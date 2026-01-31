@@ -5,13 +5,12 @@
  * 特定适配器可以根据需要覆盖方法。
  */
 
-import { LLMRequest, LLMResponse } from "../typing";
-import { BaseAPIAdapter } from "./base";
-
+import type { LLMRequest, LLMResponse } from '../types';
+import { BaseAPIAdapter } from './base';
 
 export interface StandardTransformOptions extends LLMRequest {
-  /** 如果未指定，则使用的默认模型 */
-  defaultModel?: string;
+    /** 如果未指定，则使用的默认模型 */
+    defaultModel?: string;
 }
 
 /**
@@ -21,73 +20,75 @@ export interface StandardTransformOptions extends LLMRequest {
  * 子类可以覆盖特定方法以实现自定义行为。
  */
 export class StandardAdapter extends BaseAPIAdapter {
-  readonly endpointPath: string;
-  readonly defaultModel: string;
+    readonly endpointPath: string;
+    readonly defaultModel: string;
 
-  constructor(options: { endpointPath?: string; defaultModel?: string } = {}) {
-    super();
-    this.endpointPath = options.endpointPath ?? '/chat/completions';
-    this.defaultModel = options.defaultModel ?? 'gpt-4o';
-  }
-
-  /**
-   * 转换请求 - 基础实现
-   */
-  transformRequest(options?: LLMRequest): LLMRequest {
-    const { model, max_tokens, messages, temperature, stream, tools } = options || {} as LLMRequest;
-    const body: LLMRequest = {
-      model: model || this.defaultModel,
-      messages: this.cleanMessage(messages),
-      max_tokens: max_tokens,
-      temperature: temperature,
-      stream: stream ?? false,
-    };
-
-    // 如果提供了工具，则添加
-    if (tools && tools.length > 0) {
-      body.tools = tools;
+    constructor(options: { endpointPath?: string; defaultModel?: string } = {}) {
+        super();
+        this.endpointPath = options.endpointPath ?? '/chat/completions';
+        this.defaultModel = options.defaultModel ?? 'gpt-4o';
     }
 
-    // 允许子类添加自定义转换
-    return this.enrichRequestBody(body, options);
-  }
+    /**
+     * 转换请求 - 基础实现
+     */
+    transformRequest(options?: LLMRequest): LLMRequest {
+        const { model, max_tokens, messages, temperature, stream, tools } = options || {} as LLMRequest;
+        const body: LLMRequest = {
+            model: model || this.defaultModel,
+            messages: this.cleanMessage(messages),
+            max_tokens: max_tokens,
+            temperature: temperature,
+            stream: stream ?? false,
+        };
 
-  /**
-   * 子类的钩子方法，用于向请求体添加自定义字段
-   * 覆盖此方法以添加特定于提供商的字段。
-   */
-  protected enrichRequestBody(body: LLMRequest, _options?: StandardTransformOptions): LLMRequest {
-    return body;
-  }
+        // 如果提供了工具，则添加
+        if (tools && tools.length > 0) {
+            body.tools = tools;
+        }
 
-  /**
-   * 转换响应 - 基础实现
-   */
-  transformResponse(response: Record<string, unknown>): LLMResponse {
-    const data = response as LLMResponse;
-
-
-    if (!data.choices || data.choices.length === 0) {
-      throw new Error('Empty choices in response');
+        // 允许子类添加自定义转换
+        return this.enrichRequestBody(body, options);
     }
 
-    return data;
-  }
+    /**
+     * 子类的钩子方法，用于向请求体添加自定义字段
+     * 覆盖此方法以添加特定于提供商的字段。
+     */
+    protected enrichRequestBody(body: LLMRequest, _options?: StandardTransformOptions): LLMRequest {
+        return body;
+    }
 
-  /**
-   * 获取标准 HTTP 头
-   */
-  getHeaders(apiKey: string): Headers {
-    return new Headers({
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-    });
-  }
+    /**
+     * 转换响应 - 基础实现
+     */
+    transformResponse(response: Record<string, unknown>): LLMResponse {
+        const data = response as LLMResponse;
 
-  /**
-   * 获取端点路径
-   */
-  getEndpointPath(): string {
-    return this.endpointPath;
-  }
+
+        if (!data.choices || data.choices.length === 0) {
+            // 提供更详细的错误信息，帮助调试
+            const responseStr = JSON.stringify(response, null, 2);
+            throw new Error(`Empty choices in response. Response: ${responseStr}`);
+        }
+
+        return data;
+    }
+
+    /**
+     * 获取标准 HTTP 头
+     */
+    getHeaders(apiKey: string): Headers {
+        return new Headers({
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+        });
+    }
+
+    /**
+     * 获取端点路径
+     */
+    getEndpointPath(): string {
+        return this.endpointPath;
+    }
 }

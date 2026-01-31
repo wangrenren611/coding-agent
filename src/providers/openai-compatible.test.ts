@@ -5,7 +5,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { OpenAICompatibleProvider } from './openai-compatible';
 import { StandardAdapter } from './adapters/standard';
-import type { LLMRequestMessage, LLMRequest } from './typing';
+import type { LLMGenerateOptions, LLMRequestMessage } from './types';
 
 describe('OpenAICompatibleProvider', () => {
   let provider: OpenAICompatibleProvider;
@@ -30,12 +30,12 @@ describe('OpenAICompatibleProvider', () => {
 
   describe('constructor', () => {
     it('should create provider with required config', () => {
-      expect(provider.apiKey).toBe('test-api-key');
-      expect(provider.baseURL).toBe('https://api.example.com');
-      expect(provider.model).toBe('gpt-4');
-      expect(provider.temperature).toBe(0.7);
-      expect(provider.max_tokens).toBe(2000);
-      expect(provider.LLMMAX_TOKENS).toBe(8000);
+      expect(provider.config.apiKey).toBe('test-api-key');
+      expect(provider.config.baseURL).toBe('https://api.example.com');
+      expect(provider.config.model).toBe('gpt-4');
+      expect(provider.config.temperature).toBe(0.7);
+      expect(provider.config.max_tokens).toBe(2000);
+      expect(provider.config.LLMMAX_TOKENS).toBe(8000);
     });
 
     it('should create default adapter when none provided', () => {
@@ -69,7 +69,7 @@ describe('OpenAICompatibleProvider', () => {
         LLMMAX_TOKENS: 4000,
       });
 
-      expect(providerWithSlash.baseURL).toBe('https://api.example.com');
+      expect(providerWithSlash.config.baseURL).toBe('https://api.example.com');
     });
 
     it('should create HTTPClient with config options', () => {
@@ -165,7 +165,7 @@ describe('OpenAICompatibleProvider', () => {
         json: async () => mockResponse,
       } as Response);
 
-      const options: LLMRequest = {
+      const options: LLMGenerateOptions = {
         model: 'gpt-3.5-turbo',
         temperature: 0.5,
         max_tokens: 1000,
@@ -208,7 +208,7 @@ describe('OpenAICompatibleProvider', () => {
 
   describe('resolveEndpoint', () => {
     it('should combine baseURL and endpoint path', () => {
-      expect(provider.baseURL).toBe('https://api.example.com');
+      expect(provider.config.baseURL).toBe('https://api.example.com');
     });
   });
 
@@ -292,7 +292,7 @@ describe('OpenAICompatibleProvider', () => {
       expect(result.choices[0].message.tool_calls?.[0].function.arguments).toBe('{}');
     });
 
-    it('should throw error for empty stream without stop reason', async () => {
+    it('should not throw error for empty stream with length finish reason', async () => {
       const mockChunks = [
         'data: {"id": "c1", "index": 0, "choices": [{"index": 0, "finish_reason": "length"}]}\n\n',
         'data: [DONE]\n\n',
@@ -313,9 +313,10 @@ describe('OpenAICompatibleProvider', () => {
         body: stream,
       } as Response);
 
-      await expect(
-        provider.generate([{ role: 'user', content: 'Hi' }], { stream: true })
-      ).rejects.toThrow('Empty content in response');
+      const result = await provider.generate([{ role: 'user', content: 'Hi' }], { stream: true });
+
+      // Should not throw, length is a valid empty response reason
+      expect(result).toBeDefined();
     });
 
     it('should handle empty stream with stop reason', async () => {

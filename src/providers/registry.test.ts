@@ -62,7 +62,7 @@ describe('ProviderRegistry', () => {
       const provider = ProviderRegistry.createFromEnv('glm-4.7');
 
       expect(provider).toBeInstanceOf(OpenAICompatibleProvider);
-      expect(provider.apiKey).toBe('test-glm-key');
+      expect(provider.config.apiKey).toBe('test-glm-key');
     });
 
     it('should create provider for minimax-2.1', () => {
@@ -71,7 +71,7 @@ describe('ProviderRegistry', () => {
       const provider = ProviderRegistry.createFromEnv('minimax-2.1');
 
       expect(provider).toBeInstanceOf(OpenAICompatibleProvider);
-      expect(provider.apiKey).toBe('test-minimax-key');
+      expect(provider.config.apiKey).toBe('test-minimax-key');
     });
 
     it('should create provider for kimi-k2.5', () => {
@@ -80,7 +80,7 @@ describe('ProviderRegistry', () => {
       const provider = ProviderRegistry.createFromEnv('kimi-k2.5');
 
       expect(provider).toBeInstanceOf(OpenAICompatibleProvider);
-      expect(provider.apiKey).toBe('test-kimi-key');
+      expect(provider.config.apiKey).toBe('test-kimi-key');
     });
 
     it('should create provider for deepseek-chat', () => {
@@ -89,7 +89,7 @@ describe('ProviderRegistry', () => {
       const provider = ProviderRegistry.createFromEnv('deepseek-chat');
 
       expect(provider).toBeInstanceOf(OpenAICompatibleProvider);
-      expect(provider.apiKey).toBe('test-deepseek-key');
+      expect(provider.config.apiKey).toBe('test-deepseek-key');
     });
 
     it('should use default baseURL when env var not set', () => {
@@ -98,7 +98,7 @@ describe('ProviderRegistry', () => {
 
       const provider = ProviderRegistry.createFromEnv('glm-4.7');
 
-      expect(provider.baseURL).toBe('https://open.bigmodel.cn/api/paas/v4');
+      expect(provider.config.baseURL).toBe('https://open.bigmodel.cn/api/paas/v4');
     });
 
     it('should use custom baseURL from env var', () => {
@@ -107,7 +107,7 @@ describe('ProviderRegistry', () => {
 
       const provider = ProviderRegistry.createFromEnv('glm-4.7');
 
-      expect(provider.baseURL).toBe('https://custom.example.com');
+      expect(provider.config.baseURL).toBe('https://custom.example.com');
     });
 
     it('should accept config overrides', () => {
@@ -118,8 +118,8 @@ describe('ProviderRegistry', () => {
         apiKey: 'override-key',
       });
 
-      expect(provider.temperature).toBe(0.8);
-      expect(provider.apiKey).toBe('override-key');
+      expect(provider.config.temperature).toBe(0.8);
+      expect(provider.config.apiKey).toBe('override-key');
     });
 
     it('should throw error for unknown modelId', () => {
@@ -139,7 +139,7 @@ describe('ProviderRegistry', () => {
 
       const provider = ProviderRegistry.createFromEnv('glm-4.7');
 
-      expect(provider.apiKey).toBe('');
+      expect(provider.config.apiKey).toBe('');
     });
   });
 
@@ -157,9 +157,9 @@ describe('ProviderRegistry', () => {
       const provider = ProviderRegistry.create('glm-4.7', config);
 
       expect(provider).toBeInstanceOf(OpenAICompatibleProvider);
-      expect(provider.apiKey).toBe('custom-key');
-      expect(provider.baseURL).toBe('https://custom.api.com');
-      expect(provider.model).toBe('custom-model');
+      expect(provider.config.apiKey).toBe('custom-key');
+      expect(provider.config.baseURL).toBe('https://custom.api.com');
+      expect(provider.config.model).toBe('custom-model');
     });
 
     it('should throw error for unknown model', () => {
@@ -316,43 +316,25 @@ describe('ProviderRegistry', () => {
     });
   });
 
-  describe('deprecated methods', () => {
-    it('getTypes should work (deprecated)', () => {
-      const types = ProviderRegistry.getTypes();
-      expect(types).toEqual(['glm-4.7', 'minimax-2.1', 'kimi-k2.5', 'deepseek-chat']);
-    });
-
-    it('getModels should work (deprecated)', () => {
-      const models = ProviderRegistry.getModels();
-      expect(models).toEqual(['glm-4.7', 'minimax-2.1', 'kimi-k2.5', 'deepseek-chat']);
-    });
-
-    it('listProviders should work (deprecated)', () => {
-      const providers = ProviderRegistry.listProviders();
-      expect(providers).toHaveLength(4);
-    });
-
-    it('getMetadata should work (deprecated)', () => {
-      const metadata = ProviderRegistry.getMetadata('glm-4.7');
-      expect(metadata.id).toBe('glm-4.7');
-    });
-  });
-
   describe('Models accessor', () => {
     it('should have glm47 accessor', () => {
-      expect(Models.glm47).toBe(MODEL_CONFIGS['glm-4.7']);
+      expect(Models.glm47).toEqual(MODEL_CONFIGS['glm-4.7']);
+      expect(Models.glm47.apiKey).toBeUndefined();
     });
 
     it('should have minimax21 accessor', () => {
-      expect(Models.minimax21).toBe(MODEL_CONFIGS['minimax-2.1']);
+      expect(Models.minimax21).toEqual(MODEL_CONFIGS['minimax-2.1']);
+      expect(Models.minimax21.apiKey).toBeUndefined();
     });
 
     it('should have kimiK25 accessor', () => {
-      expect(Models.kimiK25).toBe(MODEL_CONFIGS['kimi-k2.5']);
+      expect(Models.kimiK25).toEqual(MODEL_CONFIGS['kimi-k2.5']);
+      expect(Models.kimiK25.apiKey).toBeUndefined();
     });
 
     it('should have deepseekChat accessor', () => {
-      expect(Models.deepseekChat).toBe(MODEL_CONFIGS['deepseek-chat']);
+      expect(Models.deepseekChat).toEqual(MODEL_CONFIGS['deepseek-chat']);
+      expect(Models.deepseekChat.apiKey).toBeUndefined();
     });
   });
 });

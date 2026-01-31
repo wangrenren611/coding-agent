@@ -4,7 +4,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { StreamParser } from './stream-parser';
-import type { Chunk } from '../typing';
+import type { Chunk } from '../types';
 
 describe('StreamParser', () => {
   describe('parseSseLine', () => {

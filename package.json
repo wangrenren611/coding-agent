@@ -7,7 +7,7 @@
   "type": "commonjs",
   "main": "index.js",
   "scripts": {
-    "dev": "cross-env NODE_ENV=development tsx src/index.ts",
+    "dev": "cross-env NODE_ENV=development tsx src/demo.ts",
     "test": "vitest",
     "test:ui": "vitest --ui",
     "test:run": "vitest run",
@@ -22,6 +22,16 @@
     "vitest": "^4.0.18"
   },
   "dependencies": {
-    "dotenv": "^17.2.3"
+    "@types/glob": "^8.1.0",
+    "@types/uuid": "^10.0.0",
+    "bash-parser": "^0.5.0",
+    "dotenv": "^17.2.3",
+    "execa": "^9.6.1",
+    "fast-glob": "^3.3.3",
+    "glob": "^11.1.0",
+    "iconv-lite": "^0.7.2",
+    "uuid": "^11.1.0",
+    "uuidv4": "^6.2.13",
+    "zod": "^4.3.6"
   }
 }

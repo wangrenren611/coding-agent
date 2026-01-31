@@ -1,12 +1,25 @@
 /**
- * Providers 使用示例
+ * Agent-V4 统一导出
  *
- * 本示例展示了如何使用 providers 模块调用各种 LLM 服务
+ * 导出 Provider 和 Agent 模块
  */
 
-import { ProviderRegistry, ModelId } from './providers/registry';
+// =============================================================================
+// Provider 模块导出
+// =============================================================================
+export * from './providers';
+
+// =============================================================================
+// Agent 模块导出
+// =============================================================================
+export * from './agent-v1';
+
+// =============================================================================
+// 示例代码
+// =============================================================================
+import { ProviderRegistry } from './providers/registry';
 import { OpenAICompatibleProvider } from './providers/openai-compatible';
-import type { LLMRequestMessage, LLMRequest } from './providers/typing';
+import type { LLMGenerateOptions, LLMRequestMessage } from './providers';
 import dotenv from 'dotenv';
 dotenv.config({
     path: './.env.development',
@@ -27,7 +40,12 @@ async function example1_UsingRegistry() {
         { role: 'user', content: '你好，请用一句话介绍你自己' },
     ];
 
-    const response = await provider.generate(messages);
+    const response = await provider.generate(messages,{
+        model: 'glm-4.7',
+        max_tokens: 2000,
+        temperature: 0.7,
+        stream: false,
+    });
 
     console.log('Response:', response);
 }
@@ -57,6 +75,10 @@ async function example2_ManualConfig() {
     ];
 
     const response = await provider.generate(messages);
+    if (!response) {
+        console.log('No response received');
+        return;
+    }
     console.log('Response:', response.choices[0].message.content);
 }
 
@@ -67,13 +89,13 @@ async function example2_ManualConfig() {
 async function example3_Streaming() {
     console.log('\n=== 示例 3: 流式请求 ===\n');
 
-    const provider = ProviderRegistry.createFromEnv('deepseek-chat');
+    const provider = ProviderRegistry.createFromEnv('glm-4.7');
 
     const messages: LLMRequestMessage[] = [
         { role: 'user', content: '写一首关于编程的诗' },
     ];
 
-    const options: LLMRequest = {
+    const options: LLMGenerateOptions = {
         stream: true,
         streamCallback: (chunk) => {
             // 实时接收每个流式数据块
@@ -95,7 +117,7 @@ async function example3_Streaming() {
 async function example4_ToolCalling() {
     console.log('\n=== 示例 4: 工具调用 ===\n');
 
-    const provider = ProviderRegistry.createFromEnv('kimi-k2.5');
+    const provider = ProviderRegistry.createFromEnv('glm-4.7');
 
     // 定义工具
     const tools = [
@@ -123,6 +145,10 @@ async function example4_ToolCalling() {
     ];
 
     const response = await provider.generate(messages, { tools });
+    if (!response) {
+        console.log('No response received');
+        return;
+    }
 
     const toolCalls = response.choices[0].message.tool_calls;
     if (toolCalls && toolCalls.length > 0) {
@@ -141,7 +167,9 @@ async function example4_ToolCalling() {
         });
 
         const finalResponse = await provider.generate(messages);
-        console.log('\n最终回复:', finalResponse.choices[0].message.content);
+        if (finalResponse) {
+            console.log('\n最终回复:', finalResponse.choices[0].message.content);
+        }
     }
 }
 
@@ -184,13 +212,19 @@ async function example6_MultiTurnConversation() {
     // 第一轮
     messages.push({ role: 'user', content: '什么是 React?' });
     let response = await provider.generate(messages);
+    if (!response) {
+        console.log('No response received');
+        return;
+    }
     console.log('Assistant:', response.choices[0].message.content);
 
     // 第二轮
     messages.push(response.choices[0].message);
     messages.push({ role: 'user', content: '它和 Vue 有什么区别?' });
     response = await provider.generate(messages);
-    console.log('\nAssistant:', response.choices[0].message.content);
+    if (response) {
+        console.log('\nAssistant:', response.choices[0].message.content);
+    }
 }
 
 // =============================================================================
@@ -233,13 +267,14 @@ async function example7_WithAbortSignal() {
 async function main() {
     // 运行示例
     try {
-         await example1_UsingRegistry();
-        // example2_ManualConfig();
-        // example3_Streaming();
-        // example4_ToolCalling();
-        example5_ListModels();
-        // example6_MultiTurnConversation();
-        // example7_WithAbortSignal();
+    //      await example1_UsingRegistry();
+    //      await example4_ToolCalling();
+    //     // example2_ManualConfig();
+    //    await  example3_Streaming();
+    //   await  example4_ToolCalling();
+    //   await  example5_ListModels();
+      await  example6_MultiTurnConversation();
+      await  example7_WithAbortSignal();
     } catch (error) {
         console.error('Error:', error);
     }

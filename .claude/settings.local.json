@@ -2,7 +2,12 @@
   "permissions": {
     "allow": [
       "Bash(pnpm add:*)",
-      "Bash(pnpm test:run)"
+      "Bash(pnpm test:run)",
+      "Bash(npx tsc:*)",
+      "Bash(npm test)",
+      "Bash(wc:*)",
+      "Bash(find:*)",
+      "Bash(npm install:*)"
     ]
   }
 }

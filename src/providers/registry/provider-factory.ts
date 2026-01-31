@@ -1,0 +1,95 @@
+/**
+ * Provider 工厂
+ *
+ * 负责创建 Provider 实例，将创建逻辑从 Registry 中分离
+ */
+
+import { StandardAdapter } from '../adapters/standard';
+import { OpenAICompatibleProvider, OpenAICompatibleConfig } from '../openai-compatible';
+import type { BaseProviderConfig, ModelId, ProviderType } from '../types';
+import { MODEL_DEFINITIONS } from './model-config';
+import type { ModelConfig } from '../types';
+
+/**
+ * Provider 工厂类
+ */
+export class ProviderFactory {
+    /**
+     * 从环境变量创建 Provider
+     *
+     * @param modelId 模型唯一标识
+     * @param overrides 可选的配置覆盖
+     * @returns OpenAI Compatible Provider 实例
+     */
+    static createFromEnv(
+        modelId: ModelId,
+        overrides?: Partial<ModelConfig>
+    ): OpenAICompatibleProvider {
+        if (!modelId) {
+            throw new Error('ModelId is required.');
+        }
+
+        const modelConfig = MODEL_DEFINITIONS[modelId];
+        if (!modelConfig) {
+            throw new Error(`Unknown model: ${modelId}`);
+        }
+
+        const apiKey = process.env[modelConfig.envApiKey] || '';
+        const baseURL = process.env[modelConfig.envBaseURL] || modelConfig.baseURL;
+
+        const baseConfig: Record<string, unknown> = {
+            baseURL,
+            model: modelConfig.model,
+            temperature: 0.3,
+            max_tokens: modelConfig.max_tokens,
+            maxOutputTokens: modelConfig.LLMMAX_TOKENS,
+        };
+
+        // Config overrides take precedence over env vars
+        const finalConfig = {
+            ...baseConfig,
+            ...(overrides || {}),
+            apiKey: overrides?.apiKey ?? apiKey,
+            baseURL: overrides?.baseURL ?? baseURL,
+            max_tokens: modelConfig.max_tokens,
+            maxOutputTokens: modelConfig.LLMMAX_TOKENS,
+        };
+
+        const adapter = ProviderFactory.createAdapter(modelId);
+
+        return new OpenAICompatibleProvider(finalConfig as OpenAICompatibleConfig, adapter);
+    }
+
+    /**
+     * 创建指定类型的 Provider
+     *
+     * @param modelId 模型唯一标识
+     * @param config Provider 配置
+     * @returns OpenAI Compatible Provider 实例
+     */
+    static create(modelId: ModelId, config: BaseProviderConfig): OpenAICompatibleProvider {
+        const modelConfig = MODEL_DEFINITIONS[modelId];
+        if (!modelConfig) {
+            throw new Error(`Unknown model: ${modelId}`);
+        }
+
+        const adapter = ProviderFactory.createAdapter(modelId);
+        return new OpenAICompatibleProvider(config as OpenAICompatibleConfig, adapter);
+    }
+
+    /**
+     * 创建适配器
+     *
+     * @param modelId 模型唯一标识
+     * @returns API 适配器实例
+     */
+    static createAdapter(modelId: ModelId): StandardAdapter {
+        const modelConfig = MODEL_DEFINITIONS[modelId];
+        // 目前所有 provider 都使用标准适配器
+        // 如果需要特定适配器，可以在此处添加 switch 逻辑
+        return new StandardAdapter({
+            defaultModel: modelConfig.model,
+            endpointPath: modelConfig.endpointPath || '/chat/completions',
+        });
+    }
+}

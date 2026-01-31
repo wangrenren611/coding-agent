@@ -16,7 +16,7 @@ import {
   isRetryableError,
   isPermanentError,
   isAbortedError,
-} from './errors';
+} from './types';
 
 describe('LLMError', () => {
   it('should create error with message and code', () => {
