@@ -44,23 +44,13 @@ export abstract class BaseTool<T extends z.ZodType> {
     /**
      * 创建成功结果
      */
-  protected success<T>({ metadata, output }: { metadata: T, output: ToolResult['output'] }): ToolResult<T> {
+  protected result<T>({success, metadata, output }: { success: boolean, metadata: T, output: ToolResult['output'] }): ToolResult<T> {
         return {
-            success: true,
+            success,
             metadata,
             output,
         };
- }
-
-    /**
-     * 创建失败结果
-     */
-    protected fail({ error }: { error?: ToolResult['error'] }): ToolResult {
-        return {
-            success: false,
-            error,
-        };
-    }
+  }
 }
 
 export { z };

@@ -5,10 +5,9 @@
  * 支持从环境变量创建 Provider，以具体模型为单位
  */
 
-import { OpenAICompatibleProvider } from './openai-compatible';
 import { ProviderFactory } from './registry/provider-factory';
 import { MODEL_DEFINITIONS } from './registry/model-config';
-import type { BaseProviderConfig, ModelConfig, ModelId, ProviderType } from './types';
+import type {ModelConfig, ModelId, ProviderType } from './types';
 
 // 导出类型
 export type { ProviderType, ModelId, ModelConfig } from './types';

@@ -4,10 +4,15 @@
   "description": "",
   "license": "ISC",
   "author": "",
-  "type": "commonjs",
+  "type": "module",
   "main": "index.js",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
-    "dev": "cross-env NODE_ENV=development tsx src/demo.ts",
+    "dev": "cross-env NODE_ENV=development tsx src/demo-1.ts",
+    "build": "tsup",
+    "build:watch": "tsup --watch",
     "test": "vitest",
     "test:ui": "vitest --ui",
     "test:run": "vitest run",
@@ -15,8 +20,10 @@
   },
   "devDependencies": {
     "@types/node": "^25.1.0",
+    "@types/shell-quote": "^1.7.5",
     "@vitest/ui": "^4.0.18",
     "cross-env": "^10.1.0",
+    "tsup": "^8.4.0",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
@@ -30,8 +37,12 @@
     "fast-glob": "^3.3.3",
     "glob": "^11.1.0",
     "iconv-lite": "^0.7.2",
+    "shell-quote": "^1.8.3",
     "uuid": "^11.1.0",
     "uuidv4": "^6.2.13",
     "zod": "^4.3.6"
+  },
+  "ts-node": {
+    "experimentalSpecifierResolution": "node"
   }
 }

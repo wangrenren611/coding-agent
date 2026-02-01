@@ -1,0 +1,1025 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Agent - 智能助手</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --bg-primary: #0f172a;
+            --bg-secondary: #1e293b;
+            --bg-tertiary: #334155;
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --border-color: #334155;
+            --accent-primary: #3b82f6;
+            --accent-success: #10b981;
+            --accent-warning: #f59e0b;
+            --accent-error: #ef4444;
+            --accent-info: #06b6d4;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+
+        /* 容器 */
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        /* 头部 */
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 24px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .logo {
+            width: 48px;
+            height: 48px;
+            background: linear-gradient(135deg, var(--accent-primary), var(--accent-info));
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+        }
+
+        .header-title h1 {
+            font-size: 24px;
+            font-weight: 600;
+            background: linear-gradient(135deg, #60a5fa, #3b82f6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .header-title p {
+            font-size: 13px;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        .status-badge {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: var(--bg-tertiary);
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--accent-warning);
+            animation: pulse 2s infinite;
+        }
+
+        .status-dot.connected { background: var(--accent-success); }
+        .status-dot.disconnected { background: var(--accent-error); }
+        .status-dot.connecting { background: var(--accent-warning); }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* 输入区域 */
+        .input-section {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+
+        .input-wrapper {
+            flex: 1;
+            position: relative;
+        }
+
+        input {
+            width: 100%;
+            padding: 16px 20px;
+            background: var(--bg-secondary);
+            border: 2px solid var(--border-color);
+            border-radius: 12px;
+            color: var(--text-primary);
+            font-size: 15px;
+            transition: all 0.2s;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+
+        input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .send-btn {
+            padding: 16px 32px;
+            background: linear-gradient(135deg, var(--accent-primary), var(--accent-info));
+            border: none;
+            border-radius: 12px;
+            color: white;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .send-btn:hover:not(:disabled) {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+        }
+
+        .send-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .send-icon {
+            font-size: 18px;
+        }
+
+        /* 主内容区 */
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 320px;
+            gap: 20px;
+            gap: 20px;
+        }
+
+        /* 消息展示区 */
+        .messages-panel {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .panel-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .panel-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .panel-title::before {
+            content: '';
+            width: 8px;
+            height: 8px;
+            border-radius: 2px;
+            background: var(--accent-primary);
+        }
+
+        .messages-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            max-height: 500px;
+        }
+
+        /* 单条消息 */
+        .message {
+            margin-bottom: 16px;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .message-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+        }
+
+        .message-avatar.user {
+            background: linear-gradient(135deg, #8b5cf6, #6366f1);
+        }
+
+        .message-avatar.assistant {
+            background: linear-gradient(135deg, var(--accent-success), var(--accent-info));
+        }
+
+        .message-meta {
+            flex: 1;
+            font-size: 12px;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .message-bubble {
+            padding: 14px 18px;
+            background: var(--bg-tertiary);
+            border-radius: 12px;
+            border-top-left: 3px solid transparent;
+            line-height: 1.6;
+        }
+
+        .message.user .message-bubble {
+            background: linear-gradient(135deg, rgba(139, 92, 246, 0.2), rgba(99, 102, 241, 0.2));
+            border-top-left-color: #8b5cf6;
+        }
+
+        .message.assistant .message-bubble {
+            background: var(--bg-tertiary);
+            border-top-left-color: var(--accent-success);
+        }
+
+        /* 状态消息 */
+        .status-message {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            margin-bottom: 12px;
+            border-radius: 10px;
+            font-size: 13px;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        .status-message.task {
+            background: rgba(59, 130, 246, 0.1);
+            border-left: 3px solid var(--accent-primary);
+        }
+
+        .status-message.content {
+            background: rgba(6, 182, 212, 0.1);
+            border-left: 3px solid var(--accent-info);
+        }
+
+        .status-message.tool {
+            background: rgba(139, 92, 246, 0.1);
+            border-left: 3px solid var(--accent-warning);
+        }
+
+        .status-message.success {
+            background: rgba(16, 185, 129, 0.1);
+            border-left: 3px solid var(--accent-success);
+        }
+
+        .status-message.error {
+            background: rgba(239, 68, 68, 0.1);
+            border-left: 3px solid var(--accent-error);
+        }
+
+        /* 工具调用展示 */
+        .tool-call {
+            background: var(--bg-tertiary);
+            border-radius: 10px;
+            padding: 12px;
+            margin: 8px 0;
+            border-left: 3px solid var(--accent-warning);
+            animation: slideIn 0.3s ease-out;
+        }
+
+        .tool-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+            font-size: 12px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .tool-name {
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .tool-args {
+            font-family: 'Consolas', monospace;
+            font-size: 12px;
+            color: var(--text-secondary);
+            background: var(--bg-primary);
+            padding: 8px 12px;
+            border-radius: 6px;
+            overflow-x: auto;
+        }
+
+        /* 侧边栏 - 状态面板 */
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .info-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .info-header {
+            padding: 14px 16px;
+            background: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border-color);
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+
+        .info-content {
+            padding: 16px;
+        }
+
+        /* 统计数据 */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        .stat-item {
+            text-align: center;
+            padding: 12px;
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+        }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--accent-primary), var(--accent-info));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .stat-label {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        /* 时间线 */
+        .timeline {
+            position: relative;
+            padding-left: 16px;
+        }
+
+        .timeline::before {
+            content: '';
+            position: absolute;
+            left: 4px;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background: var(--border-color);
+        }
+
+        .timeline-item {
+            position: relative;
+            padding-bottom: 16px;
+            padding-left: 16px;
+        }
+
+        .timeline-dot {
+            position: absolute;
+            left: -9px;
+            top: 4px;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            border: 2px solid var(--bg-secondary);
+            z-index: 1;
+        }
+
+        .timeline-dot.start { background: var(--accent-success); }
+        .timeline-dot.progress { background: var(--accent-info); }
+        .timeline-dot.tool { background: var(--accent-warning); }
+        .timeline-dot.error { background: var(--accent-error); }
+
+        .timeline-content {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .timeline-time {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-bottom: 2px;
+        }
+
+        /* 标签 */
+        .tag {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 500;
+            margin-right: 4px;
+        }
+
+        .tag.status { background: rgba(59, 130, 246, 0.2); color: #60a5fa; }
+        .tag.content { background: rgba(6, 182, 212, 0.2); color: #06b6d4; }
+        .tag.tool { background: rgba(245, 158, 11, 0.2); color: #f59e0b; }
+        .tag.error { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+        .tag.success { background: rgba(16, 185, 129, 0.2); color: #10b981; }
+
+        /* 流式内容 */
+        .stream-content {
+            color: #4fc3f7;
+        }
+
+        /* 响应式 */
+        @media (max-width: 768px) {
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+
+            .header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 16px;
+            }
+
+            .input-section {
+                flex-direction: column;
+            }
+
+            .send-btn {
+                width: 100%;
+            }
+        }
+
+        /* 滚动条样式 */
+        .messages-container::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .messages-container::-webkit-scrollbar-track {
+            background: var(--bg-secondary);
+        }
+
+        .messages-container::-webkit-scrollbar-thumb {
+            background: var(--bg-tertiary);
+            border-radius: 3px;
+        }
+
+        .messages-container::-webkit-scrollbar-thumb:hover {
+            background: var(--text-muted);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- 头部 -->
+        <div class="header">
+            <div class="header-left">
+                <div class="logo">🤖</div>
+                <div class="header-title">
+                    <h1>AI Agent</h1>
+                    <p>智能对话助手 - 实时任务执行</p>
+                </div>
+            </div>
+            <div class="status-badge" id="statusBadge">
+                <div class="status-dot" id="statusDot"></div>
+                <span id="statusText">未连接</span>
+            </div>
+        </div>
+
+        <!-- 输入区域 -->
+        <div class="input-section">
+            <div class="input-wrapper">
+                <input type="text" id="query" placeholder="输入您的问题..." value="当前目录有什么" />
+            </div>
+            <button class="send-btn" id="sendBtn" onclick="sendQuery()">
+                <span class="send-icon">➤</span>
+                <span>发送</span>
+            </button>
+        </div>
+
+        <!-- 主内容区 -->
+        <div class="main-content">
+            <!-- 消息展示区 -->
+            <div class="messages-panel">
+                <div class="panel-header">
+                    <span class="panel-title">对话历史</span>
+                    <span id="messageCount" style="font-size: 12px; color: var(--text-muted);">0 条消息</span>
+                </div>
+                <div class="messages-container" id="messagesContainer">
+                    <!-- 消息将在这里动态添加 -->
+                    <div style="text-align: center; color: var(--text-muted); padding: 40px;">
+                        发送消息开始对话...
+                    </div>
+                </div>
+            </div>
+
+            <!-- 侧边栏 -->
+            <div class="sidebar">
+                <!-- 任务状态 -->
+                <div class="info-card">
+                    <div class="info-header">📊 任务状态</div>
+                    <div class="info-content">
+                        <div class="stats-grid">
+                            <div class="stat-item">
+                                <div class="stat-value" id="loopCount">-</div>
+                                <div class="stat-label">循环次数</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-value" id="duration">-</div>
+                                <div class="stat-label">耗时(秒)</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 执行时间线 -->
+                <div class="info-card">
+                    <div class="info-header">📅 执行时间线</div>
+                    <div class="info-content">
+                        <div class="timeline" id="timeline">
+                            <div class="timeline-item">
+                                <div class="timeline-dot start"></div>
+                                <div class="timeline-content">
+                                    <div class="timeline-time" id="startTime">--:--:--</div>
+                                    <div>等待任务...</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 工具调用 -->
+                <div class="info-card">
+                    <div class="info-header">🔧 工具调用</div>
+                    <div class="info-content" id="toolCalls">
+                        <div style="text-align: center; color: var(--text-muted); padding: 20px;">
+                            暂无工具调用
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 错误日志 -->
+                <div class="info-card" id="errorCard" style="display: none;">
+                    <div class="info-header">⚠️ 错误信息</div>
+                    <div class="info-content" id="errorContent">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 状态管理
+        const state = {
+            isConnected: false,
+            isProcessing: false,
+            messages: [],
+            toolCalls: [],
+            loopCount: 0,
+            taskStartTime: null,
+            timelineItems: []
+        };
+
+        const elements = {
+            statusDot: document.getElementById('statusDot'),
+            statusText: document.getElementById('statusText'),
+            statusBadge: document.getElementById('statusBadge'),
+            messagesContainer: document.getElementById('messagesContainer'),
+            messageCount: document.getElementById('messageCount'),
+            loopCount: document.getElementById('loopCount'),
+            duration: document.getElementById('duration'),
+            timeline: document.getElementById('timeline'),
+            toolCalls: document.getElementById('toolCalls'),
+            errorCard: document.getElementById('errorCard'),
+            errorContent: document.getElementById('errorContent'),
+            sendBtn: document.getElementById('sendBtn'),
+            queryInput: document.getElementById('query')
+        };
+
+        let eventSource = null;
+
+        // 格式化时间
+        function formatTime(ms) {
+            const seconds = Math.floor(ms / 1000);
+            if (seconds < 60) return `${seconds}s`;
+            const minutes = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            return `${minutes}m ${secs}s`;
+        }
+
+        // 格式化时间戳
+        function formatTimestamp(ts) {
+            return new Date(ts).toLocaleTimeString('zh-CN', { hour12: false });
+        }
+
+        // 更新状态
+        function updateStatus(connected, processing, text) {
+            state.isConnected = connected;
+            state.isProcessing = processing;
+            elements.statusDot.className = `status-dot ${connected ? 'connected' : 'disconnected'}`;
+            elements.statusText.textContent = text;
+        }
+
+        // 添加时间线项
+        function addTimelineItem(type, text, status = 'progress') {
+            const time = formatTimestamp(Date.now());
+            const item = document.createElement('div');
+            item.className = 'timeline-item';
+            item.innerHTML = `
+                <div class="timeline-dot ${status}"></div>
+                <div class="timeline-content">
+                    <div class="timeline-time">${time}</div>
+                    <div>${text}</div>
+                </div>
+            `;
+            elements.timeline.appendChild(item);
+            elements.timeline.scrollTop = elements.timeline.scrollHeight;
+        }
+
+        // 更新统计数据
+        function updateStats() {
+            if (state.taskStartTime) {
+                const elapsed = Date.now() - state.taskStartTime;
+                elements.duration.textContent = formatTime(elapsed);
+            }
+            elements.loopCount.textContent = state.loopCount;
+        }
+
+        // 添加消息
+        function addMessage(role, content, isStream = false) {
+            const messageId = `msg-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+
+            const messageEl = document.createElement('div');
+            messageEl.className = `message ${role}`;
+            messageEl.dataset.id = messageId;
+
+            const avatar = role === 'user' ? '👤' : '🤖';
+
+            messageEl.innerHTML = `
+                <div class="message-header">
+                    <div class="message-avatar ${role}">${avatar}</div>
+                    <div class="message-meta">
+                        <span>${role === 'user' ? '您' : 'AI 助手'}</span>
+                        <span>${formatTimestamp(Date.now())}</span>
+                    </div>
+                </div>
+                <div class="message-bubble">${isStream ? '' : escapeHtml(content)}</div>
+            `;
+
+            if (isStream) {
+                // 流式消息，添加一个占位符，内容会动态追加
+                const streamContent = document.createElement('span');
+                streamContent.className = 'stream-content';
+                messageEl.querySelector('.message-bubble').appendChild(streamContent);
+            }
+
+            elements.messagesContainer.appendChild(messageEl);
+            elements.messagesContainer.scrollTop = elements.messagesContainer.scrollHeight;
+
+            state.messages.push({ id: messageId, role, content, isStream });
+            updateMessageCount();
+
+            return messageId;
+        }
+
+        // 更新流式消息内容
+        function updateStreamMessage(messageId, delta) {
+            const messageEl = document.querySelector(`[data-id="${messageId}"] .stream-content`);
+            if (messageEl) {
+                messageEl.textContent += delta;
+            }
+        }
+
+        // 完成流式消息
+        function finalizeStreamMessage(messageId) {
+            const messageEl = document.querySelector(`[data-id="${messageId}"]`);
+            if (messageEl) {
+                const bubble = messageEl.querySelector('.message-bubble');
+                const streamContent = bubble.querySelector('.stream-content');
+                if (streamContent) {
+                    const content = streamContent.textContent;
+                    bubble.textContent = content;
+                }
+                messageEl.dataset.finalized = 'true';
+            }
+        }
+
+        // 添加状态消息
+        function addStatusMessage(type, content, status = 'task') {
+            const icons = {
+                task: '📋',
+                content: '💬',
+                tool: '🔧',
+                success: '✅',
+                error: '❌',
+                info: 'ℹ️'
+            };
+
+            const msgEl = document.createElement('div');
+            msgEl.className = `status-message ${type}`;
+            msgEl.innerHTML = `
+                <span style="font-size: 16px;">${icons[type]}</span>
+                <span style="margin-left: 8px;">${content}</span>
+            `;
+            elements.messagesContainer.appendChild(msgEl);
+            elements.messagesContainer.scrollTop = elements.messagesContainer.scrollHeight;
+        }
+
+        // 添加工具调用
+        function addToolCall(toolName, args, status = 'start') {
+            const toolId = `tool-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+            state.toolCalls.push({ id: toolId, name: toolName, args, status });
+
+            updateToolCallsPanel();
+            return toolId;
+        }
+
+        // 更新工具调用面板
+        function updateToolCallsPanel() {
+            if (state.toolCalls.length === 0) {
+                elements.toolCalls.innerHTML = `
+                    <div style="text-align: center; color: var(--text-muted); padding: 20px;">
+                        暂无工具调用
+                    </div>
+                `;
+                return;
+            }
+
+            elements.toolCalls.innerHTML = state.toolCalls.map(tool => {
+                const statusIcons = {
+                    start: '⏳',
+                    success: '✅',
+                    failed: '❌'
+                };
+
+                let argsPreview = tool.args;
+                try {
+                    const parsed = JSON.parse(tool.args);
+                    argsPreview = JSON.stringify(parsed, null, 2);
+                    if (argsPreview.length > 60) {
+                        argsPreview = argsPreview.substring(0, 60) + '...';
+                    }
+                } catch (e) {
+                    argsPreview = tool.args.substring(0, 60);
+                    if (tool.args.length > 60) {
+                        argsPreview += '...';
+                    }
+                }
+
+                return `
+                    <div class="tool-call" style="margin-bottom: 8px;">
+                        <div class="tool-header">
+                            <span style="color: var(--accent-warning);">${statusIcons[tool.status] || '⏳'}</span>
+                            <span class="tool-name">${tool.name}</span>
+                        </div>
+                        <div class="tool-args">${escapeHtml(argsPreview)}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // 处理流式消息
+        function handleStreamMessage(message) {
+            // 更新统计数据
+            state.loopCount = message.loopCount || 0;
+            updateStats();
+
+            // 根据消息类型处理
+            switch (message.taskStatus) {
+                case 'STARTED':
+                    updateStatus(true, true, '执行中');
+                    state.taskStartTime = message.timestamp;
+                    addTimelineItem('start', '任务开始', 'start');
+                    addMessage('user', message.query);
+                    break;
+
+                case 'RUNNING':
+                    // 内容增量
+                    if (message.content && message.hasDelta) {
+                        const lastMsg = state.messages[state.messages.length - 1];
+                        if (lastMsg && lastMsg.role === 'assistant' && lastMsg.isStream) {
+                            updateStreamMessage(lastMsg.id, message.content.delta);
+                        } else {
+                            addMessage('assistant', message.content.delta, true);
+                        }
+                    }
+                    // 内容完成
+                    else if (message.content && message.content.status === 'COMPLETE') {
+                        const lastMsg = state.messages[state.messages.length - 1];
+                        if (lastMsg && lastMsg.isStream) {
+                            finalizeStreamMessage(lastMsg.id);
+                        }
+                    }
+                    break;
+
+                case 'COMPLETED':
+                    updateStatus(true, false, '完成');
+                    addTimelineItem('success', '任务完成', 'success');
+                    state.taskStartTime = null;
+                    break;
+
+                case 'FAILED':
+                    updateStatus(true, false, '失败');
+                    addTimelineItem('error', '任务失败', 'error');
+                    state.taskStartTime = null;
+
+                    // 显示错误
+                    if (message.error) {
+                        showError(message.error);
+                    }
+                    break;
+            }
+
+            // 工具调用
+            if (message.toolCalls && message.toolCalls.length > 0) {
+                message.toolCalls.forEach(tc => {
+                    // 检查是否已添加过
+                    const exists = state.toolCalls.some(t => t.id === tc.id);
+                    if (!exists) {
+                        addToolCall(tc.name, tc.arguments, 'start');
+                    }
+                });
+            }
+
+            // 工具执行状态
+            if (message.toolExecution) {
+                const te = message.toolExecution;
+                updateToolCallStatus(te);
+            }
+        }
+
+        // 更新工具调用状态
+        function updateToolCallStatus(toolExec) {
+            const tool = state.toolCalls.find(t => t.name === toolExec.toolName);
+            if (tool) {
+                if (toolExec.status === 'SUCCESS') {
+                    tool.status = 'success';
+                    addTimelineItem('tool', `${toolExec.toolName} 完成 (${toolExec.duration}ms)`, 'success');
+                } else if (toolExec.status === 'FAILED') {
+                    tool.status = 'failed';
+                    addTimelineItem('error', `${toolExec.toolName} 失败`, 'error');
+                }
+                updateToolCallsPanel();
+            }
+        }
+
+        // 显示错误
+        function showError(error) {
+            elements.errorCard.style.display = 'block';
+            elements.errorContent.innerHTML = `
+                <div style="margin-bottom: 8px;">
+                    <span class="tag error">${error.type}</span>
+                </div>
+                <div style="color: var(--text-primary); margin-bottom: 4px;">${escapeHtml(error.message)}</div>
+                ${error.retryable ? `
+                    <div style="font-size: 11px; color: var(--text-muted);">
+                        可重试: ${error.retryCount}/${error.maxRetries}
+                    </div>
+                ` : ''}
+            `;
+        }
+
+        // 更新消息计数
+        function updateMessageCount() {
+            elements.messageCount.textContent = `${state.messages.length} 条消息`;
+        }
+
+        // HTML 转义
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // 发送查询
+        async function sendQuery() {
+            const query = elements.queryInput.value.trim();
+            if (!query) return;
+
+            // 重置状态
+            state.messages = [];
+            state.toolCalls = [];
+            state.loopCount = 0;
+            state.taskStartTime = Date.now();
+            state.timelineItems = [];
+            elements.timeline.innerHTML = `
+                <div class="timeline-item">
+                    <div class="timeline-dot start"></div>
+                    <div class="timeline-content">
+                        <div class="timeline-time">${formatTimestamp(Date.now())}</div>
+                        <div>任务开始...</div>
+                    </div>
+                </div>
+            `;
+            elements.errorCard.style.display = 'none';
+            elements.messagesContainer.innerHTML = '';
+            updateMessageCount();
+
+            // 关闭之前的连接
+            if (eventSource) {
+                eventSource.close();
+            }
+
+            updateStatus(true, true, '连接中...');
+            elements.sendBtn.disabled = true;
+
+            // 创建 SSE 连接
+            const url = `http://localhost:3000/api/chat?q=${encodeURIComponent(query)}`;
+            eventSource = new EventSource(url);
+
+            eventSource.onopen = () => {
+                updateStatus(true, true, '已连接');
+            };
+
+            // 监听消息
+            eventSource.addEventListener('message', (e) => {
+                try {
+                    const message = JSON.parse(e.data);
+                    handleStreamMessage(message);
+
+                    // 检查是否完成
+                    if (message.isTerminal) {
+                        elements.sendBtn.disabled = false;
+                        eventSource.close();
+                    }
+                } catch (err) {
+                    console.error('Failed to parse message:', err);
+                }
+            });
+
+            eventSource.onerror = () => {
+                updateStatus(false, false, '连接错误');
+                addStatusMessage('error', '无法连接到服务器', 'error');
+                elements.sendBtn.disabled = false;
+                eventSource.close();
+            };
+        }
+
+        // 回车发送
+        elements.queryInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendQuery();
+        });
+
+        // 页面初始化
+        window.addEventListener('load', () => {
+            updateStatus(false, false, '未连接');
+        });
+    </script>
+</body>
+</html>

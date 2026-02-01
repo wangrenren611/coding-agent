@@ -1,4 +1,4 @@
-import { BaseLLMMessage, Role } from "../../providers";
+import { BaseLLMMessage, FinishReason, Role, ToolCall } from "../../providers";
 
 export type MessageType = 'text' |'tool-call'|'tool-result';
 
@@ -7,8 +7,11 @@ export type Message = {
     role:  Role;
     content: string;
     type?: MessageType;
+    finish_reason?: FinishReason;
+    id?: string;
 } & BaseLLMMessage;
 
 export type SessionOptions = {
     systemPrompt: string;
 }
+

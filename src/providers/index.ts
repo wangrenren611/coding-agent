@@ -3,7 +3,8 @@
  */
 
 // Registry 相关
-export { Models, MODEL_CONFIGS, ProviderType, ModelId, ProviderRegistry } from './registry';
+export { Models, MODEL_CONFIGS, ProviderRegistry } from './registry';
+export type { ProviderType, ModelId } from './registry';
 
 // Provider 相关
 export { LLMProvider } from './types';
@@ -43,7 +44,6 @@ export type {
     Role,
     Usage,
     BaseLLMMessage,
-    LLMResponseMessage,
     LLMRequestMessage,
     FinishReason,
     LLMResponse,

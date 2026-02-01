@@ -7,7 +7,11 @@
       "Bash(npm test)",
       "Bash(wc:*)",
       "Bash(find:*)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(timeout:*)",
+      "Bash(npm run build:*)",
+      "Bash(echo:*)",
+      "Bash(npx vitest run:*)"
     ]
   }
 }

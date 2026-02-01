@@ -42,6 +42,7 @@ export interface Usage {
  * 基础消息类型
  */
 export interface BaseLLMMessage {
+    /** 消息 ID */
     content: string;
     role: Role;
     reasoning_content?: string;
@@ -130,8 +131,6 @@ export interface LLMGenerateOptions {
     temperature?: number;
     /** 是否启用流式响应 */
     stream?: boolean;
-    /** 流式回调函数 */
-    streamCallback?: StreamCallback;
     /** 中止信号 */
     abortSignal?: AbortSignal;
     /** 工具列表 */

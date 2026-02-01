@@ -5,7 +5,7 @@
  * 请求/响应转换。
  */
 
-import type { LLMRequest, LLMResponse, LLMRequestMessage } from '../types';
+import type { LLMRequest, LLMResponse, LLMRequestMessage, Role } from '../types';
 
 export abstract class BaseAPIAdapter {
     /**
@@ -62,15 +62,19 @@ export abstract class BaseAPIAdapter {
         for (const item of msg) {
             const message: LLMRequestMessage = {
                 content: String(item.content),
-                role: String(item.role),
+                role:item.role as Role,
             };
 
             if (item.reasoning_content !== undefined && item.reasoning_content !== null) {
-                message.reasoning_content = String(item.reasoning_content);
+                message.reasoning_content = item.reasoning_content as string;
             }
 
             if (item.tool_call_id !== undefined && item.tool_call_id !== null) {
-                message.tool_call_id = String(item.tool_call_id);
+                message.tool_call_id = item.tool_call_id as string;
+            }
+
+            if (item.tool_calls !== undefined && item.tool_calls !== null) {
+                message.tool_calls = item.tool_calls;
             }
 
             cleaned.push(message);

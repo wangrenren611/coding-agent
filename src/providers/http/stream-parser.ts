@@ -47,15 +47,14 @@ export class StreamParser {
     }
 
     /**
-     * 处理可读流并为事件调用回调
+     * 处理可读流并返回 AsyncGenerator
      *
      * @param reader - 可读流读取器
-     * @param callback - 每个解析块的回调函数
+     * @returns 异步生成器，每次 yield 一个 chunk
      */
-    static async parse(
-        reader: ReadableStreamDefaultReader<Uint8Array>,
-        callback: (chunk: Chunk) => void
-    ): Promise<void> {
+    static async *parseAsync(
+        reader: ReadableStreamDefaultReader<Uint8Array>
+    ): AsyncGenerator<Chunk> {
         const decoder = new TextDecoder();
         let buffer = '';
         let shouldStop = false;
@@ -69,7 +68,7 @@ export class StreamParser {
                     const data = this.parseSseLine(buffer);
                     if (data && !this.isStreamEnd(data)) {
                         const chunk = this.safeJsonParse<Chunk>(data);
-                        if (chunk) callback(chunk);
+                        if (chunk) yield chunk;
                     }
                 }
                 break;
@@ -92,7 +91,7 @@ export class StreamParser {
                 const chunk = this.safeJsonParse<Chunk>(data);
                 if (!chunk) continue;
 
-                callback(chunk);
+                yield chunk;
             }
         }
     }

@@ -23,5 +23,6 @@
     "./src/**/*",
     "./typings",
     "./typing.d.ts",
+    "./src/types/**/*.d.ts",
   ]
 }

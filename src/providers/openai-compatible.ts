@@ -23,7 +23,7 @@ import { BaseAPIAdapter } from './adapters/base';
 import { StandardAdapter } from './adapters/standard';
 import { HTTPClient } from './http/client';
 import { StreamParser } from './http/stream-parser';
-import { LLMError } from './types';
+import { LLMError, Role } from './types';
 import {
     LLMProvider,
     OpenAICompatibleConfig,
@@ -32,7 +32,6 @@ import {
     LLMGenerateOptions,
     LLMRequestMessage,
     LLMResponse,
-    StreamCallback,
     ToolCall,
     Usage,
 } from './types';
@@ -57,8 +56,11 @@ interface StreamMetadata {
  * - 各种兼容第三方服务（如 DeepSeek、Qwen、通义千问等）
  */
 export class OpenAICompatibleProvider extends LLMProvider {
+
+  
     readonly httpClient: HTTPClient;
     readonly adapter: BaseAPIAdapter;
+    private timeout: number;
 
     constructor(config: OpenAICompatibleConfig, adapter?: BaseAPIAdapter) {
         super(config);
@@ -66,12 +68,15 @@ export class OpenAICompatibleProvider extends LLMProvider {
         // 规范化 baseURL（移除末尾斜杠）
         const normalizedBaseURL = config.baseURL.replace(/\/$/, '');
         this.config = { ...config, baseURL: normalizedBaseURL };
-
+        this.timeout = config.timeout ?? 1000*60*10;// 10 minutes
+        
         // 初始化 HTTP 客户端
         this.httpClient = new HTTPClient({
-            timeout: config.timeout,
-            maxRetries: config.maxRetries,
-            debug: config.debug,
+            timeout: this.timeout,// 10 minutes
+            maxRetries: config.maxRetries ?? 10,
+            initialRetryDelay: 1000,
+            maxRetryDelay: 10000,
+            debug: config.debug ?? false,
         });
 
         // 初始化 Adapter（未提供则使用标准适配器）
@@ -85,15 +90,15 @@ export class OpenAICompatibleProvider extends LLMProvider {
      * 生成 LLM 响应
      *
      * @param messages - 对话消息列表
-     * @param options - 可选参数（模型、温度、流式回调等）
-     * @returns LLM 响应或 null（消息为空时）
+     * @param options - 可选参数（模型、温度、流式等）
+     * @returns LLM 响应或 AsyncGenerator<Chunk>（流式时）
      */
-    async generate(
+    generate(
         messages: LLMRequestMessage[],
         options?: LLMGenerateOptions
-    ): Promise<LLMResponse | null> {
+    ): Promise<LLMResponse | null> | AsyncGenerator<Chunk> {
         if (messages.length === 0) {
-            return null;
+            return Promise.resolve(null);
         }
 
         // 构建请求体
@@ -115,10 +120,7 @@ export class OpenAICompatibleProvider extends LLMProvider {
 
         // 根据是否流式选择处理方式
         if (options?.stream) {
-            return this._generateStream({
-                ...requestParams,
-                streamCallback: options.streamCallback,
-            });
+            return this._generateStream(requestParams);
         }
 
         return this._generateNonStream(requestParams);
@@ -163,15 +165,14 @@ export class OpenAICompatibleProvider extends LLMProvider {
     /**
      * 处理流式请求
      *
-     * 累积流式块的内容和工具调用，最终返回完整的响应。
+     * 直接返回 AsyncGenerator<Chunk>，由调用者消费流式数据。
      */
-    private async _generateStream(params: {
+    private async *_generateStream(params: {
         url: string;
         body: Record<string, unknown>;
         headers: Headers;
-        streamCallback?: StreamCallback;
         abortSignal?: AbortSignal;
-    }): Promise<LLMResponse | null> {
+    }): AsyncGenerator<Chunk> {
         const response = await this.httpClient.fetch(params.url, {
             method: 'POST',
             headers: params.headers,
@@ -183,27 +184,18 @@ export class OpenAICompatibleProvider extends LLMProvider {
             throw new LLMError('Response body is not readable', 'NO_BODY');
         }
 
-        // 流式响应状态管理
-        const state = new StreamAccumulator();
-
-        try {
-            await StreamParser.parse(response.body.getReader(), (chunk) => {
-                // 触发外部回调
-                params.streamCallback?.(chunk);
-
-                // 累积响应内容
-                state.accumulate(chunk);
-            });
-        } catch (error) {
-            throw error;
-        }
-
-        // 验证响应有效性
-        state.validate();
-
-        // 构建最终响应
-        return state.toResponse();
+        // 直接 yield 每个 chunk，不累积
+        yield* StreamParser.parseAsync(response.body.getReader());
     }
+
+    getTimeTimeout(): number {
+        return this.timeout;
+    }
+
+    getLLMMaxTokens(): number {
+        return this.config.LLMMAX_TOKENS;
+    }
+    
 }
 
 /**
@@ -328,7 +320,7 @@ class StreamAccumulator {
                 {
                     index: this.choiceIndex,
                     message: {
-                        role,
+                        role:role as Role,
                         content,
                         tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
                     },

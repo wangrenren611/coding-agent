@@ -89,7 +89,7 @@ describe('StreamParser', () => {
     });
   });
 
-  describe('parse', () => {
+  describe('parseAsync', () => {
     async function parseFromText(text: string): Promise<Chunk[]> {
       const chunks: Chunk[] = [];
       const encoder = new TextEncoder();
@@ -102,7 +102,9 @@ describe('StreamParser', () => {
       });
 
       const reader = stream.getReader();
-      await StreamParser.parse(reader, (chunk) => chunks.push(chunk));
+      for await (const chunk of StreamParser.parseAsync(reader)) {
+        chunks.push(chunk);
+      }
       return chunks;
     }
 
@@ -167,16 +169,15 @@ data: {"id": "test", "index": 0, "choices": [{"index": 0, "delta": {"role": "ass
       });
 
       const reader = stream.getReader();
-      await StreamParser.parse(reader, (chunk) => chunks.push(chunk));
+      for await (const chunk of StreamParser.parseAsync(reader)) {
+        chunks.push(chunk);
+      }
 
       // Incomplete JSON in first read should be buffered and parsed when complete
       expect(chunks).toHaveLength(1);
     });
 
-    it('should call callback for each valid chunk', async () => {
-      const callback = { fn: (chunk: Chunk) => {} };
-      const spy = vi.spyOn(callback, 'fn');
-
+    it('should yield all valid chunks', async () => {
       const mockData = `data: {"id": "test1", "index": 0, "choices": [{"index": 0, "delta": {"role": "assistant", "content": "A"}}]}
 data: {"id": "test2", "index": 0, "choices": [{"index": 0, "delta": {"role": "assistant", "content": "B"}}]}`;
 
@@ -189,9 +190,12 @@ data: {"id": "test2", "index": 0, "choices": [{"index": 0, "delta": {"role": "as
       });
 
       const reader = stream.getReader();
-      await StreamParser.parse(reader, callback.fn);
+      const chunks: Chunk[] = [];
+      for await (const chunk of StreamParser.parseAsync(reader)) {
+        chunks.push(chunk);
+      }
 
-      expect(spy).toHaveBeenCalledTimes(2);
+      expect(chunks).toHaveLength(2);
     });
 
     it('should handle CRLF line endings', async () => {

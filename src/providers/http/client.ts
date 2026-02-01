@@ -17,13 +17,13 @@ import {
 
 export interface HttpClientOptions {
     /** 请求超时时间（毫秒） */
-    timeout?: number;
+    timeout: number;
     /** 最大重试次数 */
-    maxRetries?: number;
+    maxRetries: number;
     /** 初始重试延迟（毫秒） */
-    initialRetryDelay?: number;
+    initialRetryDelay: number;
     /** 最大重试延迟（毫秒） */
-    maxRetryDelay?: number;
+    maxRetryDelay: number;
     /** 启用调试日志 */
     debug?: boolean;
 }
@@ -43,11 +43,11 @@ export class HTTPClient {
     readonly maxRetryDelay: number;
     readonly debug: boolean;
 
-    constructor(options: HttpClientOptions = {}) {
-        this.defaultTimeout = options.timeout ?? 1000*60*10;// 10 minutes
-        this.maxRetries = options.maxRetries ?? 10;
-        this.initialRetryDelay = options.initialRetryDelay ?? 1000;
-        this.maxRetryDelay = options.maxRetryDelay ?? 10000;
+    constructor(options: HttpClientOptions) {
+        this.defaultTimeout = options.timeout;
+        this.maxRetries = options.maxRetries
+        this.initialRetryDelay = options.initialRetryDelay
+        this.maxRetryDelay = options.maxRetryDelay
         this.debug = options.debug ?? false;
     }
 
@@ -69,7 +69,7 @@ export class HTTPClient {
                 if (this.debug) {
                    console.log(`[HTTPClient] Attempt ${attempt + 1}/${maxRetries + 1}: ${options.method || 'GET'} ${url}`);
                 }
-                console.log(options);
+            
                 const response = await this.fetchWithTimeout(url, options, timeout);
 
                 // 检查 HTTP 错误
