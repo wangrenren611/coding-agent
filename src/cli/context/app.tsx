@@ -22,7 +22,7 @@ export type AppContextType = {
 // ============================================================================
 
 const AppContext = createContext<AppContextType>({
-  model: 'glm-4.7',
+  model: 'minimax-2.1',
   setModel: () => {},
   currentPath: process.cwd(),
 });
@@ -32,7 +32,7 @@ const AppContext = createContext<AppContextType>({
 // ============================================================================
 
 export const AppContextProvider = ({ children }: { children: React.ReactNode }) => {
-  const [model, setModel] = useState<ModelId>('glm-4.7');
+  const [model, setModel] = useState<ModelId>('minimax-2.1');
 
   return (
     <AppContext.Provider

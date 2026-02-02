@@ -1,4 +1,4 @@
-import { Chunk, FinishReason, isRetryableError, LLMGenerateOptions, LLMResponse, Role } from "../../providers";
+import { Chunk, FinishReason, isRetryableError, LLMGenerateOptions, LLMResponse, Role, Usage } from "../../providers";
 import { Session } from "../session";
 import { ToolRegistry } from "../tool/registry";
 import { AgentError, ToolError } from "./errors";
@@ -26,6 +26,7 @@ interface StreamChunkMetadata {
     model?: string;
     created?: number;
     finish_reason?: FinishReason;
+    usage?: Usage;
 }
 
 interface ToolCall {
@@ -135,12 +136,15 @@ export class Agent {
         if (!config.provider) {
             throw new AgentError('Provider is required');
         }
-    
+
 
         this.provider = config.provider;
         this.systemPrompt = config.systemPrompt ?? '';
         this.session = new Session({ systemPrompt: this.systemPrompt });
-        this.toolRegistry = config.toolRegistry ?? createDefaultToolRegistry({ workingDirectory: process.cwd() });
+        this.toolRegistry = config.toolRegistry ?? createDefaultToolRegistry(
+            { workingDirectory: process.cwd() },
+            this.provider
+        );
         this.maxRetries = config.maxRetries ?? 10;
         this.stream = config.stream ?? false;
         this.streamCallback = config.streamCallback;
@@ -168,7 +172,7 @@ export class Agent {
             throw new AgentError(validation.error || 'Invalid input');
         }
 
-        if (this.status !== AgentStatus.IDLE) {
+        if ([AgentStatus.RUNNING, AgentStatus.THINKING].includes(this.status)) {
             throw new AgentError(`Agent is not idle, current status: ${this.status}`);
         }
 
@@ -181,8 +185,6 @@ export class Agent {
         } catch (error) {
             this.failTask(error);
             throw error;
-        } finally {
-            this.status = AgentStatus.IDLE;
         }
     }
 
@@ -576,19 +578,6 @@ export class Agent {
             });
         }
 
-        this.streamCallback?.({
-            type: AgentMessageType.TOOL_CALL_CREATED,
-            payload: {
-                tool_calls: streamToolCalls.map((item) => ({
-                    callId: item.id,
-                    toolName: item.function.name,
-                    args: item.function.arguments,
-                })),
-            },
-            msgId: messageId,
-            sessionId: this.session.getSessionId(),
-            timestamp: this.timeProvider.getCurrentTime(),
-        });
     }
 
     /**
@@ -626,6 +615,7 @@ export class Agent {
         if (chunk.model) this.streamLastChunk.model = chunk.model;
         if (chunk.created) this.streamLastChunk.created = chunk.created;
         if (finishReason) this.streamLastChunk.finish_reason = finishReason;
+        if (chunk.usage) this.streamLastChunk.usage = chunk.usage;
     }
 
     /**
@@ -666,6 +656,7 @@ export class Agent {
                     finish_reason: this.streamLastChunk.finish_reason || undefined,
                 },
             ],
+            usage: this.streamLastChunk.usage || undefined,
         };
     }
 
@@ -682,42 +673,57 @@ export class Agent {
         }
 
         const toolCalls = choice.message?.tool_calls;
+        
 
         if (toolCalls && toolCalls.length > 0) {
-            await this.handleToolCalls(toolCalls, choice, messageId);
+            
+         
+
+            if (!this.stream) {
+                this.session.addMessage({
+                    role: 'assistant',
+                    content: choice?.message?.content || '',
+                    tool_calls: toolCalls,
+                    messageId,
+                    finish_reason: choice?.finish_reason || undefined,
+                    type: 'tool-call',
+                    usage: response.usage,
+                });
+            }
+
+           this.streamCallback?.({
+                type: AgentMessageType.TOOL_CALL_CREATED,
+                payload: {
+                    tool_calls: toolCalls.map((item) => ({
+                        callId: item.id,
+                        toolName: item.function.name,
+                        args: item.function.arguments,
+                    })),
+                },
+                msgId: messageId,
+                sessionId: this.session.getSessionId(),
+                timestamp: this.timeProvider.getCurrentTime(),
+            });
+
+            try {
+                const results = await this.toolRegistry.execute(toolCalls);
+                this.recordToolResults(results, messageId);
+            } catch (error) {
+                // 安全性：不直接暴露原始错误信息
+                const safeError = this.sanitizeError(error);
+                throw new ToolError(safeError.userMessage);
+            }
         } else {
-            this.handleTextResponse(choice, messageId);
-        }
-    }
-
-    /**
-     * 处理工具调用 - 类型安全：使用精确类型
-     */
-    private async handleToolCalls(toolCalls: ToolCall[], choice: LLMChoice, messageId: string): Promise<void> {
-        if (!this.stream) {
-            this.session.addMessage({
-                role: 'assistant',
-                content: choice.message?.content || '',
-                tool_calls: toolCalls,
-                messageId,
-                finish_reason: choice.finish_reason,
-                type: 'tool-call',
-            });
-        }
-
-        try {
-            const results = await this.toolRegistry.execute(toolCalls);
-            this.recordToolResults(results, messageId);
-        } catch (error) {
-            // 安全性：不直接暴露原始错误信息
-            const safeError = this.sanitizeError(error);
-            this.session.addMessage({
-                role: 'assistant',
-                messageId,
-                content: safeError.userMessage,
-                type: 'text',
-            });
-            throw new ToolError(safeError.userMessage);
+            if (!this.stream) {
+                this.session.addMessage({
+                    role: (choice.message?.role || 'assistant') as Role,
+                    content: choice.message?.content || '',
+                    messageId,
+                    finish_reason: choice.finish_reason,
+                    type: 'text',
+                    usage: response.usage,
+                });
+            }
         }
     }
 
@@ -771,20 +777,7 @@ export class Agent {
         return sanitized;
     }
 
-    /**
-     * 处理文本响应 - 类型安全：使用精确类型
-     */
-    private handleTextResponse(choice: LLMChoice, messageId: string): void {
-        if (!this.stream) {
-            this.session.addMessage({
-                role: (choice.message?.role || 'assistant') as Role,
-                content: choice.message?.content || '',
-                messageId,
-                finish_reason: choice.finish_reason,
-                type: 'text',
-            });
-        }
-    }
+
 
     // ==================== 私有方法 - 完成检查 ====================
 

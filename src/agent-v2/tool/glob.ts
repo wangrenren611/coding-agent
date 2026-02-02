@@ -53,15 +53,24 @@ export default class GlobTool extends BaseTool<typeof schema> {
         const limitedFiles = files;
 
         if (limitedFiles.length === 0) {
-            return this.success({
-                output: 'No files matched',
-                metadata: { pattern, path, files: [] },
+            return this.result({
+                success: true,
+                metadata: {
+                    files: [],
+                },
+                output: `No files found matching pattern: ${pattern}`,
             });
         }
 
-        return this.success({
-            output: JSON.stringify(limitedFiles),
-            metadata: { pattern, path, files: limitedFiles, totalCount },
+        return this.result({
+            success: true,
+            metadata: {
+                pattern,
+                path,
+                files: limitedFiles,
+                totalCount,
+            },
+            output: `Found ${totalCount} file(s) matching pattern: ${pattern}\n${limitedFiles.join('\n')}`,
         });
     }
 }

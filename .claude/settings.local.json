@@ -11,14 +11,15 @@
       "Bash(timeout:*)",
       "Bash(npm run build:*)",
       "Bash(echo:*)",
-      "Bash(npx vitest run:*)"
+      "Bash(npx vitest run:*)",
+      "Bash(node:*)"
     ]
   },
+  "enableAllProjectMcpServers": true,
   "enabledMcpjsonServers": [
     "sequential-thinking",
     "context7",
     "tavily",
     "shadcn"
-  ],
-  "enableAllProjectMcpServers": true
+  ]
 }

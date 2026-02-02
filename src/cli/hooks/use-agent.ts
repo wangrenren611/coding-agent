@@ -20,6 +20,7 @@ import type { AgentMessage } from '../../agent-v2/agent/stream-types';
 import { useMessageStore } from './use-message-store';
 import { AgentEventAdapter } from '../utils/event-adapter';
 import type { UIMessage } from '../types/message-types';
+import { operatorPrompt } from '../../agent-v2/prompts/operator';
 
 // =============================================================================
 // Hook 配置选项
@@ -84,7 +85,7 @@ export function useAgent({ model }: UseAgentOptions): UseAgentReturn {
     // 创建 Agent 实例
     const agent = new Agent({
       provider,
-      systemPrompt: `You are a helpful AI coding assistant. Help the user with their programming tasks.`,
+      systemPrompt: operatorPrompt({ directory: process.cwd(), vcs: 'git', language: 'Chinese' }),
       stream: true,
       streamCallback: (message: AgentMessage) => {
         // 将 Agent 消息转换为 UI 事件

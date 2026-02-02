@@ -37,7 +37,7 @@ export default class BashTool extends BaseTool<typeof schema> {
      * 执行 bash 命令
      *
      * 错误分类：
-     * - 业务错误（参数验证、安全检查）→ return this.fail()
+     * - 业务错误（参数验证、安全检查）→ return { success: false, error: ... }
      * - 底层异常（执行失败）→ throw 供 Registry 捕获
      */
     async execute(args: z.infer<typeof this.schema>): Promise<ToolResult> {
@@ -46,11 +46,9 @@ export default class BashTool extends BaseTool<typeof schema> {
 
         if (!command) {
             return this.result({
-                metadata: {
-                    command,
-                },
                 success: false,
-                output: `Command is required`,
+                metadata: { error: 'COMMAND_REQUIRED' } as any,
+                output: 'COMMAND_REQUIRED: Command is required',
             });
         }
 
@@ -60,11 +58,9 @@ export default class BashTool extends BaseTool<typeof schema> {
 
         if (!cmd) {
             return this.result({
-                metadata: {
-                    command,
-                },
                 success: false,
-                output: `${command} is not a valid command`,
+                metadata: { error: 'INVALID_COMMAND' } as any,
+                output: 'INVALID_COMMAND: Invalid command',
             });
         }
         const startTime = Date.now();
@@ -98,28 +94,30 @@ export default class BashTool extends BaseTool<typeof schema> {
                     finalOutput.slice(-4000);
             }
 
-            return this.result({
-                success: result.exitCode === 0,
-                metadata: {
-                    command,
-                    duration: Date.now() - startTime,
-                    truncated: isTruncated,
-                    exitCode: result.exitCode,
-                },
-                output: finalOutput,
-            });
+            if (result.exitCode === 0) {
+                return this.result({
+                    success: true,
+                    metadata: {
+                        command,
+                        exitCode: result.exitCode,
+                    },
+                    output: finalOutput,
+                });
+            } else {
+                return this.result({
+                    success: false,
+                    metadata: { error: `EXIT_CODE_${result.exitCode}` } as any,
+                    output: `EXIT_CODE_${result.exitCode}: Command failed with exit code ${result.exitCode}\n${finalOutput}`,
+                });
+            }
 
         } catch (error) {
             return this.result({
-                metadata: {
-                    command,
-                    error: (error as Error).message as string,
-                },
                 success: false,
-                output: `${command} execution failed: ${error}`,
+                metadata: { error: 'EXECUTION_FAILED' } as any,
+                output: `EXECUTION_FAILED: ${command} execution failed: ${error}`,
             });
         }
 
     }
 }
-

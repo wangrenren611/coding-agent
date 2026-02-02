@@ -1,4 +1,4 @@
-import { BaseTool, ToolResult } from "./base";
+import { BaseTool, ToolResult, ToolContext } from "./base";
 import { z } from 'zod';
 import { ToolSchema } from "./type";
 import { ToolCall } from "../../providers";
@@ -6,6 +6,14 @@ import { safeParse } from "../util";
 
 /** 默认工具执行超时时间（毫秒） */
 const DEFAULT_TOOL_TIMEOUT = 300000; // 5分钟
+
+/**
+ * 静态上下文存储（用于工具访问会话信息）
+ */
+interface StaticContext {
+    sessionId?: string;
+    sessionPath?: string;
+}
 
 /**
  * 工具注册表配置
@@ -40,9 +48,32 @@ export class ToolRegistry {
     private toolTimeout: number;
     private eventCallbacks?: ToolEventCallbacks;
 
+    /** 静态上下文存储 */
+    private static context: StaticContext = {};
+
     constructor(config: ToolRegistryConfig) {
         this.workingDirectory = config.workingDirectory;
         this.toolTimeout = config.toolTimeout ?? DEFAULT_TOOL_TIMEOUT;
+    }
+
+    /**
+     * 设置静态上下文（供工具访问会话信息）
+     */
+    static setContext(ctx: StaticContext): void {
+        ToolRegistry.context = ctx;
+    }
+
+    /**
+     * 获取静态上下文
+     */
+    static getContext(): ToolContext {
+        return {
+            environment: process.cwd(),
+            platform: process.platform,
+            time: new Date().toISOString(),
+            sessionId: ToolRegistry.context.sessionId,
+            sessionPath: ToolRegistry.context.sessionPath,
+        };
     }
 
     /**
@@ -175,6 +206,8 @@ export class ToolRegistry {
 
       return results as {tool_call_id: string, name: string, arguments: string, result: any}[];
     }
+ 
+
 
   /**
      * 转换为 LLM 工具格式

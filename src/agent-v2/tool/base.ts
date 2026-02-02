@@ -6,12 +6,21 @@ import { z } from 'zod';
 export interface ToolResult<T = unknown> {
     /** 是否成功 */
     success: boolean;
-    /** 结果数据 */
     metadata?: T;
-    /** 错误信息（失败时必填） */
     error?: string;
     output?: string;
 }
+
+/**
+ * 工具上下文信息
+ */
+export type ToolContext = {
+    environment: string;
+    platform: string;
+    time: string;
+    sessionId?: string;
+    sessionPath?: string;
+};
 
 
 
@@ -51,6 +60,8 @@ export abstract class BaseTool<T extends z.ZodType> {
             output,
         };
   }
+
+
 }
 
 export { z };
