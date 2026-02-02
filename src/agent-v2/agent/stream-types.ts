@@ -1,3 +1,5 @@
+import { AgentStatus } from "./types";
+
 
 
 /**
@@ -25,7 +27,6 @@ export enum AgentMessageType {
  * 基础消息结构：所有流式包必须携带 msgId
  */
 interface BaseAgentMessage {
-  msgId: string;       // 你后端生成的唯一逻辑 ID
   sessionId: string;   // 会话 ID
   timestamp: number;   // 毫秒时间戳
 }
@@ -36,11 +37,14 @@ interface BaseAgentMessage {
 interface ThoughtMessage extends BaseAgentMessage {
   type: AgentMessageType.THOUGHT;
   payload: { content: string };
+  msgId: string;       // 你后端生成的唯一逻辑 ID
+
 }
 
 interface TextMessage extends BaseAgentMessage {
   type: AgentMessageType.TEXT;
   payload: { content: string };
+  msgId: string;       // 你后端生成的唯一逻辑 ID
 }
 
 interface ToolCall {
@@ -56,6 +60,7 @@ interface ToolCallCreatedMessage extends BaseAgentMessage {
   payload: {
       tool_calls: ToolCall[];
   };
+  msgId: string;       // 你后端生成的唯一逻辑 ID
 }
 
 interface ToolCallStreamMessage extends BaseAgentMessage {
@@ -86,6 +91,7 @@ interface CodePatchMessage extends BaseAgentMessage {
     diff: string;      // 标准 Unified Diff 格式
     language?: string; // 编程语言
   };
+  msgId: string;       // 你后端生成的唯一逻辑 ID
 }
 
 /**
@@ -94,9 +100,10 @@ interface CodePatchMessage extends BaseAgentMessage {
 interface StatusMessage extends BaseAgentMessage {
   type: AgentMessageType.STATUS;
   payload: {
-    state: 'thinking' | 'executing' | 'completed' | 'aborted';
+    state: AgentStatus;
     message?: string;
   };
+  msgId?: string;       // 你后端生成的唯一逻辑 ID
 }
 
 /**

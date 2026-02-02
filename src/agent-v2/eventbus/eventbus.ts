@@ -2,6 +2,7 @@
  * 简单的事件总线实现
  */
 
+export { EventType } from './types';
 import { EventListener, EventMap, EventType } from './types';
 
 /**

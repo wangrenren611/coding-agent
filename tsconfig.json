@@ -1,5 +1,5 @@
 {
-  "exclude": ["dist", "__tests__", "node_modules",  "**/*.test.ts"],
+  "exclude": ["dist", "__tests__", "node_modules", "src/cli-ui/**/*", "src/cli-ink/**/*", "**/*.test.ts", "src/ui/cli/**/*", "src/ui/blessed/**/*"],
   "compilerOptions": {
     "lib": ["ESNext", "DOM"],
     "module": "ESNext",
@@ -23,6 +23,5 @@
     "./src/**/*",
     "./typings",
     "./typing.d.ts",
-    "./src/types/**/*.d.ts",
   ]
 }

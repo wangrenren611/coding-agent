@@ -13,7 +13,7 @@ export type ToolCall = {
     index: number;
     function: {
         name: string;
-        arguments?: string;
+        arguments: string;
     };
 };
 

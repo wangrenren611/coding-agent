@@ -13,5 +13,12 @@
       "Bash(echo:*)",
       "Bash(npx vitest run:*)"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "sequential-thinking",
+    "context7",
+    "tavily",
+    "shadcn"
+  ],
+  "enableAllProjectMcpServers": true
 }

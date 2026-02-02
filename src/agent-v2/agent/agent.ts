@@ -1,571 +1,210 @@
-import { Chunk, FinishReason, LLMGenerateOptions, LLMResponse } from "../../providers";
+import { Chunk, FinishReason, isRetryableError, LLMGenerateOptions, LLMResponse, Role } from "../../providers";
 import { Session } from "../session";
 import { ToolRegistry } from "../tool/registry";
 import { AgentError, ToolError } from "./errors";
 import { AgentOptions, AgentStatus, StreamCallback } from "./types";
-import { EventBus } from "../eventbus";
-import { EventType } from "../eventbus";
+import { EventBus, EventType } from "../eventbus";
 import { Message } from "../session/types";
 import { uuid } from "uuidv4";
 import { AgentMessageType } from "./stream-types";
+import { createDefaultToolRegistry } from "../tool";
+
+// ==================== 类型定义 ====================
+
+interface StreamToolCall {
+    id: string;
+    type: string;
+    index: number;
+    function: {
+        name: string;
+        arguments: string;
+    };
+}
+
+interface StreamChunkMetadata {
+    id?: string;
+    model?: string;
+    created?: number;
+    finish_reason?: FinishReason;
+}
+
+interface ToolCall {
+    id: string;
+    type: string;
+    index: number;
+    function: {
+        name: string;
+        arguments: string;
+    };
+}
+
+interface LLMChoice {
+    index: number;
+    message: {
+        role: string;
+        content: string;
+        tool_calls?: ToolCall[];
+    };
+    finish_reason?: FinishReason;
+}
+
+interface ToolExecutionResult {
+    tool_call_id: string;
+    result?: {
+        success?: boolean;
+        [key: string]: unknown;
+    };
+}
+
+interface TaskFailedEvent {
+    timestamp: number;
+    error: string;
+    totalLoops: number;
+    totalRetries: number;
+}
+
+/**
+ * 时间提供者接口 - 用于提升可测试性
+ */
+export interface ITimeProvider {
+    getCurrentTime(): number;
+    sleep(ms: number): Promise<void>;
+}
+
+/**
+ * 默认时间提供者实现
+ */
+class DefaultTimeProvider implements ITimeProvider {
+    getCurrentTime(): number {
+        return Date.now();
+    }
+
+    async sleep(ms: number): Promise<void> {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+}
+
+/**
+ * 输入验证结果
+ */
+interface ValidationResult {
+    valid: boolean;
+    error?: string;
+}
+
+/**
+ * 安全的错误信息
+ */
+interface SafeError {
+    userMessage: string;
+    internalMessage?: string;
+}
 
 export class Agent {
-    /** Agent 状态 */
-    private status: AgentStatus;
+    // ==================== 类型安全：核心依赖 ====================
     private provider: AgentOptions['provider'];
-    private systemPrompt: string;
     private session: Session;
     private toolRegistry: ToolRegistry;
+    private eventBus: EventBus;
+
+    // ==================== 类型安全：配置 ====================
+    private systemPrompt: string;
     private maxRetries: number;
     private stream: boolean;
     private streamCallback?: StreamCallback;
+    private maxBufferSize: number;
+
+    // ==================== 可测试性：状态 ====================
+    private status: AgentStatus;
     private abortController: AbortController | null = null;
-    /** 事件总线 */
-    private eventBus: EventBus;
-    /** 任务开始时间戳 */
+
+    // ==================== 可测试性：执行追踪（使用注入的 TimeProvider）====================
     private taskStartTime: number = 0;
-    /** 当前循环次数 */
     private loopCount: number = 0;
-    /** 重试次数 */
     private retryCount: number = 0;
-    /** 任务 ID */
-    private taskId: string = '';
-    /** 当前查询 */
     private currentQuery: string = '';
-    /** 流式输出累积内容 */
+    private timeProvider: ITimeProvider;
+
+    // ==================== 流式处理缓冲区 ====================
     private streamBuffer: string = '';
-    /** 流式工具调用累积 Map<index, ToolCall> */
-    private streamToolCalls: Map<number, any> = new Map();
-    /** 流式最后一个 chunk 的元数据（用于构建 LLMResponse） */
-    private streamLastChunk: {
-        id?: string;
-        model?: string;
-        created?: number;
-        finish_reason?: FinishReason;
-    } = {};
- 
+    private streamToolCalls: Map<number, StreamToolCall> = new Map();
+    private streamLastChunk: StreamChunkMetadata = {};
+
     constructor(config: AgentOptions) {
         // 配置参数校验
         if (!config.provider) {
-            throw new Error('Provider is required');
+            throw new AgentError('Provider is required');
         }
-        if (!config.toolRegistry) {
-            throw new Error('ToolRegistry is required');
-        }
+    
 
-        this.status = AgentStatus.IDLE;
         this.provider = config.provider;
         this.systemPrompt = config.systemPrompt ?? '';
-        this.session = new Session({
-            systemPrompt: this.systemPrompt,
-        });
-        this.toolRegistry = config.toolRegistry;
+        this.session = new Session({ systemPrompt: this.systemPrompt });
+        this.toolRegistry = config.toolRegistry ?? createDefaultToolRegistry({ workingDirectory: process.cwd() });
         this.maxRetries = config.maxRetries ?? 10;
         this.stream = config.stream ?? false;
         this.streamCallback = config.streamCallback;
         this.eventBus = new EventBus();
+        this.status = AgentStatus.IDLE;
 
-        // 设置工具事件回调，转发到事件总线
-        this.toolRegistry.setEventCallbacks({
-            onToolStart: (toolName, args) => {
-                this.eventBus.emit(EventType.TOOL_START, {
-                    timestamp: Date.now(),
-                    toolName,
-                    arguments: args,
-                });
-            },
-            onToolSuccess: (toolName, duration, resultLength) => {
-                this.eventBus.emit(EventType.TOOL_SUCCESS, {
-                    timestamp: Date.now(),
-                    toolName,
-                    duration,
-                    resultLength,
-                });
-            },
-            onToolFailed: (toolName, error) => {
-                this.eventBus.emit(EventType.TOOL_FAILED, {
-                    timestamp: Date.now(),
-                    toolName,
-                    error,
-                });
-            },
-        });
+        // 可测试性：支持注入时间提供者
+        this.timeProvider = config.timeProvider ?? new DefaultTimeProvider();
+
+        // 安全性：设置缓冲区大小限制
+        this.maxBufferSize = config.maxBufferSize ?? 100000; // 默认 100KB
     }
+
+    // ==================== 公共方法（带返回类型）====================
 
     /**
      * 执行 Agent 查询
-     * @param query 用户输入的查询内容
      * @returns 最后一条消息
+     * @throws {AgentError} 当 Agent 非空闲状态时
      */
-    async execute(query: string) {
-        if (this.status !== AgentStatus.IDLE) {
-            throw new Error(`Agent is not idle, current status: ${this.status}`);
+    async execute(query: string): Promise<Message> {
+        // 安全性：输入验证
+        const validation = this.validateInput(query);
+        if (!validation.valid) {
+            throw new AgentError(validation.error || 'Invalid input');
         }
 
-        // 初始化任务状态
-        this.taskStartTime = Date.now();
-        this.loopCount = 0;
-        this.retryCount = 0;
-        this.taskId = `task-${this.taskStartTime}`;
-        this.currentQuery = query;
+        if (this.status !== AgentStatus.IDLE) {
+            throw new AgentError(`Agent is not idle, current status: ${this.status}`);
+        }
 
-        
-
-   
-          this.session.addMessage({
-            role: 'user',
-            content: query,
-            type: 'text',
-            messageId: uuid(),
-          });
+        this.initializeTask(query);
 
         try {
             await this.loop();
-
-            // 任务成功
-            this.status = AgentStatus.COMPLETED;
-            this.eventBus.emit(EventType.TASK_SUCCESS, {
-                timestamp: Date.now(),
-                totalLoops: this.loopCount,
-                totalRetries: this.retryCount,
-                duration: Date.now() - this.taskStartTime,
-            });
-
-            
-
+            this.completeTask();
             return this.session.getLastMessage();
         } catch (error) {
-            // 任务失败
-            this.status = AgentStatus.FAILED;
-            const errorMessage = (error as Error).message;
-            this.eventBus.emit(EventType.TASK_FAILED, {
-                timestamp: Date.now(),
-                error: errorMessage,
-                totalLoops: this.loopCount,
-                totalRetries: this.retryCount,
-            });
-
-        
-
+            this.failTask(error);
             throw error;
+        } finally {
+            this.status = AgentStatus.IDLE;
         }
     }
 
- 
     /**
      * 注册事件监听器
-     * @param type 事件类型
-     * @param listener 监听器函数
      */
-    on(type: EventType, listener: (data: any) => void): void {
-        this.eventBus.on(type as any, listener);
+    on(type: EventType, listener: (data: unknown) => void): void {
+        this.eventBus.on(type, listener);
     }
 
     /**
      * 取消事件监听器
-     * @param type 事件类型
-     * @param listener 监听器函数
      */
-    off(type: EventType, listener: (data: any) => void): void {
-        this.eventBus.off(type as any, listener);
-    }
-
-  
-
-
-
-
-
-    /** 处理流式输出数据块 */
-    private handleStreamChunk(chunk: Chunk,messageId:string) {
-        if (!this.stream) return;
-
-        const delta = chunk.choices?.[0].delta;
-        const finishReason = chunk.choices?.[0].finish_reason;
-        const id = chunk.id;
-
-        if (!delta) return;
-
-        // 处理文本内容
-        const content = delta.content || '';
-
-        if (content) {
-            this.streamBuffer += content;
-         
-            this.streamCallback?.({
-                type: AgentMessageType.TEXT,
-                payload: {
-                    content,
-                },
-                msgId: messageId,
-                sessionId: this.session.getSessionId(),
-                timestamp: Date.now(),
-            });
-            // 实时更新 session 中的消息
-            const lastMessage: Message = this.session.getLastMessage();
-           
-            if (lastMessage.messageId === messageId) {
-                // 更新最后一条消息的内容
-                lastMessage.content = this.streamBuffer;
-                messageId=this.session.addMessage({
-                    ...lastMessage,
-                    content: this.streamBuffer,
-                    id,
-                    finish_reason: finishReason || (lastMessage.finishReason as FinishReason),
-                    type: 'text',
-                });
-            } else {
-                // 创建新的流式消息
-                messageId=this.session.addMessage({
-                    role: 'assistant',
-                    content: this.streamBuffer,
-                    messageId,
-                    finish_reason: finishReason,
-                    type: 'text',
-                });
-            }
-
-        }
-
-        // 处理工具调用流式数据
-        const toolCalls = delta.tool_calls;
-        if (toolCalls && toolCalls.length > 0) {
-            // 实时更新 session 中的消息
-            for (const toolCall of toolCalls) {
-                const index = toolCall.index;
-                if (!this.streamToolCalls.has(index)) {
-                    // 初始化工具调用
-                    this.streamToolCalls.set(index, {
-                        id: toolCall.id,
-                        type: toolCall.type,
-                        index,
-                        function: {
-                            name: toolCall.function?.name || '',
-                            arguments: toolCall.function?.arguments || '',
-                        },
-                    });
-                } else {
-                    // 累积工具调用数据
-                    const existing = this.streamToolCalls.get(index)!;
-                    if (toolCall.function?.name) {
-                        existing.function.name = toolCall.function.name;
-                    }
-                    if (toolCall.function?.arguments) {
-                        existing.function.arguments += toolCall.function.arguments;
-                    }
-                }
-            }
-
-            const lastMessage = this.session.getLastMessage();
-           const streamToolCalls= Array.from(this.streamToolCalls.values()) 
-  
-            if (lastMessage.messageId ! == messageId) {
-               this.session.addMessage({
-                    role: 'assistant',
-                    content: '',
-                    messageId,
-                    tool_calls:streamToolCalls,
-                    type: 'tool-call',
-                    id,
-                    finish_reason: finishReason,
-                });
-            } else {
-             this.session.addMessage({
-                    ...lastMessage,
-                    tool_calls: streamToolCalls,
-                    messageId,
-                    finish_reason: finishReason || (lastMessage.finishReason as FinishReason),
-                    type: 'tool-call',
-                });
-            }
-
-            this.streamCallback?.({
-                type: AgentMessageType.TOOL_CALL_CREATED,
-                payload: {
-                    tool_calls: Array.from(this.streamToolCalls.values()).map((item) => ({
-                        callId: item.id ,
-                        toolName: item.function.name,
-                        args: item.function.arguments,
-                    })),
-                },
-                msgId: messageId,
-                sessionId: this.session.getSessionId(),
-                timestamp: Date.now(),
-            });
-        
-        }
-
-        // 存储最后一个 chunk 的元数据（用于构建 LLMResponse）
-        if (chunk.id) this.streamLastChunk.id = chunk.id;
-        if (chunk.model) this.streamLastChunk.model = chunk.model;
-        if (chunk.created) this.streamLastChunk.created = chunk.created;
-        if (finishReason) this.streamLastChunk.finish_reason = finishReason;
-       
-        // 当收到 finish_reason 时，确保它被设置到最后一条 session 消息
-        // 这处理了最后一个 chunk 只有 finish_reason 而没有 content 或 tool_calls 的情况
-        if (finishReason) {
-            const lastMessage = this.session.getLastMessage();
-            if (lastMessage && lastMessage.messageId === messageId) {
-                this.session.addMessage({
-                    ...lastMessage,
-                    messageId,
-                    finish_reason: finishReason,
-                });
-            }
-        }
-    }
-
-    /**
-     * Agent 主循环：持续调用 LLM 直到完成或失败
-     */
-    async loop() {
-        let retries = 0;
-
-        while (true) {
-          
-            try {
-                // 检查重试次数
-                if (retries > this.maxRetries) {
-                    this.status = AgentStatus.FAILED;
-                    break;
-                }
-
-                // 检查是否已完成
-                if (this.checkComplete()) {
-                    this.status = AgentStatus.COMPLETED;
-                    break;
-                }
-
-                this.loopCount++;
-                this.status = AgentStatus.RUNNING;
-                this.abortController = new AbortController();
-                // 重置流式缓冲区
-                this.streamBuffer = '';
-                this.streamToolCalls.clear();
-                this.streamLastChunk = {};
-
-                
-                const messageId=uuid();
-                // 创建超时信号
-                const timeoutSignal = AbortSignal.any([
-                    this.abortController.signal,
-                    AbortSignal.timeout(this.provider.getTimeTimeout()),
-                ]);
-
-                const messages = this.session.getMessages();
-
-                const llmOptions: LLMGenerateOptions = {
-                    tools: this.toolRegistry.toLLMTools(),
-                    signal: timeoutSignal,
-                };
-
-                let response: LLMResponse | null = null;
-
-            
-
-                if (this.stream) {
-                //   this.streamCallback?.({
-                //     type: AgentMessageType.STATUS,
-                //         payload: {
-                //             state: 'thinking',
-                //             message: 'Agent is thinking...',
-                //         },
-                //         msgId: messageId,
-                //         sessionId: this.session.getSessionId(),
-                //         timestamp: Date.now(),
-                //    });
-                    llmOptions.stream = true;
-                    const streamResult = await this.provider.generate(messages, llmOptions);
-                    const streamGenerator = streamResult as unknown as AsyncGenerator<Chunk>;
-                    for await (const chunk of streamGenerator) {
-                        this.handleStreamChunk(chunk,messageId);
-                    }
-                    // 从累积的数据构建 LLMResponse
-                    response = this.buildStreamResponse();
-                } else {
-                    response = await this.provider.generate(messages, llmOptions) as LLMResponse | null;
-                }
-
-                if (!response) {
-                    throw new AgentError('LLM returned no response');
-                }
-
-                await this.handleResponse(response,messageId);
-
-                // 成功执行一次，重置重试计数
-                retries = 0;
-            } catch (error) {
-                console.log(error);
-                // 工具错误：记录并重试
-                if (error instanceof ToolError) {
-                    retries++;
-                    this.retryCount = retries;
-
-                    // 发送重试事件（EventBus）
-                    this.eventBus.emit(EventType.TASK_RETRY, {
-                        timestamp: Date.now(),
-                        retryCount: retries,
-                        maxRetries: this.maxRetries,
-                        reason: (error as Error).message,
-                    });
-
-
-                    continue;
-                }
-
-                // Agent 错误：直接抛出
-                if (error instanceof AgentError) {
-                    throw error;
-                }
-
-                // 其他异常：LLM 调用失败等
-                const errorMessage = (error as Error).message;
-                this.session.addMessage({
-                    role: 'assistant',
-                    messageId:uuid(),
-                    content: `Execution failed: ${errorMessage}`,
-                    type: 'text',
-                });
-                retries++;
-                this.status = AgentStatus.FAILED;
-            } finally {
-                this.abortController?.abort();
-                this.abortController = null;
-            }
-        }
-    }
-
-    /**
-     * 从流式累积的数据构建 LLMResponse
-     */
-    private buildStreamResponse(): LLMResponse {
-        const toolCalls = Array.from(this.streamToolCalls.values());
-        const finishReason = this.streamLastChunk.finish_reason;
-
-        return {
-            id: this.streamLastChunk.id || '',
-            object: 'chat.completion',
-            created: this.streamLastChunk.created || Date.now(),
-            model: this.streamLastChunk.model || '',
-            choices: [
-                {
-                    index: 0,
-                    message: {
-                        role: 'assistant',
-                        content: this.streamBuffer,
-                        tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
-                    },
-                    finish_reason: finishReason || undefined,
-                },
-            ],
-        };
-    }
-
-    async handleResponse(response: LLMResponse,messageId:string) {
-        const choice = response.choices?.[0];
-
-        if (!choice) {
-            throw new AgentError('LLM response missing choices');
-        }
-
-        const finishReason = choice.finish_reason;
-        const toolCalls = choice.message?.tool_calls;
-
-        // 处理工具调用
-        if (toolCalls && toolCalls.length > 0) {
-            if (!this.stream) {
-                // 非流式模式：创建新的工具调用消息
-                this.session.addMessage({
-                    role: 'assistant',
-                    content: choice.message?.content || '',
-                    tool_calls: toolCalls,
-                    messageId,
-                    finish_reason: finishReason,
-                    type: 'tool-call',
-                });
-            }
-
-            try {
-                const results = await this.toolRegistry.execute(toolCalls);
-                results.forEach(result => {
-
-                    this.streamCallback?.({
-                        type: AgentMessageType.TOOL_CALL_RESULT,
-                        payload: {
-                            callId: result.tool_call_id,
-                            result: JSON.stringify(result.result) || '',
-                            status: result.result?.success? 'success' : 'error',
-                        },
-                        msgId: messageId,
-                        sessionId: this.session.getSessionId(),
-                        timestamp: Date.now(),
-                    });
-                    
-                    this.session.addMessage({
-                        role: 'tool',
-                        tool_call_id: result.tool_call_id,
-                        content: JSON.stringify(result.result) || '',
-                        messageId:uuid(),
-                        type: 'tool-result',
-                    });
-
-                });
-
-            
-            } catch (error) {
-                const errorMessage = (error as Error).message;
-
-                // 工具执行失败，将错误信息反馈给 LLM 重试
-                this.session.addMessage({
-                    role: 'assistant',
-                    messageId,
-                    content: `Tool execution error: ${errorMessage}`,
-                    type: 'text',
-                });
-
-                throw new ToolError(errorMessage || 'Tool execution error');
-            }
-        } else {
-            // 文本响应
-            if (!this.stream) {
-                // 非流式模式：添加完整消息
-                this.session.addMessage({
-                    ...choice.message,
-                    messageId,
-                    finish_reason: finishReason,
-                    type: 'text',
-                });
-            }
-            // 流式模式的消息已经在 handleStreamChunk 中处理
-        }
-    }
-
-    /**
-     * 检查 Agent 是否已完成
-     * 完成条件：
-     * 1. 最后一条消息是文本类型
-     * 2. 有 finish_reason（LLM 正常结束）或 content 为空（异常情况）
-     */
-    private checkComplete(): boolean {
-        const lastMessage = this.session.getLastMessage();
-          console.log(lastMessage);
-       
-        if (!lastMessage) {
-            return false;
-        }
-
-        // LLM 正常结束
-        const hasFinishReason = lastMessage.type === 'text' && lastMessage.finish_reason;
-        // 空响应（异常情况下的终止）
-        const isEmptyText = lastMessage.type === 'text' && !lastMessage.content;
-
-        return !!(hasFinishReason || isEmptyText);
+    off(type: EventType, listener: (data: unknown) => void): void {
+        this.eventBus.off(type, listener);
     }
 
     /**
      * 获取当前会话的所有消息
+     * @returns 消息列表
      */
-    getMessages() {
+    getMessages(): Message[] {
         return this.session.getMessages();
     }
 
@@ -581,5 +220,625 @@ export class Agent {
      */
     abort(): void {
         this.abortController?.abort();
+        this.status = AgentStatus.ABORTED;
+        this.emitStatus(AgentStatus.ABORTED, 'Agent aborted by user.');
+    }
+
+    // ==================== 安全性：输入验证 ====================
+
+    /**
+     * 验证用户输入
+     */
+    private validateInput(query: string): ValidationResult {
+        if (typeof query !== 'string') {
+            return { valid: false, error: 'Query must be a string' };
+        }
+
+        if (query.length === 0) {
+            return { valid: false, error: 'Query cannot be empty' };
+        }
+
+        if (query.length > 100000) {
+            return { valid: false, error: 'Query exceeds maximum length' };
+        }
+
+        // 检测可能的注入攻击
+        const dangerousPatterns = [
+            /<script[^>]*>.*?<\/script>/gi,
+            /javascript:/gi,
+            /data:text\/html/gi,
+        ];
+
+        for (const pattern of dangerousPatterns) {
+            if (pattern.test(query)) {
+                return { valid: false, error: 'Query contains potentially malicious content' };
+            }
+        }
+
+        return { valid: true };
+    }
+
+    /**
+     * 安全化错误信息 - 避免暴露内部细节
+     */
+    private sanitizeError(error: unknown): SafeError {
+        if (error instanceof AgentError) {
+            return {
+                userMessage: error.message,
+                internalMessage: error.stack,
+            };
+        }
+
+        if (error instanceof ToolError) {
+            return {
+                userMessage: 'Tool execution failed. Please try again.',
+                internalMessage: error.message,
+            };
+        }
+
+        if (error instanceof Error) {
+            // 不向用户暴露原始错误消息
+            return {
+                userMessage: 'An unexpected error occurred. Please try again.',
+                internalMessage: error.message,
+            };
+        }
+
+        return {
+            userMessage: 'An unexpected error occurred. Please try again.',
+            internalMessage: String(error),
+        };
+    }
+
+    // ==================== 私有方法 - 任务管理 ====================
+
+    /**
+     * 初始化任务状态
+     */
+    private initializeTask(query: string): void {
+        // 可测试性：使用注入的 TimeProvider
+        this.taskStartTime = this.timeProvider.getCurrentTime();
+        this.loopCount = 0;
+        this.retryCount = 0;
+        this.currentQuery = query;
+
+        this.session.addMessage({
+            role: 'user',
+            content: query,
+            type: 'text',
+            messageId: uuid(),
+        });
+    }
+
+    /**
+     * 标记任务完成
+     */
+    private completeTask(): void {
+        this.status = AgentStatus.COMPLETED;
+        this.emitStatus(AgentStatus.COMPLETED, 'Task completed successfully');
+    }
+
+    /**
+     * 标记任务失败 - 安全性：使用安全化的错误信息
+     */
+    private failTask(error: unknown): void {
+        this.status = AgentStatus.FAILED;
+        const safeError = this.sanitizeError(error);
+
+        // 内部事件包含详细信息（用于日志）
+        this.eventBus.emit(EventType.TASK_FAILED, {
+            timestamp: this.timeProvider.getCurrentTime(),
+            error: safeError.internalMessage || safeError.userMessage,
+            totalLoops: this.loopCount,
+            totalRetries: this.retryCount,
+        } as TaskFailedEvent);
+
+        // 用户只看到友好消息
+        this.emitStatus(AgentStatus.FAILED, safeError.userMessage);
+    }
+
+    // ==================== 私有方法 - 主循环 ====================
+
+    /**
+     * Agent 主循环
+     */
+    async loop(): Promise<void> {
+        this.emitStatus(AgentStatus.RUNNING, 'Agent is running...');
+
+        while (true) {
+            if (this.retryCount > this.maxRetries) {
+                this.handleMaxRetriesExceeded();
+                break;
+            }
+
+            if (this.checkComplete()) {
+                this.status = AgentStatus.COMPLETED;
+                this.emitStatus(AgentStatus.COMPLETED, 'Agent completed the task.');
+                break;
+            }
+
+            if (this.retryCount > 0) {
+                this.status = AgentStatus.RETRYING;
+                this.emitStatus(AgentStatus.RETRYING, `Agent is retrying... (${this.retryCount}/${this.maxRetries})`);
+            }
+
+            this.loopCount++;
+            this.status = AgentStatus.RUNNING;
+
+            try {
+                await this.executeLLMCall();
+                this.retryCount = 0;
+            } catch (error) {
+                if (!this.handleError(error)) {
+                    throw error;
+                }
+            }
+        }
+    }
+
+    /**
+     * 执行 LLM 调用
+     */
+    private async executeLLMCall(): Promise<void> {
+        this.abortController = new AbortController();
+        this.resetStreamBuffers();
+
+        const messageId = uuid();
+        const timeoutSignal = AbortSignal.any([
+            this.abortController.signal,
+            AbortSignal.timeout(this.provider.getTimeTimeout()),
+        ]);
+
+        const messages = this.session.getMessages();
+        const llmOptions: LLMGenerateOptions = {
+            tools: this.toolRegistry.toLLMTools(),
+            signal: timeoutSignal,
+        };
+
+        const response = this.stream
+            ? await this.executeStreamCall(messages, llmOptions, messageId)
+            : await this.executeNormalCall(messages, llmOptions);
+
+        if (!response) {
+            throw new AgentError('LLM returned no response');
+        }
+
+        await this.handleResponse(response, messageId);
+    }
+
+    /**
+     * 执行流式调用
+     */
+    private async executeStreamCall(
+        messages: Message[],
+        llmOptions: LLMGenerateOptions,
+        messageId: string
+    ): Promise<LLMResponse> {
+        this.emitStatus(AgentStatus.THINKING, 'Agent is thinking...', messageId);
+
+        llmOptions.stream = true;
+        const streamResult = await this.provider.generate(messages, llmOptions);
+        const streamGenerator = streamResult as unknown as AsyncGenerator<Chunk>;
+
+        for await (const chunk of streamGenerator) {
+            this.handleStreamChunk(chunk, messageId);
+        }
+
+        return this.buildStreamResponse();
+    }
+
+    /**
+     * 执行非流式调用
+     */
+    private async executeNormalCall(
+        messages: Message[],
+        llmOptions: LLMGenerateOptions
+    ): Promise<LLMResponse> {
+        const response = await this.provider.generate(messages, llmOptions);
+        return response as LLMResponse;
+    }
+
+    /**
+     * 重置流式缓冲区
+     */
+    private resetStreamBuffers(): void {
+        this.streamBuffer = '';
+        this.streamToolCalls.clear();
+        this.streamLastChunk = {};
+    }
+
+    /**
+     * 处理最大重试次数超限
+     */
+    private handleMaxRetriesExceeded(): void {
+        this.status = AgentStatus.FAILED;
+        this.emitStatus(AgentStatus.FAILED, 'Agent failed after maximum retries.');
+    }
+
+    /**
+     * 处理错误
+     */
+    private handleError(error: unknown): boolean {
+        if (error instanceof AgentError || !isRetryableError(error)) {
+            return false;
+        }
+
+        this.retryCount++;
+        return true;
+    }
+
+    // ==================== 私有方法 - 流式处理 ====================
+
+    /**
+     * 处理流式输出数据块
+     */
+    private handleStreamChunk(chunk: Chunk, messageId: string): void {
+        if (!this.stream) return;
+
+        const delta = chunk.choices?.[0].delta;
+        const finishReason = chunk.choices?.[0].finish_reason;
+
+        if (!delta) return;
+
+        this.processStreamContent(delta.content || '', messageId, chunk.id, finishReason);
+        this.processStreamToolCalls(delta.tool_calls, messageId, chunk.id, finishReason);
+        this.updateStreamMetadata(chunk, finishReason);
+        this.updateSessionWithFinishReason(finishReason, messageId);
+    }
+
+    /**
+     * 处理流式文本内容 - 安全性：缓冲区大小限制
+     */
+    private processStreamContent(
+        content: string,
+        messageId: string,
+        chunkId: string | undefined,
+        finishReason: FinishReason | undefined
+    ): void {
+        if (!content) return;
+
+        // 安全性：检查缓冲区大小
+        if (this.streamBuffer.length + content.length > this.maxBufferSize) {
+            // 截断内容并发出警告
+            const remainingSpace = this.maxBufferSize - this.streamBuffer.length;
+            if (remainingSpace > 0) {
+                this.streamBuffer += content.slice(0, remainingSpace);
+            }
+            this.emitStatus(AgentStatus.FAILED, 'Response size exceeded limit');
+            return;
+        }
+
+        this.streamBuffer += content;
+        this.streamCallback?.({
+            type: AgentMessageType.TEXT,
+            payload: { content },
+            msgId: messageId,
+            sessionId: this.session.getSessionId(),
+            timestamp: this.timeProvider.getCurrentTime(),
+        });
+
+        const lastMessage = this.session.getLastMessage();
+        if (lastMessage.messageId === messageId) {
+            lastMessage.content = this.streamBuffer;
+            this.session.addMessage({
+                ...lastMessage,
+                content: this.streamBuffer,
+                id: chunkId,
+                finish_reason: finishReason || (lastMessage.finishReason as FinishReason),
+                type: 'text',
+            });
+        } else {
+            this.session.addMessage({
+                role: 'assistant',
+                content: this.streamBuffer,
+                messageId,
+                finish_reason: finishReason,
+                type: 'text',
+            });
+        }
+    }
+
+    /**
+     * 处理流式工具调用 - 类型安全：使用精确类型
+     */
+    private processStreamToolCalls(
+        toolCalls: ToolCall[] | undefined,
+        messageId: string,
+        chunkId: string | undefined,
+        finishReason: FinishReason | undefined
+    ): void {
+        if (!toolCalls || toolCalls.length === 0) return;
+
+        for (const toolCall of toolCalls) {
+            this.updateStreamToolCall(toolCall);
+        }
+
+        const lastMessage = this.session.getLastMessage();
+        const streamToolCalls = Array.from(this.streamToolCalls.values());
+
+        const messageData = {
+            role: 'assistant' as const,
+            content: '',
+            messageId,
+            tool_calls: streamToolCalls,
+            type: 'tool-call' as const,
+            id: chunkId,
+            finish_reason: finishReason,
+        };
+
+        if (lastMessage.messageId === messageId) {
+            this.session.addMessage(messageData);
+        } else {
+            this.session.addMessage({
+                ...lastMessage,
+                ...messageData,
+                finish_reason: finishReason || (lastMessage.finishReason as FinishReason),
+            });
+        }
+
+        this.streamCallback?.({
+            type: AgentMessageType.TOOL_CALL_CREATED,
+            payload: {
+                tool_calls: streamToolCalls.map((item) => ({
+                    callId: item.id,
+                    toolName: item.function.name,
+                    args: item.function.arguments,
+                })),
+            },
+            msgId: messageId,
+            sessionId: this.session.getSessionId(),
+            timestamp: this.timeProvider.getCurrentTime(),
+        });
+    }
+
+    /**
+     * 更新流式工具调用数据 - 类型安全：使用精确类型
+     */
+    private updateStreamToolCall(toolCall: ToolCall): void {
+        const index = toolCall.index ?? 0;
+
+        if (!this.streamToolCalls.has(index)) {
+            this.streamToolCalls.set(index, {
+                id: toolCall.id || '',
+                type: toolCall.type || 'function',
+                index,
+                function: {
+                    name: toolCall.function?.name || '',
+                    arguments: toolCall.function?.arguments || '',
+                },
+            });
+        } else {
+            const existing = this.streamToolCalls.get(index)!;
+            if (toolCall.function?.name) {
+                existing.function.name = toolCall.function.name;
+            }
+            if (toolCall.function?.arguments) {
+                existing.function.arguments += toolCall.function.arguments;
+            }
+        }
+    }
+
+    /**
+     * 更新流式元数据
+     */
+    private updateStreamMetadata(chunk: Chunk, finishReason: FinishReason | undefined): void {
+        if (chunk.id) this.streamLastChunk.id = chunk.id;
+        if (chunk.model) this.streamLastChunk.model = chunk.model;
+        if (chunk.created) this.streamLastChunk.created = chunk.created;
+        if (finishReason) this.streamLastChunk.finish_reason = finishReason;
+    }
+
+    /**
+     * 更新会话消息的完成原因
+     */
+    private updateSessionWithFinishReason(finishReason: FinishReason | undefined, messageId: string): void {
+        if (!finishReason) return;
+
+        const lastMessage = this.session.getLastMessage();
+        if (lastMessage && lastMessage.messageId === messageId) {
+            this.session.addMessage({
+                ...lastMessage,
+                messageId,
+                finish_reason: finishReason,
+            });
+        }
+    }
+
+    /**
+     * 从流式累积的数据构建 LLMResponse
+     */
+    private buildStreamResponse(): LLMResponse {
+        const toolCalls = Array.from(this.streamToolCalls.values());
+
+        return {
+            id: this.streamLastChunk.id || '',
+            object: 'chat.completion',
+            created: this.streamLastChunk.created || this.timeProvider.getCurrentTime(),
+            model: this.streamLastChunk.model || '',
+            choices: [
+                {
+                    index: 0,
+                    message: {
+                        role: 'assistant',
+                        content: this.streamBuffer,
+                        tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
+                    },
+                    finish_reason: this.streamLastChunk.finish_reason || undefined,
+                },
+            ],
+        };
+    }
+
+    // ==================== 私有方法 - 响应处理 ====================
+
+    /**
+     * 处理 LLM 响应 - 类型安全：使用精确类型
+     */
+    async handleResponse(response: LLMResponse, messageId: string): Promise<void> {
+        const choice = response.choices?.[0];
+
+        if (!choice) {
+            throw new AgentError('LLM response missing choices');
+        }
+
+        const toolCalls = choice.message?.tool_calls;
+
+        if (toolCalls && toolCalls.length > 0) {
+            await this.handleToolCalls(toolCalls, choice, messageId);
+        } else {
+            this.handleTextResponse(choice, messageId);
+        }
+    }
+
+    /**
+     * 处理工具调用 - 类型安全：使用精确类型
+     */
+    private async handleToolCalls(toolCalls: ToolCall[], choice: LLMChoice, messageId: string): Promise<void> {
+        if (!this.stream) {
+            this.session.addMessage({
+                role: 'assistant',
+                content: choice.message?.content || '',
+                tool_calls: toolCalls,
+                messageId,
+                finish_reason: choice.finish_reason,
+                type: 'tool-call',
+            });
+        }
+
+        try {
+            const results = await this.toolRegistry.execute(toolCalls);
+            this.recordToolResults(results, messageId);
+        } catch (error) {
+            // 安全性：不直接暴露原始错误信息
+            const safeError = this.sanitizeError(error);
+            this.session.addMessage({
+                role: 'assistant',
+                messageId,
+                content: safeError.userMessage,
+                type: 'text',
+            });
+            throw new ToolError(safeError.userMessage);
+        }
+    }
+
+    /**
+     * 记录工具执行结果 - 类型安全：使用精确类型
+     */
+    private recordToolResults(results: ToolExecutionResult[], messageId: string): void {
+        results.forEach(result => {
+            // 安全性：过滤敏感信息
+            const sanitizedResult = this.sanitizeToolResult(result);
+
+            this.streamCallback?.({
+                type: AgentMessageType.TOOL_CALL_RESULT,
+                payload: {
+                    callId: result.tool_call_id,
+                    result: JSON.stringify(sanitizedResult) || '',
+                    status: result.result?.success ? 'success' : 'error',
+                },
+                msgId: messageId,
+                sessionId: this.session.getSessionId(),
+                timestamp: this.timeProvider.getCurrentTime(),
+            });
+
+            this.session.addMessage({
+                role: 'tool',
+                tool_call_id: result.tool_call_id,
+                content: JSON.stringify(sanitizedResult) || '',
+                messageId: uuid(),
+                type: 'tool-result',
+            });
+        });
+    }
+
+    /**
+     * 安全性：过滤工具执行结果中的敏感信息
+     */
+    private sanitizeToolResult(result: ToolExecutionResult): unknown {
+        if (!result.result) {
+            return result;
+        }
+
+        const sanitized = { ...result.result };
+        const sensitiveKeys = ['password', 'token', 'secret', 'apiKey', 'api_key', 'authorization'];
+
+        for (const key of sensitiveKeys) {
+            if (key in sanitized) {
+                sanitized[key] = '[REDACTED]';
+            }
+        }
+
+        return sanitized;
+    }
+
+    /**
+     * 处理文本响应 - 类型安全：使用精确类型
+     */
+    private handleTextResponse(choice: LLMChoice, messageId: string): void {
+        if (!this.stream) {
+            this.session.addMessage({
+                role: (choice.message?.role || 'assistant') as Role,
+                content: choice.message?.content || '',
+                messageId,
+                finish_reason: choice.finish_reason,
+                type: 'text',
+            });
+        }
+    }
+
+    // ==================== 私有方法 - 完成检查 ====================
+
+    /**
+     * 检查 Agent 是否已完成
+     */
+    private checkComplete(): boolean {
+        const lastMessage = this.session.getLastMessage();
+
+        if (!lastMessage) {
+            return false;
+        }
+
+        const hasFinishReason = lastMessage.type === 'text' && lastMessage.finish_reason;
+        const isEmptyText = lastMessage.type === 'text' && !lastMessage.content;
+
+        return !!(hasFinishReason || isEmptyText);
+    }
+
+    // ==================== 私有方法 - 事件发射 ====================
+
+    /**
+     * 发射状态消息 - 类型安全：使用精确类型
+     */
+    private emitStatus(state: AgentStatus, message: string, msgId?: string): void {
+        this.streamCallback?.({
+            type: AgentMessageType.STATUS,
+            payload: { state, message },
+            ...(msgId && { msgId }),
+            sessionId: this.session.getSessionId(),
+            timestamp: this.timeProvider.getCurrentTime(),
+        });
+    }
+
+    // ==================== 可测试性：公共方法 ====================
+
+    /**
+     * 获取当前循环次数 - 用于测试
+     */
+    getLoopCount(): number {
+        return this.loopCount;
+    }
+
+    /**
+     * 获取当前重试次数 - 用于测试
+     */
+    getRetryCount(): number {
+        return this.retryCount;
+    }
+
+    /**
+     * 获取任务开始时间 - 用于测试
+     */
+    getTaskStartTime(): number {
+        return this.taskStartTime;
     }
 }
