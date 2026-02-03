@@ -148,7 +148,7 @@ export class ToolRegistry {
                 arguments:paramsStr,
                 result:{
                     success: false,
-                   error,
+                    error,
                 }
             };
         }

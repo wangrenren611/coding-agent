@@ -163,9 +163,9 @@ export class AgentEventAdapter {
       const toolInvocation: ToolInvocation = {
         id: toolCall.callId,
         name: toolCall.toolName,
-        args: typeof toolCall.args === 'string' ? JSON.parse(toolCall.args) : toolCall.args,
+        args: toolCall.args,
         status: 'running',
-        startedAt: message.timestamp,
+        startedAt: message?.timestamp,
       };
 
       this.streamingState.toolCalls.set(toolCall.callId, toolInvocation);

@@ -20,9 +20,9 @@ export type AppContextType = {
 // ============================================================================
 // Default Context
 // ============================================================================
-
+const DefaultModel: ModelId = 'kimi-k2.5';
 const AppContext = createContext<AppContextType>({
-  model: 'minimax-2.1',
+  model: DefaultModel,
   setModel: () => {},
   currentPath: process.cwd(),
 });
@@ -32,7 +32,7 @@ const AppContext = createContext<AppContextType>({
 // ============================================================================
 
 export const AppContextProvider = ({ children }: { children: React.ReactNode }) => {
-  const [model, setModel] = useState<ModelId>('minimax-2.1');
+  const [model, setModel] = useState<ModelId>(DefaultModel);
 
   return (
     <AppContext.Provider

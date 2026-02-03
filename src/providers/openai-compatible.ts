@@ -23,29 +23,17 @@ import { BaseAPIAdapter } from './adapters/base';
 import { StandardAdapter } from './adapters/standard';
 import { HTTPClient } from './http/client';
 import { StreamParser } from './http/stream-parser';
-import { LLMError, Role } from './types';
+import { LLMError } from './types';
 import {
     LLMProvider,
     OpenAICompatibleConfig,
     Chunk,
-    FinishReason,
     LLMGenerateOptions,
     LLMRequestMessage,
     LLMResponse,
-    ToolCall,
-    Usage,
 } from './types';
 
-/**
- * 流式响应元数据（内部使用）
- */
-interface StreamMetadata {
-    id: string;
-    object: string;
-    created: number;
-    model: string;
-    usage: Usage;
-}
+
 
 /**
  * OpenAI 兼容 Provider 基类
@@ -107,6 +95,7 @@ export class OpenAICompatibleProvider extends LLMProvider {
             max_tokens: options?.max_tokens,
             temperature: this.config.temperature,
             messages,
+            thinking: options?.thinking||this.config.thinking,
             ...(options ?? {}),
         });
 
@@ -198,139 +187,7 @@ export class OpenAICompatibleProvider extends LLMProvider {
     
 }
 
-/**
- * 流式响应累积器
- *
- * 用于聚合 SSE 流中的增量数据，包括：
- * - 文本内容的增量拼接
- * - 工具调用的增量拼接（arguments 可能分多次传输）
- * - 元数据（id、model、usage 等）的更新
- */
-class StreamAccumulator {
-    private contentMap = new Map<number, string>();
-    private roleMap = new Map<number, string>();
-    private toolCallsMap = new Map<number, ToolCall>();
 
-    private metadata: StreamMetadata = {
-        id: '',
-        object: '',
-        created: 0,
-        model: '',
-        usage: {
-            prompt_tokens: 0,
-            completion_tokens: 0,
-            total_tokens: 0,
-            prompt_cache_miss_tokens: 0,
-            prompt_cache_hit_tokens: 0,
-        },
-    };
-
-    private finishReason: FinishReason | null = null;
-    private choiceIndex = 0;
-
-    /**
-     * 累积单个流式块的数据
-     */
-    accumulate(chunk: Chunk): void {
-        const choice = chunk.choices?.[0];
-        if (!choice) {
-            return;
-        }
-
-        this.choiceIndex = choice.index ?? 0;
-        const delta = choice.delta;
-
-        // 更新内容
-        if (delta?.content) {
-            const existing = this.contentMap.get(this.choiceIndex) ?? '';
-            this.contentMap.set(this.choiceIndex, existing + delta.content);
-
-            if (delta.role) {
-                this.roleMap.set(this.choiceIndex, delta.role);
-            }
-        }
-
-        // 更新工具调用
-        if (delta?.tool_calls?.length) {
-            for (const toolCall of delta.tool_calls) {
-                const callIndex = toolCall.index ?? 0;
-                const existing = this.toolCallsMap.get(callIndex);
-
-                this.toolCallsMap.set(callIndex, {
-                    id: existing?.id ?? (toolCall.id ?? ''),
-                    index: callIndex,
-                    type: existing?.type ?? (toolCall.type ?? 'function'),
-                    function: {
-                        name: existing?.function.name ?? (toolCall.function.name ?? ''),
-                        arguments: (existing?.function.arguments ?? '') + (toolCall.function.arguments ?? ''),
-                    },
-                });
-            }
-        }
-
-        // 更新元数据
-        if (chunk.id) this.metadata.id = chunk.id;
-        if (chunk.object) this.metadata.object = chunk.object;
-        if (chunk.created) this.metadata.created = chunk.created;
-        if (chunk.model) this.metadata.model = chunk.model;
-        if (chunk.usage) this.metadata.usage = chunk.usage;
-        if (choice.finish_reason) this.finishReason = choice.finish_reason;
-    }
-
-    /**
-     * 验证响应是否有效
-     *
-     * @throws 当响应为空且无有效完成原因时抛出错误
-     */
-    validate(): void {
-        const hasContent = this.contentMap.size > 0;
-        const hasToolCalls = this.toolCallsMap.size > 0;
-        const isEmptyResponse = !hasContent && !hasToolCalls;
-
-        // 允许空响应的完成原因：stop（正常结束）、tool_calls（仅工具调用）、length（达到长度限制）
-        const validEmptyReasons: FinishReason[] = ['stop', 'tool_calls', 'length', 'content_filter'];
-
-        if (isEmptyResponse && this.finishReason && !validEmptyReasons.includes(this.finishReason)) {
-            throw new LLMError(
-                `Empty response with unexpected finish reason: ${this.finishReason}`,
-                'EMPTY_RESPONSE'
-            );
-        }
-    }
-
-    /**
-     * 构建最终的 LLMResponse
-     */
-    toResponse(): LLMResponse | null {
-        const content = this.contentMap.get(this.choiceIndex) ?? '';
-        const role = this.roleMap.get(this.choiceIndex) ?? 'assistant';
-        const toolCalls = Array.from(this.toolCallsMap.values());
-
-        // 如果完全没有内容也没有工具调用，且没有明确的完成原因，返回 null
-        if (!content && toolCalls.length === 0 && !this.finishReason) {
-            return null;
-        }
-
-        return {
-            id: this.metadata.id,
-            object: this.metadata.object,
-            created: this.metadata.created,
-            model: this.metadata.model,
-            choices: [
-                {
-                    index: this.choiceIndex,
-                    message: {
-                        role:role as Role,
-                        content,
-                        tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
-                    },
-                    finish_reason: this.finishReason ?? undefined,
-                },
-            ],
-            usage: this.metadata.usage,
-        };
-    }
-}
 
 // 重新导出配置类型
 export type { OpenAICompatibleConfig } from './types';

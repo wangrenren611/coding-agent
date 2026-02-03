@@ -9,6 +9,7 @@ import { OpenAICompatibleProvider, OpenAICompatibleConfig } from '../openai-comp
 import type { BaseProviderConfig, ModelId, ProviderType } from '../types';
 import { MODEL_DEFINITIONS } from './model-config';
 import type { ModelConfig } from '../types';
+import { KimiAdapter } from '../adapters/kimi';
 
 /**
  * Provider 工厂类
@@ -40,9 +41,10 @@ export class ProviderFactory {
         const baseConfig: Record<string, unknown> = {
             baseURL,
             model: modelConfig.model,
-            temperature: 0.3,
+            temperature: modelConfig.temperature||0.3,
             max_tokens: modelConfig.max_tokens,
             maxOutputTokens: modelConfig.LLMMAX_TOKENS,
+            thinking: modelConfig.thinking || false,
         };
 
         // Config overrides take precedence over env vars
@@ -87,9 +89,17 @@ export class ProviderFactory {
         const modelConfig = MODEL_DEFINITIONS[modelId];
         // 目前所有 provider 都使用标准适配器
         // 如果需要特定适配器，可以在此处添加 switch 逻辑
-        return new StandardAdapter({
-            defaultModel: modelConfig.model,
-            endpointPath: modelConfig.endpointPath || '/chat/completions',
-        });
+        switch (modelId) {
+            case 'kimi-k2.5':
+                return new KimiAdapter({
+                    defaultModel: modelConfig.model,
+                    endpointPath: modelConfig.endpointPath || '/chat/completions',
+                });
+            default:
+                return new StandardAdapter({
+                    defaultModel: modelConfig.model,
+                    endpointPath: modelConfig.endpointPath || '/chat/completions',
+                });
+        }
     }
 }

@@ -52,4 +52,5 @@ export interface ModelConfig {
     apiKey?: string;
     /** 温度（可选） */
     temperature?: number;
+    thinking?: boolean;
 }

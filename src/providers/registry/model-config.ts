@@ -51,6 +51,8 @@ export const MODEL_DEFINITIONS: Record<ModelId, Omit<ModelConfig, 'apiKey'>> = {
         max_tokens: 8000,
         LLMMAX_TOKENS: 200 * 1000,
         features: ['streaming', 'function-calling', 'reasoning'],
+        temperature: 0.6,
+        thinking: false,
     },
     // DeepSeek 系列
     'deepseek-chat': {
