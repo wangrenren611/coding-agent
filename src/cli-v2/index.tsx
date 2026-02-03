@@ -2,11 +2,13 @@ import React from 'react';
 import { render } from 'ink';
 import dotenv from 'dotenv';
 import { App } from './app';
+import { runPlain } from './plain';
 
 const env = process.env.NODE_ENV || 'development';
 dotenv.config({ path: `.env.${env}`, override: true });
 
 const hasTTY = process.stdin.isTTY || process.stdout.isTTY;
+const usePlain = process.argv.includes('--plain') || process.argv.includes('--scrollback');
 
 if (!hasTTY) {
   console.error('\nError: This CLI requires an interactive terminal (TTY).\n');
@@ -42,9 +44,13 @@ process.on('SIGTERM', () => process.exit(0));
 
 process.title = 'Coding Agent CLI';
 
-const { waitUntilExit } = render(<App />, {
-  patchConsole: false,
-  exitOnCtrlC: false,
-});
+if (usePlain) {
+  runPlain();
+} else {
+  const { waitUntilExit } = render(<App />, {
+    patchConsole: false,
+    exitOnCtrlC: false,
+  });
 
-waitUntilExit();
+  waitUntilExit();
+}

@@ -8,3 +8,5 @@ dist
 .memory/*
 .agent-cache/*
 /doc/*
+/web/.next/
+/web/.next/*

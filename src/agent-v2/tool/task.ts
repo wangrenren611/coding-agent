@@ -10,11 +10,12 @@ import { z } from 'zod';
 import { Agent } from '../agent/agent';
 import { ToolRegistry } from './registry';
 import { LLMProvider } from '../../providers';
-import BashTool from './bash';
 import GlobTool from './glob';
 import GrepTool from './grep';
 import { ReadFileTool } from './file';
 import type { ToolRegistryConfig } from './registry';
+import { WebSearchTool } from './web-search';
+import { WebFetchTool } from './web-fetch';
 
 /**
  * 代理类型定义
@@ -69,7 +70,7 @@ interface SubagentResult {
  */
 const AGENT_CONFIGS: Record<SubagentType, AgentConfig> = {
     [SubagentType.Explore]: {
-        tools: [GlobTool, GrepTool, ReadFileTool],
+        tools: [GlobTool, GrepTool, ReadFileTool, WebSearchTool,WebFetchTool],
         systemPrompt: `You are a file search specialist. You excel at thoroughly navigating and exploring codebases.
 
 Your strengths:
