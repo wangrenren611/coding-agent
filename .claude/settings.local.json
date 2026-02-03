@@ -19,7 +19,11 @@
       "Bash(npx tsx:*)",
       "WebSearch",
       "mcp__tavily__tavily_search",
-      "mcp__tavily__tavily_extract"
+      "mcp__tavily__tavily_extract",
+      "mcp__sequential-thinking__sequentialthinking",
+      "Bash(tree:*)",
+      "Bash(pnpm install)",
+      "Bash(ls:*)"
     ]
   },
   "enableAllProjectMcpServers": true,
