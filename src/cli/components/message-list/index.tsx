@@ -9,7 +9,7 @@
  */
 
 import React, { useMemo } from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text, useStdout } from 'ink';
 import type { UIMessage, ToolInvocation, AssistantTextMessage, AssistantToolMessage } from '../../types/message-types';
 import MarkdownText from './MarkdownText';
 
@@ -426,17 +426,35 @@ export const MessageList: React.FC<MessageListProps> = ({
   error,
   maxMessages = 100,
 }) => {
+  const { stdout } = useStdout();
+
+  // 根据终端高度动态计算可见消息数量
+  // 预留空间给：输入框(3行) + 活跃状态(2行) + padding(2行) + 边界(2行)
+  const terminalHeight = stdout.rows || 24;
+  const availableHeight = terminalHeight - 9; // 约计算每条消息平均占用 3-4 行
+  const dynamicMaxMessages = maxMessages > 0 ? maxMessages : Math.max(10, Math.floor(availableHeight / 3));
+
   const items = useMemo(() => {
-    if (maxMessages > 0 && messages.length > maxMessages) {
-      return messages.slice(-maxMessages);
+    if (messages.length > dynamicMaxMessages) {
+      return messages.slice(-dynamicMaxMessages);
     }
     return messages;
-  }, [messages, maxMessages]);
+  }, [messages, dynamicMaxMessages]);
 
   const isWaitingForAssistant = items.length > 0 && items[items.length - 1].type === 'user';
 
+  // 计算被截断的消息数量
+  const truncatedCount = Math.max(0, messages.length - items.length);
+
   return (
     <Box flexDirection="column" width="100%" paddingX={1}>
+      {/* 显示截断提示 */}
+      {truncatedCount > 0 && (
+        <Box flexDirection="row" marginBottom={1}>
+          <Text dimColor>... ({truncatedCount} earlier messages hidden)</Text>
+        </Box>
+      )}
+
       {/* 消息列表 */}
       {items.map((message) => (
         <Box key={message.id}>

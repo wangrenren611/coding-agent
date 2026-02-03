@@ -12,7 +12,14 @@
       "Bash(npm run build:*)",
       "Bash(echo:*)",
       "Bash(npx vitest run:*)",
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "Bash(pnpm build:cli:*)",
+      "Bash(pnpm run:*)",
+      "Bash(pnpm build:*)",
+      "Bash(npx tsx:*)",
+      "WebSearch",
+      "mcp__tavily__tavily_search",
+      "mcp__tavily__tavily_extract"
     ]
   },
   "enableAllProjectMcpServers": true,

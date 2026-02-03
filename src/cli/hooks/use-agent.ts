@@ -14,13 +14,15 @@
 
 import { useEffect, useRef, useCallback } from 'react';
 import { Agent } from '../../agent-v2/agent/agent';
-import { ToolRegistry } from '../../agent-v2/tool/registry';
 import { ProviderRegistry, type ModelId } from '../../providers';
 import type { AgentMessage } from '../../agent-v2/agent/stream-types';
 import { useMessageStore } from './use-message-store';
 import { AgentEventAdapter } from '../utils/event-adapter';
-import type { UIMessage } from '../types/message-types';
+import type { UIMessage, UIEvent } from '../types/message-types';
 import { operatorPrompt } from '../../agent-v2/prompts/operator';
+
+// UI 事件回调类型
+type UIEventCallback = (event: UIEvent) => void;
 
 // =============================================================================
 // Hook 配置选项
@@ -57,6 +59,7 @@ export function useAgent({ model }: UseAgentOptions): UseAgentReturn {
   const modelRef = useRef<string>(model);
   const adapterRef = useRef<AgentEventAdapter | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const applyEventRef = useRef<UIEventCallback | null>(null);
 
   // ---------------------------------------------------------------------------
   // 消息状态管理
@@ -70,6 +73,9 @@ export function useAgent({ model }: UseAgentOptions): UseAgentReturn {
     clearMessages: clearMessageStore,
     setLoading,
   } = useMessageStore();
+
+  // 始终保持 applyEventRef 为最新值
+  applyEventRef.current = applyEvent;
 
   // ---------------------------------------------------------------------------
   // Agent 初始化
@@ -97,15 +103,15 @@ export function useAgent({ model }: UseAgentOptions): UseAgentReturn {
     agentRef.current = agent;
     modelRef.current = model;
 
-    // 创建事件适配器
+    // 创建事件适配器 - 使用 ref 获取最新的 applyEvent
     const adapter = new AgentEventAdapter((event) => {
-      // 将 UI 事件应用到消息存储
-      applyEvent(event);
+      // 使用 ref 获取最新的 applyEvent
+      applyEventRef.current?.(event);
     });
 
     adapterRef.current = adapter;
 
-  }, [model, applyEvent]);
+  }, [model]);  // 移除 applyEvent 依赖
 
   // ---------------------------------------------------------------------------
   // 生命周期管理

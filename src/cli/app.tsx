@@ -49,16 +49,18 @@ const App: React.FC = () => {
 
   // 默认视图：消息列表 + 输入框
   return (
-    <Box flexDirection="column" width="100%">
+    <Box flexDirection="column" width="100%" height={stdout.rows}>
       {/* 欢迎消息 - 只在第一次显示 */}
       {messages.length === 0 && <Welcome />}
 
-      {/* 消息列表 */}
-      <MessageList
-        messages={messages}
-        isLoading={isLoading}
-        maxMessages={0}  // 0 表示不限制消息数量
-      />
+      {/* 消息列表 - 占据剩余空间，自动滚动到底部 */}
+      <Box flexDirection="column" flexGrow={1} overflow="hidden">
+        <MessageList
+          messages={messages}
+          isLoading={isLoading}
+          maxMessages={0}  // 0 表示不限制消息数量
+        />
+      </Box>
 
       {/* 输入框 - 固定在底部 */}
       <Box marginTop={1}>

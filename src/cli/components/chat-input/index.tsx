@@ -4,11 +4,15 @@
  * 支持命令选择和消息输入
  * 使用键盘管理器统一处理键盘事件
  * 支持上下键切换输入历史
+ *
+ * 注意：在 typing 模式下使用局部的 useInput 处理上下键历史导航
+ * 因为全局的 KeyboardManager 在该模式下被禁用，避免与 Input 组件冲突
  */
 
 import Input from 'ink-text-input';
-import React, { useState, useCallback, useEffect } from 'react';
-import { Box, Text, useInput } from 'ink';
+import React, { useState, useEffect } from 'react';
+import { Box, Text } from 'ink';
+import { useInput } from 'ink';
 import {
   useKeyboard,
   type AppMode,
@@ -152,29 +156,23 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   // 键盘事件处理 - 上下键切换历史
   // =============================================================================
 
-  useInput((input, key) => {
-    // 只在 typing 模式下处理历史导航
-    if (mode !== 'typing') return;
-
-    // 上箭头键 - 上一条历史
-    if (key.upArrow) {
-      if (hasPrevious) {
-        navigatePrevious();
-        // 强制刷新 Input 组件以显示新值
-        setInputKey(prev => prev + 1);
-      }
+  // 使用局部的 useInput 处理上下键历史导航
+  // 注意：只在 typing 模式下激活，避免与其他键盘处理器冲突
+  useInput((_, key) => {
+    // 只处理上下箭头键，其他键由 Input 组件处理
+    if (key.upArrow && hasPrevious) {
+      navigatePrevious();
+      setInputKey(prev => prev + 1);
       return;
     }
 
-    // 下箭头键 - 下一条历史
-    if (key.downArrow) {
-      if (hasNext) {
-        navigateNext();
-        // 强制刷新 Input 组件以显示新值
-        setInputKey(prev => prev + 1);
-      }
+    if (key.downArrow && hasNext) {
+      navigateNext();
+      setInputKey(prev => prev + 1);
       return;
     }
+  }, {
+    isActive: mode === 'typing'  // 只在 typing 模式下激活
   });
 
   // 计算历史导航提示
@@ -212,7 +210,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         <Box height={10} flexDirection="column">
           <Box paddingX={1} borderBottom={true} borderColor="gray">
             <Text bold color="cyan">Commands</Text>
-            <Text dimColor> (↑↓ navigate Page翻页 Enter select Esc cancel, Ctrl+C exit)</Text>
+            <Text dimColor> (↑↓ navigate, Page翻页, Enter select, Esc cancel, Ctrl+C exit)</Text>
           </Box>
           <Box marginTop={0}>
             <CommandSelector

@@ -162,11 +162,16 @@ const KeyboardContext = createContext<KeyboardContextValue | null>(null);
 export const KeyboardManager: React.FC<{
   /** 子组件 */
   children: ReactNode;
-  /** 退出回调（可选）*/
-  onExit?: () => void;
-}> = ({ children, onExit }) => {
-  const [mode, setMode] = useState<AppMode>('idle');
+}> = ({ children }) => {
+  const [mode, setMode] = useState<AppMode>('typing');
   const handlersRef = useRef<Map<string, RegisteredHandler>>(new Map());
+  // 使用 ref 保持 mode 的最新值，避免闭包陷阱
+  const modeRef = useRef<AppMode>('typing');
+
+  // 同步 mode 到 ref
+  React.useEffect(() => {
+    modeRef.current = mode;
+  }, [mode]);
 
   /**
    * 注册处理器
@@ -198,26 +203,38 @@ export const KeyboardManager: React.FC<{
   /**
    * 全局键盘处理
    * 单一入口，按优先级分发
+   *
+   * 注意：在 typing 模式下通过 isActive: false 完全禁用 useInput
+   * 这让 ink-text-input 的 Input 组件完全控制输入，避免 stdin setRawMode 冲突
    */
   useInput((input, key) => {
-    // 构建键盘事件对象
-    const event: KeyboardEvent = { input, key };
+    try {
+      const currentMode = modeRef.current;
 
-    // 获取所有在当前模式下激活的处理器
-    const activeHandlers = Array.from(handlersRef.current.values())
-      .filter(handler => handler.activeModes.includes(mode))
-      .sort((a, b) => a.priority - b.priority);  // 按优先级排序
+      // 非 typing 模式：正常处理所有键盘事件
+      const event: KeyboardEvent = { input, key };
 
-    // 按优先级依次调用处理器
-    for (const handlerConfig of activeHandlers) {
-      const handled = handlerConfig.handler(event);
-      if (handled === true) {
-        // 处理器返回 true 表示已处理，停止传播
-        return;
+      // 获取所有在当前模式下激活的处理器
+      const activeHandlers = Array.from(handlersRef.current.values())
+        .filter(handler => handler.activeModes.includes(currentMode))
+        .sort((a, b) => a.priority - b.priority);  // 按优先级排序
+
+      // 按优先级依次调用处理器
+      for (const handlerConfig of activeHandlers) {
+        const handled = handlerConfig.handler(event);
+        if (handled === true) {
+          // 处理器返回 true 表示已处理，停止传播
+          return;
+        }
       }
+    } catch (error) {
+      // 错误处理：记录但不中断程序
+      console.error('KeyboardManager error:', error);
+      // 确保函数正常返回，避免 stdin 状态不一致
+      return;
     }
   }, {
-    isActive: true  // 始终激活，由处理器内部判断
+    isActive: mode !== 'typing'  // 在 typing 模式下完全禁用，避免与 Input 组件冲突
   });
 
   const contextValue: KeyboardContextValue = {
@@ -303,9 +320,9 @@ export const useGlobalShortcuts = (onExit: () => void) => {
     priority: HandlerPriority.GLOBAL,
     activeModes: ['idle', 'typing', 'commandSelect', 'confirmExit'],
     handler: ({ input, key }) => {
-      // Ctrl+C 或 Q - 始终退出
-      if ((input === 'c' && key.ctrl) || input === 'q') {
-        onExit();
+      // Ctrl+C - 退出（移除 q 键避免输入时误触发）
+      if (input === 'c' && key.ctrl) {
+        // onExit();
         return true;
       }
       return false;
