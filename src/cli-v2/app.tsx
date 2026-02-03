@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Box, useInput, useStdout } from 'ink';
+import { Box, useInput, useStdout,Text } from 'ink';
 import type { ModelId } from '../providers';
 import { useAgentRunner } from './agent/use-agent-runner';
 import { MessageList } from './ui/message-list';
@@ -36,13 +36,7 @@ export const App: React.FC = () => {
         : 0;
   const viewportHeight = Math.max(6, (stdout.rows || 24) - baseReserved - overlayReserved);
 
-  useEffect(() => {
-    if (!stdout.isTTY) return;
-    stdout.write('\u001b[?1000h\u001b[?1006h');
-    return () => {
-      stdout.write('\u001b[?1000l\u001b[?1006l');
-    };
-  }, [stdout]);
+
 
   const runCommand = useCallback((command: Command) => {
     setInputValue('');
@@ -116,13 +110,10 @@ export const App: React.FC = () => {
   });
 
   return (
-    <Box flexDirection="column" width="100%" height={stdout.rows || undefined}>
-      <Box flexDirection="column" flexGrow={1} overflow="hidden" height={viewportHeight}>
+    <Box flexDirection="column" width="100%" minHeight={viewportHeight}>
+      <Box flexDirection="column" flexGrow={1} >
         <MessageList
           messages={messages}
-          height={viewportHeight}
-          scrollEnabled={!overlayActive}
-          scrollCommand={scrollCommand}
         />
       </Box>
 

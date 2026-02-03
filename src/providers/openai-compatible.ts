@@ -45,6 +45,8 @@ import {
  */
 export class OpenAICompatibleProvider extends LLMProvider {
 
+
+
   
     readonly httpClient: HTTPClient;
     readonly adapter: BaseAPIAdapter;
@@ -185,6 +187,9 @@ export class OpenAICompatibleProvider extends LLMProvider {
         return this.config.LLMMAX_TOKENS;
     }
     
+    getMaxOutputTokens(): number {
+      return this.config.max_tokens;
+    }
 }
 
 

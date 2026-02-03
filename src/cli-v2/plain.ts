@@ -6,6 +6,7 @@ import { operatorPrompt } from '../agent-v2/prompts/operator';
 import { ProviderRegistry, type ModelId } from '../providers';
 import { StreamAdapter } from './agent/stream-adapter';
 import type { UIEvent } from './state/types';
+import { COLORS, ICONS } from './ui/theme';
 
 const DEFAULT_MODEL: ModelId = 'minimax-2.1';
 
@@ -35,6 +36,19 @@ const formatToolResult = (result: unknown): string => {
   if (result === undefined || result === null) return '';
   if (typeof result === 'string') return result.trim();
   return safeStringify(result);
+};
+
+/**
+ * Color codes for terminal output
+ */
+const colors = {
+  reset: '\x1b[0m',
+  cyan: '\x1b[36m',
+  green: '\x1b[32m',
+  yellow: '\x1b[33m',
+  red: '\x1b[31m',
+  magenta: '\x1b[35m',
+  dim: '\x1b[2m',
 };
 
 export const runPlain = (): void => {
@@ -75,44 +89,71 @@ export const runPlain = (): void => {
 
   function handleEvent(event: UIEvent): void {
     switch (event.type) {
-      case 'assistant-start':
+      case 'text-start':
         ensureNewline();
-        process.stdout.write('Assistant: ');
+        process.stdout.write(`${colors.cyan}${ICONS.assistant} Assistant:${colors.reset} `);
         assistantOpen = true;
         break;
-      case 'assistant-delta':
+      case 'text-delta':
         process.stdout.write(event.contentDelta);
         break;
-      case 'assistant-complete':
+      case 'text-complete':
         ensureNewline();
         break;
       case 'tool-start': {
         ensureNewline();
         const args = formatToolArgs(event.args);
         const suffix = args ? `(${args})` : '';
-        process.stdout.write(`[tool] ${event.toolName}${suffix}\n`);
+        process.stdout.write(`${colors.yellow}${ICONS.tool} Tool: ${event.toolName}${suffix}${colors.reset}\n`);
         break;
       }
+      case 'tool-stream':
+        // Show real-time tool output (can be noisy, so maybe dim it)
+        process.stdout.write(`${colors.dim}${event.output}${colors.reset}`);
+        break;
       case 'tool-complete': {
         ensureNewline();
         const result = formatToolResult(event.result);
-        process.stdout.write(result ? `[tool result] ${result}\n` : '[tool result]\n');
+        if (result) {
+          process.stdout.write(`${colors.dim}${ICONS.result} Result: ${result}${colors.reset}\n`);
+        } else {
+          process.stdout.write(`${colors.green}${ICONS.success} Done${colors.reset}\n`);
+        }
         break;
       }
       case 'tool-error':
         ensureNewline();
-        process.stdout.write(`[tool error] ${event.error}\n`);
+        process.stdout.write(`${colors.red}${ICONS.error} Error: ${event.error}${colors.reset}\n`);
         break;
+      case 'code-patch': {
+        ensureNewline();
+        process.stdout.write(`${colors.magenta}${ICONS.diff} Patch: ${event.path}${colors.reset}\n`);
+        // Parse and display diff with colors
+        const lines = event.diff.split('\n');
+        for (const line of lines) {
+          if (line.startsWith('@@')) {
+            process.stdout.write(`${colors.dim}${line}${colors.reset}\n`);
+          } else if (line.startsWith('+')) {
+            process.stdout.write(`${colors.green}${line}${colors.reset}\n`);
+          } else if (line.startsWith('-')) {
+            process.stdout.write(`${colors.red}${line}${colors.reset}\n`);
+          } else if (line.startsWith(' ')) {
+            process.stdout.write(`${colors.dim}${line}${colors.reset}\n`);
+          }
+        }
+        break;
+      }
       case 'status': {
         if (!event.state) break;
         ensureNewline();
         const extra = event.message ? ` - ${event.message}` : '';
-        process.stdout.write(`[status] ${event.state}${extra}\n`);
+        process.stdout.write(`${colors.cyan}[status] ${event.state}${extra}${colors.reset}\n`);
         break;
       }
       case 'error':
         ensureNewline();
-        process.stdout.write(`[error] ${event.message}${event.phase ? ` (${event.phase})` : ''}\n`);
+        const phase = event.phase ? ` (${event.phase})` : '';
+        process.stdout.write(`${colors.red}[error] ${event.message}${phase}${colors.reset}\n`);
         resumeInput();
         break;
       case 'session-complete':
@@ -150,7 +191,7 @@ export const runPlain = (): void => {
       agent.abort();
     }
 
-    process.stdout.write(`You: ${message}\n`);
+    process.stdout.write(`${colors.green}${ICONS.user} You:${colors.reset} ${message}\n`);
     isBusy = true;
     rl.pause();
 
@@ -158,7 +199,7 @@ export const runPlain = (): void => {
       .catch((error) => {
         ensureNewline();
         const messageText = error instanceof Error ? error.message : String(error);
-        process.stdout.write(`[error] ${messageText}\n`);
+        process.stdout.write(`${colors.red}[error] ${messageText}${colors.reset}\n`);
       })
       .finally(() => {
         resumeInput();

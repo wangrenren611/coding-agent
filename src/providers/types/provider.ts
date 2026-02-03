@@ -30,4 +30,5 @@ export abstract class LLMProvider {
 
     abstract getTimeTimeout(): number;
     abstract getLLMMaxTokens(): number;
+    abstract getMaxOutputTokens(): number;
 }

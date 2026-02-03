@@ -1,5 +1,5 @@
 import { useCallback, useReducer } from 'react';
-import type { Message, MessageStatus, ToolInvocation, UIEvent } from './types';
+import type { Message, ToolInvocation, UIEvent, CodePatch } from './types';
 
 const MAX_MESSAGES = 200;
 
@@ -38,7 +38,12 @@ const trimMessages = (messages: Message[]): Message[] => {
   return messages.slice(messages.length - MAX_MESSAGES);
 };
 
-const ensureAssistantMessage = (messages: Message[], messageId: string, timestamp: number): Message[] => {
+const ensureAssistantMessage = (
+  messages: Message[],
+  messageId: string,
+  timestamp: number
+): Message[] => {
+  if (!messageId) return messages;
   const existing = messages.find(m => m.type === 'assistant' && m.id === messageId);
   if (existing) return messages;
   return [
@@ -48,6 +53,8 @@ const ensureAssistantMessage = (messages: Message[], messageId: string, timestam
       id: messageId,
       content: '',
       status: 'streaming',
+      toolCalls: [],
+      codePatches: [],
       timestamp,
     },
   ];
@@ -74,6 +81,30 @@ const updateToolCall = (
   return {
     ...message,
     toolCalls: nextToolCalls,
+  };
+};
+
+const addOrUpdateCodePatch = (
+  message: Extract<Message, { type: 'assistant' }>,
+  patch: CodePatch
+): Extract<Message, { type: 'assistant' }> => {
+  const codePatches = message.codePatches ?? [];
+  const existingIndex = codePatches.findIndex(p => p.path === patch.path);
+
+  if (existingIndex >= 0) {
+    // Update existing patch
+    const nextPatches = [...codePatches];
+    nextPatches[existingIndex] = patch;
+    return {
+      ...message,
+      codePatches: nextPatches,
+    };
+  }
+
+  // Add new patch
+  return {
+    ...message,
+    codePatches: [...codePatches, patch],
   };
 };
 
@@ -116,31 +147,44 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
     case 'APPLY_EVENT': {
       const event = action.payload;
       switch (event.type) {
-        case 'assistant-start': {
+        case 'text-start': {
           const nextMessages = ensureAssistantMessage(state.messages, event.messageId, event.timestamp);
           return { ...state, messages: trimMessages(nextMessages) };
         }
-        case 'assistant-delta': {
-          const nextMessages = updateAssistant(state.messages, event.messageId, message => ({
+        case 'text-delta': {
+          const withAssistant = ensureAssistantMessage(
+            state.messages,
+            event.messageId,
+            Date.now()
+          );
+          const nextMessages = updateAssistant(withAssistant, event.messageId, message => ({
             ...message,
             content: message.content + event.contentDelta,
             status: event.isDone ? 'complete' : 'streaming',
           }));
-          return { ...state, messages: nextMessages };
+          return { ...state, messages: trimMessages(nextMessages) };
         }
-        case 'assistant-complete': {
-          const nextMessages = updateAssistant(state.messages, event.messageId, message => ({
+        case 'text-complete': {
+          const withAssistant = ensureAssistantMessage(
+            state.messages,
+            event.messageId,
+            Date.now()
+          );
+          const nextMessages = updateAssistant(withAssistant, event.messageId, message => ({
             ...message,
-            content: event.content ?? message.content,
+            // 如果 complete 没有正文（例如只返回工具调用），保留已累积的 content
+            content: event.content && event.content.length > 0 ? event.content : message.content,
             status: 'complete',
           }));
-          return { ...state, messages: nextMessages };
+          return { ...state, messages: trimMessages(nextMessages) };
         }
         case 'tool-start': {
           const withAssistant = ensureAssistantMessage(state.messages, event.messageId, event.timestamp);
           const nextMessages = updateAssistant(withAssistant, event.messageId, message => ({
             ...message,
             status: message.status,
+            // 无条件用 tool-start 携带的正文覆盖/补齐，确保同条消息展示文本
+            content: event.content ?? message.content,
             toolCalls: [
               ...(message.toolCalls ?? []),
               {
@@ -154,8 +198,27 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
           }));
           return { ...state, messages: trimMessages(nextMessages) };
         }
+        case 'tool-stream': {
+          const withAssistant = ensureAssistantMessage(
+            state.messages,
+            event.messageId,
+            Date.now()
+          );
+          const nextMessages = updateAssistant(withAssistant, event.messageId, message =>
+            updateToolCall(message, event.toolCallId, toolCall => ({
+              ...toolCall,
+              streamOutput: (toolCall.streamOutput || '') + event.output,
+            }))
+          );
+          return { ...state, messages: nextMessages };
+        }
         case 'tool-complete': {
-          const nextMessages = updateAssistant(state.messages, event.messageId, message =>
+          const withAssistant = ensureAssistantMessage(
+            state.messages,
+            event.messageId,
+            Date.now()
+          );
+          const nextMessages = updateAssistant(withAssistant, event.messageId, message =>
             updateToolCall(message, event.toolCallId, toolCall => ({
               ...toolCall,
               status: 'success',
@@ -167,7 +230,12 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
           return { ...state, messages: nextMessages };
         }
         case 'tool-error': {
-          const nextMessages = updateAssistant(state.messages, event.messageId, message =>
+          const withAssistant = ensureAssistantMessage(
+            state.messages,
+            event.messageId,
+            Date.now()
+          );
+          const nextMessages = updateAssistant(withAssistant, event.messageId, message =>
             updateToolCall(message, event.toolCallId, toolCall => ({
               ...toolCall,
               status: 'error',
@@ -177,6 +245,18 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
             }))
           );
           return { ...state, messages: nextMessages };
+        }
+        case 'code-patch': {
+          const withAssistant = ensureAssistantMessage(state.messages, event.messageId, event.timestamp);
+          const nextMessages = updateAssistant(withAssistant, event.messageId, message =>
+            addOrUpdateCodePatch(message, {
+              path: event.path,
+              diff: event.diff,
+              language: event.language,
+              timestamp: event.timestamp,
+            })
+          );
+          return { ...state, messages: trimMessages(nextMessages) };
         }
         case 'error': {
           const nextMessages = trimMessages([

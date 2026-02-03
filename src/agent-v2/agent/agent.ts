@@ -183,7 +183,9 @@ export class Agent {
             this.completeTask();
             return this.session.getLastMessage();
         } catch (error) {
-            this.failTask(error);
+            if (this.status !== AgentStatus.ABORTED) {
+                this.failTask(error);
+            }
             throw error;
         }
     }
@@ -350,7 +352,6 @@ export class Agent {
         while (true) {
             if (this.retryCount > this.maxRetries) {
                 this.handleMaxRetriesExceeded();
-                break;
             }
 
             if (this.checkComplete()) {
@@ -397,15 +398,20 @@ export class Agent {
             signal: timeoutSignal,
         };
 
-        const response = this.stream
-            ? await this.executeStreamCall(messages, llmOptions, messageId)
-            : await this.executeNormalCall(messages, llmOptions);
+        try {
+            const response = this.stream
+                ? await this.executeStreamCall(messages, llmOptions, messageId)
+                : await this.executeNormalCall(messages, llmOptions);
 
-        if (!response) {
-            throw new AgentError('LLM returned no response');
+            if (!response) {
+                throw new AgentError('LLM returned no response');
+            }
+
+            await this.handleResponse(response, messageId);
+        } finally {
+            // 防止上一次的 AbortController 污染下一轮调用
+            this.abortController = null;
         }
-
-        await this.handleResponse(response, messageId);
     }
 
     /**
@@ -452,9 +458,11 @@ export class Agent {
     /**
      * 处理最大重试次数超限
      */
-    private handleMaxRetriesExceeded(): void {
+    private handleMaxRetriesExceeded(): never {
         this.status = AgentStatus.FAILED;
-        this.emitStatus(AgentStatus.FAILED, 'Agent failed after maximum retries.');
+        const error = new AgentError(`Agent failed after maximum retries (${this.maxRetries}).`);
+        this.emitStatus(AgentStatus.FAILED, error.message);
+        throw error;
     }
 
     /**
@@ -467,6 +475,23 @@ export class Agent {
 
         this.retryCount++;
         return true;
+    }
+
+    /**
+     * 确保流式内容不会突破缓冲上限；超限时立即中止当前调用
+     */
+    private appendToStreamBuffer(content: string): void {
+        const projectedSize = this.streamBuffer.length + content.length;
+        if (projectedSize > this.maxBufferSize) {
+            const remaining = this.maxBufferSize - this.streamBuffer.length;
+            if (remaining > 0) {
+                this.streamBuffer += content.slice(0, remaining);
+            }
+            this.abortController?.abort();
+            throw new AgentError('Response size exceeded limit');
+        }
+
+        this.streamBuffer += content;
     }
 
     // ==================== 私有方法 - 流式处理 ====================
@@ -497,34 +522,17 @@ export class Agent {
         chunkId: string | undefined,
         finishReason: FinishReason | undefined
     ): void {
-        if (!content) return;
+        if (content === '') return;
 
-        // 安全性：检查缓冲区大小
-        if (this.streamBuffer.length + content.length > this.maxBufferSize) {
-            // 截断内容并发出警告
-            const remainingSpace = this.maxBufferSize - this.streamBuffer.length;
-            if (remainingSpace > 0) {
-                this.streamBuffer += content.slice(0, remainingSpace);
-            }
-            this.emitStatus(AgentStatus.FAILED, 'Response size exceeded limit');
-            return;
-        }
-
-        this.streamBuffer += content;
-        this.streamCallback?.({
-            type: AgentMessageType.TEXT,
-            payload: { content },
-            msgId: messageId,
-            sessionId: this.session.getSessionId(),
-            timestamp: this.timeProvider.getCurrentTime(),
-        });
+        // 先检查并累积缓冲，避免后续状态更新后才抛错
+        this.appendToStreamBuffer(content);
 
         const lastMessage = this.session.getLastMessage();
+
         if (lastMessage.messageId === messageId) {
-            lastMessage.content = this.streamBuffer;
             this.session.addMessage({
                 ...lastMessage,
-                content: this.streamBuffer,
+                content: lastMessage.content + content,
                 id: chunkId,
                 finish_reason: finishReason || (lastMessage.finishReason as FinishReason),
                 type: 'text',
@@ -532,10 +540,37 @@ export class Agent {
         } else {
             this.session.addMessage({
                 role: 'assistant',
-                content: this.streamBuffer,
+                content,
                 messageId,
+                id: chunkId,
                 finish_reason: finishReason,
                 type: 'text',
+            });
+
+            this.streamCallback?.({
+                type: AgentMessageType.TEXT_START,
+                payload: { content: '' },
+                msgId: messageId,
+                sessionId: this.session.getSessionId(),
+                timestamp: this.timeProvider.getCurrentTime(),
+            });
+        }
+
+        this.streamCallback?.({
+            type: AgentMessageType.TEXT_DELTA,
+            payload: { content },
+            msgId: messageId,
+            sessionId: this.session.getSessionId(),
+            timestamp: this.timeProvider.getCurrentTime(),
+        });
+
+        if (finishReason) {
+            this.streamCallback?.({
+                type: AgentMessageType.TEXT_COMPLETE,
+                payload: { content: '' },
+                msgId: messageId,
+                sessionId: this.session.getSessionId(),
+                timestamp: this.timeProvider.getCurrentTime(),
             });
         }
     }
@@ -550,7 +585,15 @@ export class Agent {
         finishReason: FinishReason | undefined
     ): void {
         if (!toolCalls || toolCalls.length === 0) return;
-
+          
+         this.streamCallback?.({
+            type: AgentMessageType.TEXT_COMPLETE,
+            payload: { content: '' },
+            msgId: messageId,
+            sessionId: this.session.getSessionId(),
+            timestamp: this.timeProvider.getCurrentTime(),
+        });
+        
         for (const toolCall of toolCalls) {
             this.updateStreamToolCall(toolCall);
         }
@@ -560,7 +603,6 @@ export class Agent {
 
         const messageData = {
             role: 'assistant' as const,
-            content: '',
             messageId,
             tool_calls: streamToolCalls,
             type: 'tool-call' as const,
@@ -569,12 +611,15 @@ export class Agent {
         };
 
         if (lastMessage.messageId === messageId) {
-            this.session.addMessage(messageData);
+            this.session.addMessage({
+                content: lastMessage.content,
+                ...messageData,
+
+            });
         } else {
             this.session.addMessage({
-                ...lastMessage,
                 ...messageData,
-                finish_reason: finishReason || (lastMessage.finishReason as FinishReason),
+                content: '',
             });
         }
 
@@ -673,25 +718,23 @@ export class Agent {
         }
 
         const toolCalls = choice.message?.tool_calls;
-        
+
 
         if (toolCalls && toolCalls.length > 0) {
-            
-         
 
             if (!this.stream) {
-                this.session.addMessage({
-                    role: 'assistant',
-                    content: choice?.message?.content || '',
-                    tool_calls: toolCalls,
-                    messageId,
-                    finish_reason: choice?.finish_reason || undefined,
-                    type: 'tool-call',
-                    usage: response.usage,
-                });
+            this.session.addMessage({
+                role: 'assistant',
+                content: choice?.message?.content || '',
+                tool_calls: toolCalls,
+                messageId,
+                finish_reason: choice?.finish_reason || undefined,
+                type: 'tool-call',
+                usage: response.usage,
+            });
             }
 
-           this.streamCallback?.({
+            this.streamCallback?.({
                 type: AgentMessageType.TOOL_CALL_CREATED,
                 payload: {
                     tool_calls: toolCalls.map((item) => ({
@@ -699,6 +742,8 @@ export class Agent {
                         toolName: item.function.name,
                         args: item.function.arguments,
                     })),
+                    // 携带本条消息的文本内容（非流式模式下用于 UI 展示）
+                    content: choice?.message?.content || '',
                 },
                 msgId: messageId,
                 sessionId: this.session.getSessionId(),
@@ -733,8 +778,9 @@ export class Agent {
     private recordToolResults(results: ToolExecutionResult[], messageId: string): void {
         results.forEach(result => {
             // 安全性：过滤敏感信息
-            const sanitizedResult = this.sanitizeToolResult(result);
-
+            const sanitizedResult = result;//this.sanitizeToolResult(result);
+              const _uuid = uuid();       
+      
             this.streamCallback?.({
                 type: AgentMessageType.TOOL_CALL_RESULT,
                 payload: {
@@ -742,16 +788,16 @@ export class Agent {
                     result: JSON.stringify(sanitizedResult) || '',
                     status: result.result?.success ? 'success' : 'error',
                 },
-                msgId: messageId,
+                msgId: _uuid,
                 sessionId: this.session.getSessionId(),
                 timestamp: this.timeProvider.getCurrentTime(),
             });
-
+          
             this.session.addMessage({
                 role: 'tool',
                 tool_call_id: result.tool_call_id,
                 content: JSON.stringify(sanitizedResult) || '',
-                messageId: uuid(),
+                messageId: _uuid,
                 type: 'tool-result',
             });
         });

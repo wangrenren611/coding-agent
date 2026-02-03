@@ -1,21 +1,23 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Text, useInput, useStdout } from 'ink';
-import type { Message, ToolInvocation } from '../state/types';
-import { COLORS, ICONS } from './theme';
+import React, { useMemo } from 'react';
+import { Box, Text } from 'ink';
+import type { Message, ToolInvocation, CodePatch } from '../state/types';
+import { COLORS, ICONS, DISPLAY } from './theme';
+import Spinner from 'ink-spinner';
 
 interface Line {
   prefix?: string;
-  content: string;
+  content?: string;
   color?: string;
   dim?: boolean;
   bold?: boolean;
+  spinner?: boolean;  // Special flag for spinner line
 }
 
 const truncate = (value: string, maxLen: number): string => (
   value.length > maxLen ? `${value.slice(0, maxLen)}...` : value
 );
 
-const safeStringify = (value: unknown, maxDepth = 2): string | undefined => {
+const safeStringify = (value: unknown, maxDepth = DISPLAY.maxSafeDepth): string | undefined => {
   const seen = new WeakSet<object>();
 
   const walk = (input: unknown, depth: number): unknown => {
@@ -56,7 +58,7 @@ const formatToolArgs = (args: Record<string, unknown>): string => {
   const entries = Object.entries(args).filter(([, value]) => value !== undefined && value !== null);
   if (entries.length === 0) return '';
   const [key, value] = entries[0];
-  const preview = previewValue(value, 50);
+  const preview = previewValue(value, DISPLAY.maxPreviewLen);
   return `${key}=${preview}${entries.length > 1 ? ',...' : ''}`;
 };
 
@@ -64,15 +66,15 @@ const formatToolResult = (result: unknown): string => {
   if (result === undefined || result === null) return '';
   if (typeof result === 'string') {
     const line = result.trim().split('\n')[0] ?? '';
-    return line.length > 80 ? `${line.slice(0, 80)}...` : line;
+    return line.length > DISPLAY.maxResultLen ? `${line.slice(0, DISPLAY.maxResultLen)}...` : line;
   }
   if (typeof result === 'object') {
     const entries = Object.entries(result as Record<string, unknown>);
     if (entries.length === 0) return '';
     const [key, value] = entries[0];
-    return `${key}: ${previewValue(value, 80)}`;
+    return `${key}: ${previewValue(value, DISPLAY.maxResultLen)}`;
   }
-  return String(result).slice(0, 80);
+  return String(result).slice(0, DISPLAY.maxResultLen);
 };
 
 const splitLines = (content: string): string[] => {
@@ -80,6 +82,18 @@ const splitLines = (content: string): string[] => {
   return content.split('\n');
 };
 
+// Trim redundant blank lines at the tail to avoid large vertical gaps
+const trimTrailingEmptyLines = (lines: string[]): string[] => {
+  let end = lines.length;
+  while (end > 0 && lines[end - 1].trim() === '') {
+    end--;
+  }
+  return lines.slice(0, end === 0 ? 1 : end);
+};
+
+/**
+ * Render tool invocation with optional stream output
+ */
 const renderToolLines = (toolCall: ToolInvocation): Line[] => {
   const args = formatToolArgs(toolCall.args);
   const header = `${toolCall.name}${args ? `(${args})` : ''}`;
@@ -90,9 +104,71 @@ const renderToolLines = (toolCall: ToolInvocation): Line[] => {
   ];
 
   if (summary) {
-    lines.push({ prefix: `${ICONS.result} `, content: summary, dim: true, color: COLORS.muted });
+    lines.push({ prefix: `${ICONS.result} `, content: summary, dim: false, color: COLORS.muted });
   } else if (toolCall.status === 'running') {
     lines.push({ prefix: `${ICONS.result} `, content: 'running...', color: COLORS.warning });
+  }
+
+  // Show stream output if available (for running tools)
+  if (toolCall.streamOutput && toolCall.status === 'running') {
+    const outputLines = splitLines(toolCall.streamOutput);
+    // Show last few lines of stream output
+    const previewLines = outputLines.slice(-DISPLAY.maxStreamLines);
+    previewLines.forEach((line, idx) => {
+      const isLast = idx === previewLines.length - 1;
+      lines.push({
+        prefix: `${ICONS.result} `,
+        content: line || ' ',
+        dim: !isLast,
+        color: COLORS.muted,
+      });
+    });
+  }
+
+  return lines;
+};
+
+/**
+ * Parse and render code patch as colored diff
+ */
+const renderCodePatchLines = (patch: CodePatch): Line[] => {
+  const lines: Line[] = [
+    { prefix: `${ICONS.diff} `, content: `Patch: ${patch.path}`, color: COLORS.diff, bold: true },
+  ];
+
+  // Parse unified diff format
+  const diffLines = splitLines(patch.diff);
+  for (const line of diffLines) {
+    if (line.startsWith('@@')) {
+      // Hunk header
+      lines.push({
+        prefix: '  ',
+        content: line,
+        color: COLORS.info,
+        dim: true,
+      });
+    } else if (line.startsWith('+')) {
+      // Added line
+      lines.push({
+        prefix: '  ',
+        content: line,
+        color: COLORS.diffAdd,
+      });
+    } else if (line.startsWith('-')) {
+      // Removed line
+      lines.push({
+        prefix: '  ',
+        content: line,
+        color: COLORS.diffRemove,
+      });
+    } else if (line.startsWith(' ')) {
+      // Context line
+      lines.push({
+        prefix: '  ',
+        content: line,
+        dim: true,
+      });
+    }
   }
 
   return lines;
@@ -101,7 +177,7 @@ const renderToolLines = (toolCall: ToolInvocation): Line[] => {
 const renderMessageLines = (message: Message): Line[] => {
   switch (message.type) {
     case 'user': {
-      const lines = splitLines(message.content);
+      const lines = trimTrailingEmptyLines(splitLines(message.content));
       return lines.map((line, index) => ({
         prefix: index === 0 ? `${ICONS.user} ` : '  ',
         content: line,
@@ -110,22 +186,39 @@ const renderMessageLines = (message: Message): Line[] => {
       }));
     }
     case 'assistant': {
-      const lines = splitLines(message.content);
+      const lines = trimTrailingEmptyLines(splitLines(message.content));
       const rendered: Line[] = lines.map((line, index) => ({
         prefix: index === 0 ? `${ICONS.assistant} ` : '  ',
         content: line,
-        color: COLORS.assistant,
+        color:  COLORS.assistant,
         bold: index === 0,
       }));
 
       if (message.status === 'streaming') {
-        rendered.push({ prefix: `${ICONS.running} `, content: 'streaming...', color: COLORS.warning });
+        rendered.push({ spinner: true });
       }
 
+      // Render tool calls
       if (message.toolCalls && message.toolCalls.length > 0) {
-        rendered.push({ prefix: '  ', content: 'Tools:', dim: true, color: COLORS.muted });
+        // rendered.push({  dim: true, color: COLORS.muted });
         message.toolCalls.forEach(toolCall => {
           renderToolLines(toolCall).forEach(line => {
+            rendered.push({
+              prefix: `${line.prefix ?? ''}`,
+              content: line.content,
+              color: line.color,
+              dim: line.dim,
+              bold: line.bold,
+            });
+          });
+        });
+      }
+
+      // Render code patches
+      if (message.codePatches && message.codePatches.length > 0) {
+        rendered.push({ prefix: '  ', content: 'Changes:', dim: true, color: COLORS.muted });
+        message.codePatches.forEach(patch => {
+          renderCodePatchLines(patch).forEach(line => {
             rendered.push({
               prefix: `  ${line.prefix ?? ''}`,
               content: line.content,
@@ -166,22 +259,9 @@ const renderMessageLines = (message: Message): Line[] => {
 
 interface MessageListProps {
   messages: Message[];
-  height?: number;
-  scrollEnabled?: boolean;
-  scrollCommand?: { id: number; action: 'up' | 'down' | 'top' | 'bottom' } | null;
 }
 
-export const MessageList: React.FC<MessageListProps> = ({
-  messages,
-  height,
-  scrollEnabled = true,
-  scrollCommand,
-}) => {
-  const { stdout } = useStdout();
-  const fallbackHeight = Math.max(6, (stdout.rows || 24) - 6);
-  const viewHeight = height ?? fallbackHeight;
-  const maxWidth = Math.max(20, (stdout.columns || 80) - 2);
-
+export const MessageList: React.FC<MessageListProps> = ({ messages }) => {
   const lines = useMemo(() => {
     const result: Line[] = [];
     messages.forEach(message => {
@@ -191,234 +271,29 @@ export const MessageList: React.FC<MessageListProps> = ({
     return result;
   }, [messages]);
 
-  const { wrappedLines, hasScrollbar, contentWidth } = useMemo(() => {
-    const baseWrapped = wrapLines(lines, maxWidth);
-    const needsScrollbar = baseWrapped.length > viewHeight;
-    const nextWidth = needsScrollbar ? Math.max(10, maxWidth - 1) : maxWidth;
-    return {
-      wrappedLines: needsScrollbar ? wrapLines(lines, nextWidth) : baseWrapped,
-      hasScrollbar: needsScrollbar,
-      contentWidth: nextWidth,
-    };
-  }, [lines, maxWidth, viewHeight]);
-
-  const [scrollOffset, setScrollOffset] = useState(0);
-  const pinnedRef = useRef(true);
-
-  const maxOffset = Math.max(0, wrappedLines.length - viewHeight);
-
-  useEffect(() => {
-    if (pinnedRef.current) {
-      setScrollOffset(0);
-      return;
-    }
-    setScrollOffset(offset => {
-      const next = Math.min(offset, maxOffset);
-      pinnedRef.current = next === 0;
-      return next;
-    });
-  }, [wrappedLines.length, maxOffset]);
-
-  useEffect(() => {
-    setScrollOffset(offset => {
-      const next = Math.min(offset, maxOffset);
-      pinnedRef.current = next === 0;
-      return next;
-    });
-  }, [viewHeight, maxOffset]);
-
-  useInput((input, key) => {
-    if (!scrollEnabled) return;
-
-    if (key.pageUp || (key.ctrl && input === 'u')) {
-      setScrollOffset(offset => {
-        const next = Math.min(offset + viewHeight, maxOffset);
-        pinnedRef.current = next === 0;
-        return next;
-      });
-    }
-
-    if (key.pageDown || (key.ctrl && input === 'd')) {
-      setScrollOffset(offset => {
-        const next = Math.max(0, offset - viewHeight);
-        pinnedRef.current = next === 0;
-        return next;
-      });
-    }
-
-    if (key.home) {
-      setScrollOffset(maxOffset);
-      pinnedRef.current = false;
-    }
-
-    if (key.end) {
-      setScrollOffset(0);
-      pinnedRef.current = true;
-    }
-  }, { isActive: scrollEnabled });
-
-  useEffect(() => {
-    if (!scrollCommand) return;
-    const action = scrollCommand.action;
-    if (action === 'up') {
-      setScrollOffset(offset => {
-        const next = Math.min(offset + viewHeight, maxOffset);
-        pinnedRef.current = next === 0;
-        return next;
-      });
-      return;
-    }
-
-    if (action === 'down') {
-      setScrollOffset(offset => {
-        const next = Math.max(0, offset - viewHeight);
-        pinnedRef.current = next === 0;
-        return next;
-      });
-      return;
-    }
-
-    if (action === 'top') {
-      setScrollOffset(maxOffset);
-      pinnedRef.current = false;
-      return;
-    }
-
-    if (action === 'bottom') {
-      setScrollOffset(0);
-      pinnedRef.current = true;
-    }
-  }, [scrollCommand?.id, scrollCommand?.action, maxOffset, viewHeight]);
-
   if (messages.length === 0) {
     return (
       <Box flexDirection="column" paddingX={1} paddingY={1}>
-        <Text dimColor>Start chatting. Type /help for commands.</Text>
+        {/* <Text dimColor>Start chatting. Type /help for commands.</Text> */}
       </Box>
     );
   }
 
-  const effectiveHeight = Math.max(1, viewHeight);
-  const sliceStart = Math.max(0, wrappedLines.length - effectiveHeight - scrollOffset);
-  const sliceEnd = Math.max(0, wrappedLines.length - scrollOffset);
-  const visibleLines = wrappedLines.slice(sliceStart, sliceEnd);
-  const scrollbar = hasScrollbar ? buildScrollbar(viewHeight, wrappedLines.length, scrollOffset) : null;
-
   return (
-    <Box flexDirection="column" paddingX={1}>
-      {visibleLines.map((line, index) => (
-        <Box key={`${sliceStart}-${index}-${line.content}`} flexDirection="row">
-          <Box width={contentWidth}>
-            <Text
-              color={line.color}
-              dimColor={line.dim}
-              bold={line.bold}
-              wrap="truncate"
-            >
-              {(line.prefix ?? '') + (line.content || ' ')}
+    <Box flexDirection="column">
+      {lines.map((line, idx) => (
+        <Box key={idx} flexDirection="row">
+          {line.spinner ? (
+            <Text color={COLORS.warning}>
+              <Spinner type="dots" />
             </Text>
-          </Box>
-          {hasScrollbar ? (
-            <Text dimColor>{scrollbar?.[index] ?? ' '}</Text>
-          ) : null}
+          ) : (
+            <Text color={line.color} dimColor={line.dim} bold={line.bold}>
+              {line.prefix || ''}{line.content || ' '}
+            </Text>
+          )}
         </Box>
       ))}
     </Box>
-  );
-};
-
-const wrapLines = (lines: Line[], width: number): Line[] => {
-  const wrapped: Line[] = [];
-
-  lines.forEach(line => {
-    const prefix = line.prefix ?? '';
-    const prefixWidth = stringWidth(prefix);
-    const maxContentWidth = Math.max(1, width - prefixWidth);
-    const chunks = wrapContent(line.content, maxContentWidth);
-
-    chunks.forEach((chunk, index) => {
-      wrapped.push({
-        prefix: index === 0 ? prefix : ' '.repeat(prefixWidth),
-        content: chunk,
-        color: line.color,
-        dim: line.dim,
-        bold: line.bold && index === 0,
-      });
-    });
-  });
-
-  return wrapped;
-};
-
-const buildScrollbar = (viewHeight: number, totalLines: number, scrollOffset: number): string[] => {
-  if (totalLines <= viewHeight) {
-    return Array.from({ length: viewHeight }, () => ' ');
-  }
-
-  const maxOffset = Math.max(0, totalLines - viewHeight);
-  const thumbSize = Math.max(1, Math.round((viewHeight * viewHeight) / totalLines));
-  const trackSize = Math.max(1, viewHeight - thumbSize);
-  const thumbTop = maxOffset === 0
-    ? 0
-    : Math.round(((maxOffset - scrollOffset) * trackSize) / maxOffset);
-
-  return Array.from({ length: viewHeight }, (_, index) => (
-    index >= thumbTop && index < thumbTop + thumbSize ? '█' : '│'
-  ));
-};
-
-const wrapContent = (text: string, width: number): string[] => {
-  if (width <= 0) return [''];
-  if (!text) return [''];
-
-  const lines: string[] = [];
-  let current = '';
-  let currentWidth = 0;
-
-  for (const char of text) {
-    const charWidth = stringWidth(char);
-    if (currentWidth + charWidth > width && current.length > 0) {
-      lines.push(current);
-      current = char;
-      currentWidth = charWidth;
-      continue;
-    }
-    current += char;
-    currentWidth += charWidth;
-  }
-
-  if (current.length > 0) {
-    lines.push(current);
-  }
-
-  return lines.length > 0 ? lines : [''];
-};
-
-const stringWidth = (text: string): number => {
-  let width = 0;
-  for (const char of text) {
-    width += isFullWidth(char) ? 2 : 1;
-  }
-  return width;
-};
-
-const isFullWidth = (char: string): boolean => {
-  const code = char.codePointAt(0);
-  if (!code) return false;
-  return (
-    code >= 0x1100 &&
-    (
-      code <= 0x115f ||
-      code === 0x2329 ||
-      code === 0x232a ||
-      (code >= 0x2e80 && code <= 0xa4cf && code !== 0x303f) ||
-      (code >= 0xac00 && code <= 0xd7a3) ||
-      (code >= 0xf900 && code <= 0xfaff) ||
-      (code >= 0xfe10 && code <= 0xfe19) ||
-      (code >= 0xfe30 && code <= 0xfe6f) ||
-      (code >= 0xff00 && code <= 0xff60) ||
-      (code >= 0xffe0 && code <= 0xffe6) ||
-      (code >= 0x20000 && code <= 0x3fffd)
-    )
   );
 };

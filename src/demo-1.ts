@@ -28,8 +28,10 @@ function handleStreamMessage(message: AgentMessage) {
         case AgentMessageType.TOOL_CALL_CREATED:
             console.log('工具调用创建:', message.payload.tool_calls.map((call) => `${call.toolName}(${call.args})`));
             break;
-        case AgentMessageType.TEXT:
-            console.log('文本消息:', message.payload.content);
+        case AgentMessageType.TEXT_START:
+        case AgentMessageType.TEXT_DELTA:
+        case AgentMessageType.TEXT_COMPLETE:
+            process.stdout.write(message.payload.content);
             break;
 
         default:
@@ -48,7 +50,7 @@ async function demo1() {
     ]);
 
     const agent = new Agent({
-        provider: ProviderRegistry.createFromEnv('glm-4.7'),
+        provider: ProviderRegistry.createFromEnv('minimax-2.1'),
         systemPrompt: '你是一个智能助手,现在系统环境是windows系统',
         toolRegistry,
         stream: true,

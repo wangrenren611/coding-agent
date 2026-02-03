@@ -14,6 +14,7 @@ import {
     isRetryableError,
     createErrorFromStatus,
 } from '../types';
+import fs from 'fs';
 
 export interface HttpClientOptions {
     /** 请求超时时间（毫秒） */
@@ -69,7 +70,7 @@ export class HTTPClient {
                 if (this.debug) {
                    console.log(`[HTTPClient] Attempt ${attempt + 1}/${maxRetries + 1}: ${options.method || 'GET'} ${url}`);
                 }
-            
+             
                 const response = await this.fetchWithTimeout(url, options, timeout);
 
                 // 检查 HTTP 错误
@@ -141,8 +142,10 @@ export class HTTPClient {
             // 如果原始信号被中止，也中止我们的超时控制器
             signal.addEventListener('abort', () => controller.abort());
         }
-
+       
         try {
+
+                 fs.writeFileSync('request.json', JSON.stringify(options, null, 2));  
             const response = await fetch(url, {
                 ...options,
                 signal: controller.signal,

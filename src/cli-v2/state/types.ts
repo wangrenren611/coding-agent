@@ -11,6 +11,7 @@ export interface ToolInvocation {
   status: ToolStatus;
   result?: unknown;
   error?: string;
+  streamOutput?: string;
   startedAt: Timestamp;
   completedAt?: Timestamp;
   duration?: number;
@@ -29,6 +30,7 @@ export type Message =
       content: string;
       status: MessageStatus;
       toolCalls?: ToolInvocation[];
+      codePatches?: CodePatch[];
       timestamp: Timestamp;
     }
   | {
@@ -40,20 +42,27 @@ export type Message =
       timestamp: Timestamp;
     };
 
+export interface CodePatch {
+  path: string;
+  diff: string;
+  language?: string;
+  timestamp: Timestamp;
+}
+
 export type UIEvent =
   | {
-      type: 'assistant-start';
+      type: 'text-start';
       messageId: MessageId;
       timestamp: Timestamp;
     }
   | {
-      type: 'assistant-delta';
+      type: 'text-delta';
       messageId: MessageId;
       contentDelta: string;
       isDone: boolean;
     }
   | {
-      type: 'assistant-complete';
+      type: 'text-complete';
       messageId: MessageId;
       content?: string;
     }
@@ -63,6 +72,15 @@ export type UIEvent =
       toolCallId: string;
       toolName: string;
       args: Record<string, unknown>;
+      timestamp: Timestamp;
+      /** Optional textual content belonging to the same assistant message (fallback for non-stream cases). */
+      content?: string;
+    }
+  | {
+      type: 'tool-stream';
+      messageId: MessageId;
+      toolCallId: string;
+      output: string;
       timestamp: Timestamp;
     }
   | {
@@ -79,6 +97,14 @@ export type UIEvent =
       toolCallId: string;
       error: string;
       duration?: number;
+      timestamp: Timestamp;
+    }
+  | {
+      type: 'code-patch';
+      messageId: MessageId;
+      path: string;
+      diff: string;
+      language?: string;
       timestamp: Timestamp;
     }
   | {

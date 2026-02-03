@@ -1,6 +1,6 @@
 import { uuid } from "uuidv4";
 import { Message, SessionOptions } from "./types";
-
+import fs from 'fs';
 
 export class Session {
   private sessionId: string;
@@ -40,6 +40,7 @@ export class Session {
       messageId,
     };
     this.messages.push(newMessage);
+    fs.writeFileSync('session.json', JSON.stringify(this.messages, null, 2));
     return messageId;
   }
 

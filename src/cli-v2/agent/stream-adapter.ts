@@ -1,4 +1,15 @@
-import type { AgentMessage } from '../../agent-v2/agent/stream-types';
+import type {
+  AgentMessage,
+  CodePatchMessage,
+  ErrorMessage,
+  StatusMessage,
+  TextMessage,
+  TextStartMessage,
+  ThoughtMessage,
+  ToolCallCreatedMessage,
+  ToolCallResultMessage,
+  ToolCallStreamMessage,
+} from '../../agent-v2/agent/stream-types';
 import type { ToolInvocation, UIEvent } from '../state/types';
 
 interface StreamingState {
@@ -7,16 +18,45 @@ interface StreamingState {
   fullContent: string;
   hasStarted: boolean;
   toolCalls: Map<string, ToolInvocation>;
+  codePatches: Map<string, { path: string; diff: string; language?: string; timestamp: number }>;
 }
 
+const createEmptyState = (): StreamingState => ({
+  messageId: null,
+  buffer: '',
+  fullContent: '',
+  hasStarted: false,
+  toolCalls: new Map(),
+  codePatches: new Map(),
+});
+
+const parseToolArgs = (args: unknown): Record<string, unknown> => {
+  if (typeof args === 'string') {
+    try {
+      const parsed = JSON.parse(args) as Record<string, unknown>;
+      if (parsed && typeof parsed === 'object') {
+        return parsed;
+      }
+    } catch {
+      return { raw: args };
+    }
+  }
+
+  if (args && typeof args === 'object') {
+    return args as Record<string, unknown>;
+  }
+
+  return { raw: args };
+};
+
+/**
+ * StreamAdapter - converts Agent messages to UI events
+ * Supports complete AgentMessageType enum handling
+ */
 export class StreamAdapter {
-  private state: StreamingState = {
-    messageId: null,
-    buffer: '',
-    fullContent: '',
-    hasStarted: false,
-    toolCalls: new Map(),
-  };
+  private state: StreamingState = createEmptyState();
+  /** 最后一条文本消息的 msgId，用于把后续工具事件绑定到同一条消息上 */
+  private lastTextMsgId: string | null = null;
 
   private flushTimer: NodeJS.Timeout | null = null;
 
@@ -26,13 +66,8 @@ export class StreamAdapter {
   ) {}
 
   reset(): void {
-    this.state = {
-      messageId: null,
-      buffer: '',
-      fullContent: '',
-      hasStarted: false,
-      toolCalls: new Map(),
-    };
+    this.state = createEmptyState();
+    this.lastTextMsgId = null;
     this.clearFlushTimer();
   }
 
@@ -41,51 +76,74 @@ export class StreamAdapter {
   }
 
   handleAgentMessage(message: AgentMessage): void {
-    const msgType = message.type as string;
+    const messageType = message.type;
 
-    switch (msgType) {
-      case 'text':
-        this.handleText(message as AgentMessage & { type: 'text' });
+    switch (messageType) {
+      case 'text-start':
+        this.handleTextStart(message as TextStartMessage);
+        break;
+      case 'text-delta':
+        this.handleTextDelta(message as ThoughtMessage);
+        break;
+      case 'text-complete':
+        this.handleTextComplete(message as TextMessage);
         break;
       case 'tool_call_created':
-        this.handleToolCallCreated(message as AgentMessage & { type: 'tool_call_created' });
+        this.handleToolCallCreated(message as ToolCallCreatedMessage);
+        break;
+      case 'tool_call_stream':
+        this.handleToolCallStream(message as ToolCallStreamMessage);
         break;
       case 'tool_call_result':
-        this.handleToolCallResult(message as AgentMessage & { type: 'tool_call_result' });
+        this.handleToolCallResult(message as ToolCallResultMessage);
+        break;
+      case 'code_patch':
+        this.handleCodePatch(message as CodePatchMessage);
         break;
       case 'status':
-        this.handleStatus(message as AgentMessage & { type: 'status' });
+        this.handleStatus(message as StatusMessage);
         break;
       case 'error':
-        this.emit({
-          type: 'error',
-          message: (message as any)?.payload?.error || 'Unknown error',
-          phase: 'agent',
-        });
-        this.reset();
+        this.handleError(message as ErrorMessage);
         break;
       default:
+        // Ignore unknown message types
         break;
     }
   }
 
-  private handleText(message: AgentMessage & { type: 'text' }): void {
-    const { msgId, payload } = message;
+  private handleTextStart(message: TextStartMessage): void {
+    const { msgId, timestamp } = message;
+
+    // Flush and complete any previous message
+    if (this.state.messageId && this.state.messageId !== msgId) {
+      this.flushAndCompleteCurrent();
+    }
+
+    this.state.messageId = msgId;
+    this.lastTextMsgId = msgId;
+    this.state.buffer = '';
+    this.state.fullContent = '';
+    this.state.hasStarted = true;
+
+    this.emit({
+      type: 'text-start',
+      messageId: msgId,
+      timestamp,
+    });
+  }
+
+  private handleTextDelta(message: ThoughtMessage): void {
+    const { msgId, payload, timestamp } = message;
     const content = payload.content || '';
 
+    // If this is a new message, treat it as start
     if (this.state.messageId !== msgId) {
-      this.flushAndCompleteCurrent();
-
-      this.state.messageId = msgId;
-      this.state.buffer = '';
-      this.state.fullContent = '';
-      this.state.hasStarted = true;
-
-      this.emit({
-        type: 'assistant-start',
-        messageId: msgId,
-        timestamp: message.timestamp,
-      });
+      this.handleTextStart({
+        ...message,
+        type: 'text-start',
+        timestamp: timestamp ?? Date.now(),
+      } as TextStartMessage);
     }
 
     if (content) {
@@ -95,10 +153,48 @@ export class StreamAdapter {
     }
   }
 
-  private handleToolCallCreated(message: AgentMessage & { type: 'tool_call_created' }): void {
-    const { msgId, payload } = message;
+  private handleTextComplete(message: TextMessage): void {
+    const { msgId, payload, timestamp } = message;
+    const content = payload.content || '';
 
-    this.flushAndCompleteCurrent();
+    // Make sure we have an open message to complete
+    if (this.state.messageId !== msgId) {
+      this.handleTextStart({
+        type: 'text-start',
+        msgId,
+        timestamp: timestamp ?? Date.now(),
+        payload: { content: '' },
+      } as TextStartMessage);
+    }
+
+    // Flush any remaining buffered delta before completing
+    this.flushNow();
+
+    const finalContent = content || this.state.fullContent;
+
+    this.emit({
+      type: 'text-complete',
+      messageId: msgId,
+      content: finalContent,
+    });
+
+    this.state.messageId = null;
+    this.lastTextMsgId = msgId;
+    this.state.buffer = '';
+    this.state.fullContent = '';
+    this.state.hasStarted = false;
+    this.clearFlushTimer();
+  }
+
+  private handleToolCallCreated(message: ToolCallCreatedMessage): void {
+    const { msgId, payload, timestamp } = message;
+
+    // Flush any pending text content
+    if (this.state.messageId) {
+      this.flushNow();
+    }
+
+
 
     for (const toolCall of payload.tool_calls) {
       const parsedArgs = parseToolArgs(toolCall.args);
@@ -107,7 +203,7 @@ export class StreamAdapter {
         name: toolCall.toolName,
         args: parsedArgs,
         status: 'running',
-        startedAt: message.timestamp,
+        startedAt: timestamp,
       };
 
       this.state.toolCalls.set(toolCall.callId, invocation);
@@ -118,20 +214,52 @@ export class StreamAdapter {
         toolCallId: toolCall.callId,
         toolName: toolCall.toolName,
         args: parsedArgs,
-        timestamp: message.timestamp,
+        timestamp,
+        // 透传正文，便于 UI 在缺失文本事件时回填
+        content: payload.content,
+      
       });
     }
   }
 
-  private handleToolCallResult(message: AgentMessage & { type: 'tool_call_result' }): void {
-    const { payload } = message;
+  private handleToolCallStream(message: ToolCallStreamMessage): void {
+    const { payload, timestamp } = message;
+    const { callId, output } = payload;
+    // 必须绑定到已知文本消息；若无法确定则跳过，避免生成“只有工具”的孤立消息
+    const messageId =
+      (message as any).msgId ??
+      this.state.messageId ??
+      this.lastTextMsgId;
+    if (!messageId) return;
+
+    const invocation = this.state.toolCalls.get(callId);
+    if (!invocation) return;
+
+    // Accumulate stream output
+    invocation.streamOutput = (invocation.streamOutput || '') + output;
+
+    this.emit({
+      type: 'tool-stream',
+      messageId,
+      toolCallId: callId,
+      output,
+      timestamp,
+    });
+  }
+
+  private handleToolCallResult(message: ToolCallResultMessage): void {
+    const { payload, timestamp } = message;
     const { callId, status, result } = payload;
     const invocation = this.state.toolCalls.get(callId);
 
     if (!invocation) return;
 
-    const messageId = (message as any).msgId || this.state.messageId || callId;
-    const completedAt = message.timestamp;
+    const messageId =
+      (message as any).msgId ??
+      this.state.messageId ??
+      this.lastTextMsgId;
+    if (!messageId) return;
+    const completedAt = timestamp;
     const duration = completedAt - invocation.startedAt;
 
     if (status === 'success') {
@@ -158,7 +286,24 @@ export class StreamAdapter {
     this.state.toolCalls.delete(callId);
   }
 
-  private handleStatus(message: AgentMessage & { type: 'status' }): void {
+  private handleCodePatch(message: CodePatchMessage): void {
+    const { msgId, payload, timestamp } = message;
+    const { path, diff, language } = payload;
+
+    // Store the code patch
+    this.state.codePatches.set(path, { path, diff, language, timestamp });
+
+    this.emit({
+      type: 'code-patch',
+      messageId: msgId,
+      path,
+      diff,
+      language,
+      timestamp,
+    });
+  }
+
+  private handleStatus(message: StatusMessage): void {
     const state = message.payload?.state;
     this.emit({
       type: 'status',
@@ -183,12 +328,21 @@ export class StreamAdapter {
     }
   }
 
+  private handleError(message: ErrorMessage): void {
+    this.emit({
+      type: 'error',
+      message: message.payload?.error || 'Unknown error',
+      phase: message.payload?.phase,
+    });
+    this.reset();
+  }
+
   private flushAndCompleteCurrent(): void {
     if (!this.state.messageId) return;
 
     this.flushNow();
     this.emit({
-      type: 'assistant-complete',
+      type: 'text-complete',
       messageId: this.state.messageId,
       content: this.state.fullContent,
     });
@@ -217,7 +371,7 @@ export class StreamAdapter {
     this.state.buffer = '';
 
     this.emit({
-      type: 'assistant-delta',
+      type: 'text-delta',
       messageId,
       contentDelta: delta,
       isDone: false,
@@ -233,7 +387,7 @@ export class StreamAdapter {
     this.state.buffer = '';
 
     this.emit({
-      type: 'assistant-delta',
+      type: 'text-delta',
       messageId,
       contentDelta: delta,
       isDone: false,
@@ -247,22 +401,3 @@ export class StreamAdapter {
     }
   }
 }
-
-const parseToolArgs = (args: unknown): Record<string, unknown> => {
-  if (typeof args === 'string') {
-    try {
-      const parsed = JSON.parse(args) as Record<string, unknown>;
-      if (parsed && typeof parsed === 'object') {
-        return parsed;
-      }
-    } catch {
-      return { raw: args };
-    }
-  }
-
-  if (args && typeof args === 'object') {
-    return args as Record<string, unknown>;
-  }
-
-  return { raw: args };
-};
