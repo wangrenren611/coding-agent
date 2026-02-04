@@ -55,4 +55,4 @@ export type {
 } from './session/types';
 
 // 工具函数
-export { uuid } from 'uuidv4';
+export { v4 as uuid } from 'uuid';

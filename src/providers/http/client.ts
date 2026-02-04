@@ -65,11 +65,11 @@ export class HTTPClient {
         let lastError: Error | undefined;
         let attempt = 0;
 
-        while (attempt <= maxRetries) {
+     
             try {
-                if (this.debug) {
-                   console.log(`[HTTPClient] Attempt ${attempt + 1}/${maxRetries + 1}: ${options.method || 'GET'} ${url}`);
-                }
+                // if (this.debug) {
+               //    console.log(`[HTTPClient] Attempt ${attempt + 1}/${maxRetries + 1}: ${options.method || 'GET'} ${url}`);
+                // }
              
                 const response = await this.fetchWithTimeout(url, options, timeout);
 
@@ -77,9 +77,10 @@ export class HTTPClient {
                 if (!response.ok) {
                     const errorText = await response.text();
                     const error = createErrorFromStatus(response.status, response.statusText, errorText);
-
+                     
                     // 不重试永久性错误
                     if (!isRetryableError(error)) {
+                                          
                         throw error;
                     }
 
@@ -93,7 +94,6 @@ export class HTTPClient {
                            console.log(`[HTTPClient] Retrying after ${delay}ms...`);
                         }
                         await this.sleep(delay);
-                        continue;
                     }
 
                     throw error;
@@ -104,25 +104,25 @@ export class HTTPClient {
                 // 如果是网络错误或超时，可能可以重试
                 if (this.isNetworkError(error) || this.isTimeoutError(error)) {
                     lastError = error as Error;
-                    attempt++;
+                    // attempt++;
 
-                    if (attempt <= maxRetries) {
-                        const delay = this.calculateRetryDelay(attempt);
-                        if (this.debug) {
-                           console.log(`[HTTPClient] Network error, retrying after ${delay}ms...`);
-                        }
-                        await this.sleep(delay);
-                        continue;
-                    }
+                    // if (attempt <= maxRetries) {
+                    //     const delay = this.calculateRetryDelay(attempt);
+                    //     if (this.debug) {
+                    //        console.log(`[HTTPClient] Network error, retrying after ${delay}ms...`);
+                    //     }
+                    //     await this.sleep(delay);
+                    // }
+                    
                 }
 
                 // 重新抛出不可重试的错误
                 throw error;
             }
-        }
+       
 
         // 不应该到达这里，但以防万一
-        throw lastError || new LLMError('Max retries exceeded');
+        //throw lastError || new LLMError('Max retries exceeded');
     }
 
     /**
@@ -144,8 +144,7 @@ export class HTTPClient {
         }
        
         try {
-
-                 fs.writeFileSync('request.json', JSON.stringify(options, null, 2));  
+            console.log(`[HTTPClient] Sending request: ${options.method || 'GET'} ${url}`,JSON.parse(options.body).model, options.headers);
             const response = await fetch(url, {
                 ...options,
                 signal: controller.signal,
@@ -155,7 +154,7 @@ export class HTTPClient {
             return response;
         } catch (error) {
             clearTimeout(timeoutId);
-
+            console.log(`[HTTPClient] Request failed: ${options.method || 'GET'} ${url}`);
             // 检查是否是超时错误
             if (controller.signal.aborted && !signal?.aborted) {
                 throw new LLMRetryableError(

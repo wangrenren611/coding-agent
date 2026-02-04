@@ -50,7 +50,7 @@ async function demo1() {
     ]);
 
     const agent = new Agent({
-        provider: ProviderRegistry.createFromEnv('minimax-2.1'),
+        provider: ProviderRegistry.createFromEnv('glm-4.7'),
         systemPrompt: '你是一个智能助手,现在系统环境是windows系统',
         toolRegistry,
         stream: true,

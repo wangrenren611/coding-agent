@@ -5,7 +5,7 @@ import { AgentError, ToolError } from "./errors";
 import { AgentOptions, AgentStatus, StreamCallback } from "./types";
 import { EventBus, EventType } from "../eventbus";
 import { Message } from "../session/types";
-import { uuid } from "uuidv4";
+import { v4 as uuid } from "uuid";
 import { AgentMessageType } from "./stream-types";
 import { createDefaultToolRegistry } from "../tool";
 
@@ -362,6 +362,7 @@ export class Agent {
 
             if (this.retryCount > 0) {
                 this.status = AgentStatus.RETRYING;
+                await this.sleep();
                 this.emitStatus(AgentStatus.RETRYING, `Agent is retrying... (${this.retryCount}/${this.maxRetries})`);
             }
 
@@ -470,9 +471,10 @@ export class Agent {
      */
     private handleError(error: unknown): boolean {
         if (error instanceof AgentError || !isRetryableError(error)) {
+            console.error('Agent error:', error);
             return false;
         }
-
+       
         this.retryCount++;
         return true;
     }
@@ -506,7 +508,6 @@ export class Agent {
         const finishReason = chunk.choices?.[0].finish_reason;
 
         if (!delta) return;
-
         this.processStreamContent(delta.content || '', messageId, chunk.id, finishReason);
         this.processStreamToolCalls(delta.tool_calls, messageId, chunk.id, finishReason);
         this.updateStreamMetadata(chunk, finishReason);
@@ -879,5 +880,12 @@ export class Agent {
      */
     getTaskStartTime(): number {
         return this.taskStartTime;
+    }
+
+     /**
+     * 休眠指定时长
+     */
+    private sleep(ms=1000*3): Promise<void> {
+        return new Promise(resolve => setTimeout(resolve, ms));
     }
 }

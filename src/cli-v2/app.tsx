@@ -9,7 +9,7 @@ import { CommandPalette, type Command } from './ui/command-palette';
 import { HelpOverlay } from './ui/help-overlay';
 import { ModelOverlay } from './ui/model-overlay';
 
-const DEFAULT_MODEL: ModelId = 'minimax-2.1';
+const DEFAULT_MODEL: ModelId = 'glm-4.7';
 
 type Overlay = 'none' | 'help' | 'models';
 

@@ -23,7 +23,8 @@
       "mcp__sequential-thinking__sequentialthinking",
       "Bash(tree:*)",
       "Bash(pnpm install)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(npm run demo-1:*)"
     ]
   },
   "enableAllProjectMcpServers": true,

@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { Box, Text } from 'ink';
-import type { Message, ToolInvocation, CodePatch } from '../state/types';
+import type { Message } from '../state';
+import type { ToolInvocation } from '../state';
 import { COLORS, ICONS, DISPLAY } from './theme';
 import Spinner from 'ink-spinner';
 
@@ -8,6 +9,7 @@ interface Line {
   prefix?: string;
   content?: string;
   color?: string;
+  prefixColor?: string;  // 单独为前缀设置颜色（图标）
   dim?: boolean;
   bold?: boolean;
   spinner?: boolean;  // Special flag for spinner line
@@ -62,19 +64,11 @@ const formatToolArgs = (args: Record<string, unknown>): string => {
   return `${key}=${preview}${entries.length > 1 ? ',...' : ''}`;
 };
 
-const formatToolResult = (result: unknown): string => {
-  if (result === undefined || result === null) return '';
-  if (typeof result === 'string') {
-    const line = result.trim().split('\n')[0] ?? '';
-    return line.length > DISPLAY.maxResultLen ? `${line.slice(0, DISPLAY.maxResultLen)}...` : line;
-  }
-  if (typeof result === 'object') {
-    const entries = Object.entries(result as Record<string, unknown>);
-    if (entries.length === 0) return '';
-    const [key, value] = entries[0];
-    return `${key}: ${previewValue(value, DISPLAY.maxResultLen)}`;
-  }
-  return String(result).slice(0, DISPLAY.maxResultLen);
+const formatToolResult = (result: string | undefined): string => {
+  if (!result) return '';
+  const trimmed = result.trim();
+  const line = trimmed.split('\n')[0] ?? '';
+  return line.length > DISPLAY.maxResultLen ? `${line.slice(0, DISPLAY.maxResultLen)}...` : line;
 };
 
 const splitLines = (content: string): string[] => {
@@ -97,14 +91,20 @@ const trimTrailingEmptyLines = (lines: string[]): string[] => {
 const renderToolLines = (toolCall: ToolInvocation): Line[] => {
   const args = formatToolArgs(toolCall.args);
   const header = `${toolCall.name}${args ? `(${args})` : ''}`;
-  const summary = toolCall.error ? toolCall.error : formatToolResult(toolCall.result);
+  const summary = toolCall.error || formatToolResult(toolCall.result);
 
   const lines: Line[] = [
-    { prefix: `${ICONS.tool} `, content: header, color: COLORS.tool, bold: true },
+    { prefix: `${ICONS.tool} `, content: header, prefixColor: COLORS.tool, bold: true },
   ];
 
   if (summary) {
-    lines.push({ prefix: `${ICONS.result} `, content: summary, dim: false, color: COLORS.muted });
+    const isError = !!toolCall.error;
+    lines.push({
+      prefix: `${ICONS.result} `,
+      content: summary,
+      dim: false,
+      color: isError ? COLORS.system : undefined,
+    });
   } else if (toolCall.status === 'running') {
     lines.push({ prefix: `${ICONS.result} `, content: 'running...', color: COLORS.warning });
   }
@@ -120,7 +120,6 @@ const renderToolLines = (toolCall: ToolInvocation): Line[] => {
         prefix: `${ICONS.result} `,
         content: line || ' ',
         dim: !isLast,
-        color: COLORS.muted,
       });
     });
   }
@@ -128,60 +127,14 @@ const renderToolLines = (toolCall: ToolInvocation): Line[] => {
   return lines;
 };
 
-/**
- * Parse and render code patch as colored diff
- */
-const renderCodePatchLines = (patch: CodePatch): Line[] => {
-  const lines: Line[] = [
-    { prefix: `${ICONS.diff} `, content: `Patch: ${patch.path}`, color: COLORS.diff, bold: true },
-  ];
-
-  // Parse unified diff format
-  const diffLines = splitLines(patch.diff);
-  for (const line of diffLines) {
-    if (line.startsWith('@@')) {
-      // Hunk header
-      lines.push({
-        prefix: '  ',
-        content: line,
-        color: COLORS.info,
-        dim: true,
-      });
-    } else if (line.startsWith('+')) {
-      // Added line
-      lines.push({
-        prefix: '  ',
-        content: line,
-        color: COLORS.diffAdd,
-      });
-    } else if (line.startsWith('-')) {
-      // Removed line
-      lines.push({
-        prefix: '  ',
-        content: line,
-        color: COLORS.diffRemove,
-      });
-    } else if (line.startsWith(' ')) {
-      // Context line
-      lines.push({
-        prefix: '  ',
-        content: line,
-        dim: true,
-      });
-    }
-  }
-
-  return lines;
-};
-
 const renderMessageLines = (message: Message): Line[] => {
-  switch (message.type) {
+  switch (message.role) {
     case 'user': {
       const lines = trimTrailingEmptyLines(splitLines(message.content));
       return lines.map((line, index) => ({
         prefix: index === 0 ? `${ICONS.user} ` : '  ',
         content: line,
-        color: COLORS.user,
+        prefixColor: COLORS.muted,
         bold: index === 0,
       }));
     }
@@ -190,38 +143,23 @@ const renderMessageLines = (message: Message): Line[] => {
       const rendered: Line[] = lines.map((line, index) => ({
         prefix: index === 0 ? `${ICONS.assistant} ` : '  ',
         content: line,
-        color:  COLORS.assistant,
+        prefixColor: COLORS.muted,
         bold: index === 0,
       }));
 
-      if (message.status === 'streaming') {
+      // Show spinner for streaming messages
+      if (message.isStreaming) {
         rendered.push({ spinner: true });
       }
 
       // Render tool calls
       if (message.toolCalls && message.toolCalls.length > 0) {
-        // rendered.push({  dim: true, color: COLORS.muted });
         message.toolCalls.forEach(toolCall => {
           renderToolLines(toolCall).forEach(line => {
             rendered.push({
               prefix: `${line.prefix ?? ''}`,
               content: line.content,
-              color: line.color,
-              dim: line.dim,
-              bold: line.bold,
-            });
-          });
-        });
-      }
-
-      // Render code patches
-      if (message.codePatches && message.codePatches.length > 0) {
-        rendered.push({ prefix: '  ', content: 'Changes:', dim: true, color: COLORS.muted });
-        message.codePatches.forEach(patch => {
-          renderCodePatchLines(patch).forEach(line => {
-            rendered.push({
-              prefix: `  ${line.prefix ?? ''}`,
-              content: line.content,
+              prefixColor: line.prefixColor,
               color: line.color,
               dim: line.dim,
               bold: line.bold,
@@ -240,16 +178,14 @@ const renderMessageLines = (message: Message): Line[] => {
           : COLORS.info;
 
       const lines = splitLines(message.content);
-      const prefix = `[${message.level.toUpperCase()}] `;
+      const prefix = `[${message.level?.toUpperCase() ?? 'INFO'}] `;
       const pad = ' '.repeat(prefix.length);
       const rendered: Line[] = lines.map((line, index) => ({
         prefix: index === 0 ? prefix : pad,
         content: line,
+        prefixColor: color,
         color,
       }));
-      if (message.details) {
-        rendered.push({ prefix: '  ', content: message.details, dim: true, color: COLORS.muted });
-      }
       return rendered;
     }
     default:
@@ -288,9 +224,18 @@ export const MessageList: React.FC<MessageListProps> = ({ messages }) => {
               <Spinner type="dots" />
             </Text>
           ) : (
-            <Text color={line.color} dimColor={line.dim} bold={line.bold}>
-              {line.prefix || ''}{line.content || ' '}
-            </Text>
+            <>
+              {/* 前缀（图标）- 使用灰色 */}
+              {line.prefix && (
+                <Text color={line.prefixColor} dimColor bold={line.bold}>
+                  {line.prefix}
+                </Text>
+              )}
+              {/* 内容 - 使用默认颜色或指定颜色 */}
+              <Text color={line.color} dimColor={line.dim} bold={line.bold && !line.prefix}>
+                {line.content || ' '}
+              </Text>
+            </>
           )}
         </Box>
       ))}

@@ -35,9 +35,9 @@ export class LLMRetryableError extends LLMError {
     }
 }
 
-export class LLMRateLimitError extends LLMRetryableError {
-    constructor(message: string, retryAfter?: number) {
-        super(message, retryAfter, 'RATE_LIMIT');
+export class LLMRateLimitError extends LLMError {
+    constructor(message: string) {
+        super(message, 'RATE_LIMIT');
         this.name = 'LLMRateLimitError';
     }
 }
@@ -101,6 +101,7 @@ export function createErrorFromStatus(
     } catch {
         // 使用原始文本
     }
+
 
     const message = `${status} ${statusText}${details ? ` - ${details}` : ''}`;
 
