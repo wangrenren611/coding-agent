@@ -65,6 +65,8 @@ export interface ChatStore {
   applyEvent: (event: UIEvent) => void;
   clearMessages: () => void;
   setLoading: (isLoading: boolean) => void;
+  setExecutionState: (state: 'idle' | 'running' | 'thinking' | 'error' | 'completed', message?: string) => void;
+  setStatusMessage: (message?: string) => void;
 }
 
 /**
@@ -116,10 +118,19 @@ export function useChatStore(): ChatStore {
     dispatch(chatActions.setLoading(isLoading));
   }, []);
 
+  const setExecutionState = useCallback((state: 'idle' | 'running' | 'thinking' | 'error' | 'completed', message?: string) => {
+    dispatch(chatActions.setExecutionState(state, message));
+  }, []);
+
+  const setStatusMessage = useCallback((message?: string) => {
+    dispatch(chatActions.setStatusMessage(message));
+  }, []);
+
   // Derive isLoading from executionState
   const isLoading = useMemo(() => {
     return state.executionState === 'running' || state.executionState === 'thinking';
   }, [state.executionState]);
+
 
   return {
     // State
@@ -136,6 +147,8 @@ export function useChatStore(): ChatStore {
     applyEvent,
     clearMessages,
     setLoading,
+    setExecutionState,
+    setStatusMessage,
   };
 }
 

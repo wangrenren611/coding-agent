@@ -24,7 +24,13 @@
       "Bash(tree:*)",
       "Bash(pnpm install)",
       "Bash(ls:*)",
-      "Bash(npm run demo-1:*)"
+      "Bash(npm run demo-1:*)",
+      "Bash(dir:*)",
+      "Bash(pnpm dev:*)",
+      "mcp__deepwiki__search_deepwiki",
+      "mcp__deepwiki__ask_repository",
+      "Bash(bun run:*)",
+      "Bash(where:*)"
     ]
   },
   "enableAllProjectMcpServers": true,

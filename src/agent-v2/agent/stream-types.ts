@@ -87,6 +87,7 @@ export interface ToolCallStreamMessage extends BaseAgentMessage {
     callId: string;
     output: string;    // 实时吐出的日志片段
   };
+  msgId?: string;      // 关联的消息 ID
 }
 
 /**
@@ -100,6 +101,7 @@ export interface ToolCallResultMessage extends BaseAgentMessage {
     result: any;       // 工具返回的完整结果
     exitCode?: number;
   };
+  msgId?: string;      // 关联的消息 ID
 }
 
 /**

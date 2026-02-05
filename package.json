@@ -18,6 +18,8 @@
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
     "dev:cli": "cross-env NODE_ENV=development tsx src/cli-v2/index.tsx",
+    "dev:cli-tui": "cross-env NODE_ENV=development tsx src/cli-tui/index.tsx",
+    "test:cli-tui-input": "cross-env NODE_ENV=development tsx src/cli-tui/test-input.tsx",
     "dev:web": "pnpm --filter coding-agent-web dev",
     "build:web": "pnpm --filter coding-agent-web build",
     "start:web": "pnpm --filter coding-agent-web start"
@@ -36,6 +38,8 @@
     "vitest": "^4.0.18"
   },
   "dependencies": {
+    "@opentui/core": "latest",
+    "@opentui/react": "latest",
     "@tavily/core": "^0.7.1",
     "@types/glob": "^8.1.0",
     "@types/uuid": "^10.0.0",
@@ -56,6 +60,7 @@
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "shell-quote": "^1.8.3",
+    "strip-ansi": "^7.1.2",
     "turndown": "^7.2.2",
     "uuid": "^11.1.0",
     "uuidv4": "^6.2.13",

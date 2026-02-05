@@ -66,23 +66,17 @@ export default class BashTool extends BaseTool<typeof schema> {
         const startTime = Date.now();
         try {
             const result = await execa(cmd, _args, {
-                all: true,
                 reject: false,       // 关键：不抛出错误，统一处理
                 shell: true,
                 preferLocal: true,
                 windowsHide: true,
-                encoding: 'buffer', // 关键：获取原始二进制数据
                 timeout: this.timeout || timeout,       // 设置硬超时
             });
 
-            let rawStr;
-
-            if (process.platform === 'win32') {
-                // Windows 环境下，尝试用 GBK 解码，如果失败再退回 UTF-8
-                rawStr = iconv.decode(result.all, 'gbk');
-            } else {
-                rawStr = iconv.decode(result.all, 'utf8');
-            }
+            // 合并 stdout 和 stderr
+            let rawStr = '';
+            if (result.stdout) rawStr += result.stdout;
+            if (result.stderr) rawStr += result.stderr;
 
             let finalOutput = stripAnsi(rawStr || '');
 
