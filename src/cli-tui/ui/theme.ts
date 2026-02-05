@@ -6,10 +6,6 @@
 // ==================== Colors ====================
 
 export const COLORS = {
-  // Text colors
-  text: '#000000',         // Black (default text color)
-  textSecondary: '#333333',// Dark gray (secondary text)
-
   // Base colors
   primary: '#6366f1',      // Indigo
   secondary: '#8b5cf6',    // Violet

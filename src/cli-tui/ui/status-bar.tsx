@@ -26,33 +26,33 @@ export const StatusBar: React.FC<StatusBarProps> = ({
 }) => {
   const statusContent = useMemo(() => {
     if (statusMessage) {
-      return <text color={COLORS.text}>{statusMessage}</text>;
+      return <text color={COLORS.info}>{statusMessage}</text>;
     }
 
     if (executionState === 'thinking') {
-      return <text color={COLORS.text}>{ICONS.thinking} Thinking...</text>;
+      return <text color={COLORS.warning}>{ICONS.thinking} Thinking...</text>;
     }
 
     if (executionState === 'error') {
-      return <text color={COLORS.text}>{ICONS.error} Error occurred</text>;
+      return <text color={COLORS.error}>{ICONS.error} Error occurred</text>;
     }
 
     if (isLoading) {
-      return <text color={COLORS.text}>{getNextSpinnerFrame()} Processing...</text>;
+      return <text color={COLORS.warning}>{getNextSpinnerFrame()} Processing...</text>;
     }
 
-    return <text color={COLORS.textSecondary}>Ready</text>;
+    return <text dimColor>Ready</text>;
   }, [isLoading, statusMessage, executionState]);
 
   return (
     <box
       width="100%"
-      height={3}
+      height={1}
       borderStyle="single"
       borderLeft={false}
       borderRight={false}
       borderColor={COLORS.border}
-      paddingX={2}
+      paddingX={1}
     >
       {statusContent}
     </box>

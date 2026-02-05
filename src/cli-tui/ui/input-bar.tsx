@@ -88,8 +88,10 @@ export const InputBar: React.FC<InputBarProps> = ({
         borderRight={false}
         borderColor={COLORS.border}
         paddingX={1}
-        backgroundColor={COLORS.background}
       >
+        <text color={COLORS.user} bold>
+          {ICONS.user}{' '}
+        </text>
         <input
           value={localValue}
           onInput={handleInput}
@@ -99,7 +101,7 @@ export const InputBar: React.FC<InputBarProps> = ({
         />
       </box>
       <box paddingX={1}>
-        <text color={COLORS.textSecondary}>
+        <text dimColor>
           Enter to send | {KEY_BINDINGS.exit} to exit | {KEY_BINDINGS.openHelp} for help
         </text>
       </box>

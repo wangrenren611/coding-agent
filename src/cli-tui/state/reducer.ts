@@ -218,13 +218,10 @@ function handleToolStart(state: ChatState, event: Extract<UIEvent, { type: 'tool
     const newMessage = createAssistantMessage(messageId, content ?? '');
     messages = [...messages, newMessage];
     message = newMessage;
-  } else if (content && message.role === 'assistant') {
+  } else if (content && message.role === 'assistant' && !message.content) {
     const index = findMessageIndex(messages, messageId);
     messages = [...messages];
-    const existingMessage = messages[index];
-    if (existingMessage && existingMessage.role === 'assistant') {
-      messages[index] = { ...existingMessage, content };
-    }
+    (messages[index] as Message).content = content;
   }
 
   const toolCall: ToolInvocation = {

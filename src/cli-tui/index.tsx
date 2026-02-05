@@ -27,10 +27,10 @@ const handleFatalError = (error: Error, source: string) => {
   hasFatalError = true;
 
   console.error(`\n[${source}] ${error.message}`);
-  // if (error.stack) {
-  //   const stackLines = error.stack.split('\n').slice(1, 6);
-  //   console.error(stackLines.join('\n'));
-  // }
+  if (error.stack) {
+    const stackLines = error.stack.split('\n').slice(1, 6);
+    console.error(stackLines.join('\n'));
+  }
 
   setTimeout(() => {
     process.exit(1);

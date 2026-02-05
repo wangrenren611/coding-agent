@@ -71,6 +71,8 @@ export const App: React.FC = () => {
       flexDirection="column"
       width="100%"
       height="100%"
+      paddingX={1}
+      paddingY={1}
     >
       {/* Message list - takes remaining space */}
       <box flexGrow={1} flexShrink={1} overflow="hidden">
@@ -87,7 +89,32 @@ export const App: React.FC = () => {
         executionState={executionState}
       />
 
-  
+      {/* Help overlay - shown above input */}
+      {showHelp && (
+        <box
+          position="absolute"
+          top={1}
+          left={1}
+          borderStyle="double"
+          borderColor={COLORS.primary}
+          paddingX={2}
+          paddingY={1}
+          backgroundColor={COLORS.background}
+        >
+          <text bold>AI Coding Agent - Help</text>
+          <text>{'\n\n'}</text>
+          <text>Commands:</text>
+          <text dimColor>{'\n  /help      Toggle this help'}</text>
+          <text dimColor>{'\n  /clear     Clear screen'}</text>
+          <text dimColor>{'\n  /exit      Exit application'}</text>
+          <text>{'\n\n'}</text>
+          <text>Keyboard Shortcuts:</text>
+          <text dimColor>{'\n  Enter      Send message'}</text>
+          <text dimColor>{'\n  Ctrl+C     Exit'}</text>
+          <text>{'\n\n'}</text>
+          <text dimColor color={COLORS.muted}>Press /help again or ESC to close</text>
+        </box>
+      )}
 
       {/* Input bar - fixed size, never shrinks */}
       <box flexShrink={0}>

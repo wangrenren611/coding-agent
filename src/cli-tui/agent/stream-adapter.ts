@@ -221,16 +221,10 @@ export class StreamAdapter {
       (message as any).msgId ??
       this.state.messageId ??
       this.lastTextMsgId;
-    if (!messageId) {
-      console.warn('[StreamAdapter] tool-stream: no messageId found');
-      return;
-    }
+    if (!messageId) return;
 
     const invocation = this.state.toolCalls.get(callId);
-    if (!invocation) {
-      console.warn('[StreamAdapter] tool-stream: invocation not found for callId:', callId);
-      return;
-    }
+    if (!invocation) return;
 
     invocation.streamOutput = (invocation.streamOutput || '') + output;
 
@@ -248,19 +242,13 @@ export class StreamAdapter {
     const { callId, status, result } = payload;
 
     const invocation = this.state.toolCalls.get(callId);
-    if (!invocation) {
-      console.warn('[StreamAdapter] tool-result: invocation not found for callId:', callId);
-      return;
-    }
+    if (!invocation) return;
 
     const messageId =
       (message as any).msgId ??
       this.state.messageId ??
       this.lastTextMsgId;
-    if (!messageId) {
-      console.warn('[StreamAdapter] tool-result: no messageId found for callId:', callId);
-      return;
-    }
+    if (!messageId) return;
 
     const completedAt = timestamp;
     const duration = completedAt - invocation.startedAt;

@@ -91,7 +91,7 @@ const renderToolLines = (toolCall: ToolInvocation): Line[] => {
   const summary = toolCall.error || formatToolResult(toolCall.result);
 
   const lines: Line[] = [
-    { prefix: `${ICONS.tool} `, content: header, prefixColor: COLORS.tool, color: COLORS.text, bold: true },
+    { prefix: `${ICONS.tool} `, content: header, prefixColor: COLORS.tool, bold: true },
   ];
 
   if (summary) {
@@ -100,10 +100,10 @@ const renderToolLines = (toolCall: ToolInvocation): Line[] => {
       prefix: `${ICONS.result} `,
       content: summary,
       dim: false,
-      color: isError ? COLORS.system : COLORS.text,
+      color: isError ? COLORS.system : undefined,
     });
   } else if (toolCall.status === 'running') {
-    lines.push({ prefix: `${ICONS.result} `, content: 'running...', color: COLORS.text });
+    lines.push({ prefix: `${ICONS.result} `, content: 'running...', color: COLORS.warning });
   }
 
   if (toolCall.streamOutput && toolCall.status === 'running') {
@@ -115,7 +115,6 @@ const renderToolLines = (toolCall: ToolInvocation): Line[] => {
         prefix: `${ICONS.result} `,
         content: line || ' ',
         dim: !isLast,
-        color: COLORS.text,
       });
     });
   }
@@ -131,7 +130,6 @@ const renderMessageLines = (message: Message): Line[] => {
         prefix: index === 0 ? `${ICONS.user} ` : '  ',
         content: line,
         prefixColor: COLORS.user,
-        color: COLORS.text,
         bold: index === 0,
       }));
     }
@@ -141,7 +139,6 @@ const renderMessageLines = (message: Message): Line[] => {
         prefix: index === 0 ? `${ICONS.assistant} ` : '  ',
         content: line,
         prefixColor: COLORS.muted,
-        color: COLORS.text,
         bold: index === 0,
       }));
 
@@ -156,7 +153,7 @@ const renderMessageLines = (message: Message): Line[] => {
               prefix: `${line.prefix ?? ''}`,
               content: line.content,
               prefixColor: line.prefixColor,
-              color: line.color || COLORS.text,
+              color: line.color,
               dim: line.dim,
               bold: line.bold,
             });
@@ -181,7 +178,7 @@ const renderMessageLines = (message: Message): Line[] => {
         prefix: index === 0 ? prefix : pad,
         content: line,
         prefixColor: color,
-        color: COLORS.text,
+        color,
       }));
       return rendered;
     }
@@ -208,8 +205,7 @@ export const MessageList: React.FC<MessageListProps> = ({ messages, isLoading = 
   if (messages.length === 0) {
     return (
       <box paddingX={1} paddingY={1}>
-        <text color={COLORS.textSecondary}>Start chatting. Type /help for commands.</text>
-        <text> </text>
+        <text dimColor>Start chatting. Type /help for commands.</text>
       </box>
     );
   }
@@ -237,12 +233,12 @@ export const MessageList: React.FC<MessageListProps> = ({ messages, isLoading = 
             ) : (
               <>
                 {line.prefix && (
-                  <text color={line.prefixColor ?? COLORS.muted} bold={line.bold}>
+                  <text color={line.prefixColor || COLORS.muted} bold={line.bold}>
                     {line.prefix}
                   </text>
                 )}
                 {line.content !== undefined && (
-                  <text color={line.color ?? COLORS.text} dimColor={line.dim} bold={line.bold && !line.prefix}>
+                  <text color={line.color} dimColor={line.dim} bold={line.bold && !line.prefix}>
                     {line.content || ' '}
                   </text>
                 )}
