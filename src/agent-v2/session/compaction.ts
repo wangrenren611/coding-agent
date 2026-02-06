@@ -1,340 +1,333 @@
 import { v4 as uuid } from "uuid";
 import { Message } from "./types";
 import { LLMProvider } from "../../providers";
+import { IMemoryManager, CompactionRecord } from "../memory/types";
 
+export interface CompactionConfig {
+  /** 最大 Token 数 */
+  maxTokens: number;
+  /** 最大输出 Token 数 */
+  maxOutputTokens: number;
+  /** LLM Provider */
+  llmProvider: LLMProvider;
+  /** 保留消息数量（默认 40） */
+  keepMessagesNum?: number;
+  /** 触发压缩的阈值比例（默认 0.90） */
+  triggerRatio?: number;
+}
+
+/** Token 统计信息 */
+export interface TokenCountInfo {
+  /** 基于消息内容估算的总 token 数 */
+  estimatedTotal: number;
+  /** 从消息 usage 字段累计的总 token 数（可能不准确，压缩后） */
+  accumulatedTotal: number;
+  /** 是否有可靠的 usage 数据 */
+  hasReliableUsage: boolean;
+}
+
+/**
+ * 上下文压缩器
+ * 当 Token 使用量超过阈值时，压缩历史消息
+ */
 export class Compaction {
   private readonly maxTokens: number;
   private readonly maxOutputTokens: number;
-  private readonly triggerRatio = 0.90; // 92% 触发压缩
-  private keepMessagesNum: number = 40;
+  private readonly triggerRatio: number;
+  private readonly keepMessagesNum: number;
+  private llmProvider: LLMProvider;
 
-
-  constructor(config: { llmProvider: LLMProvider; keepMessagesNum?: number }) {
-    this.maxTokens = config.llmProvider.getLLMMaxTokens();
-    this.maxOutputTokens = config.llmProvider.getMaxOutputTokens();
-    this.logger = (...args: any[]) => console.log("[Compaction]",...args);
+  constructor(config: CompactionConfig) {
+    this.maxTokens = config.maxTokens;
+    this.maxOutputTokens = config.maxOutputTokens;
     this.llmProvider = config.llmProvider;
-    this.keepMessagesNum = config.keepMessagesNum || this.keepMessagesNum;
+    this.keepMessagesNum = config.keepMessagesNum ?? 40;
+    this.triggerRatio = config.triggerRatio ?? 0.90;
   }
 
-  getToken(history: Message[],tools:any[]) {
-    const totalUsed = this.calculateTotalUsage(history,tools);
+  /**
+   * 获取当前 Token 使用情况
+   * 优先使用消息中的 usage 数据，如果没有则估算
+   */
+  getTokenInfo(messages: Message[]) {
+    const totalUsed = this.calculateTotalUsage(messages);
     const usableLimit = this.maxTokens;
-  
+
     return {
       totalUsed,
-      usableLimit: usableLimit * this.triggerRatio
+      usableLimit: usableLimit * this.triggerRatio,
+      shouldCompact: totalUsed >= usableLimit * this.triggerRatio && messages.length > this.keepMessagesNum,
     };
   }
 
   /**
-   * 性能优化：构建 tool_call_id 到 assistant 索引的映射表
-   * 时间复杂度：O(n)，其中 n 是 history 的长度
-   * @returns Map<tool_call_id, assistant_index>
+   * 获取配置
    */
-  private buildToolCallToAssistantIndex(messages: Message[]): Map<string, number> {
-    const index = new Map<string, number>();
-
-    // 遍历所有消息，记录每个 tool_call_id 对应的 assistant 索引
-    for (let i = 0; i < messages.length; i++) {
-      const msg = messages[i];
-      if (msg.role === 'assistant' && msg.tool_calls) {
-        for (const call of msg.tool_calls) {
-          if (call.id) {
-            index.set(call.id, i);
-          }
-        }
-      }
-    }
-
-    return index;
+  getConfig() {
+    return {
+      maxTokens: this.maxTokens,
+      maxOutputTokens: this.maxOutputTokens,
+      keepMessagesNum: this.keepMessagesNum,
+      triggerRatio: this.triggerRatio,
+    };
   }
 
   /**
-   * 性能优化：构建消息列表中 tool 消息的索引映射
-   * 时间复杂度：O(m)，其中 m 是 messages 的长度
-   * @returns Map<tool_call_id, message>
+   * 获取当前上下文的实际 Token 使用量
+   * 压缩后需要基于当前消息重新计算，而不是简单累加
    */
-  private buildToolMessageMap(messages: Message[]): Map<string, Message> {
-    const map = new Map<string, Message>();
+  getCurrentTokenCount(messages: Message[]): TokenCountInfo {
+    // 方法1：累加 usage（压缩后可能不准确）
+    let accumulatedTotal = 0;
+    let hasUsageCount = 0;
 
     for (const msg of messages) {
-      if (msg.role === 'tool' && msg.tool_call_id) {
-        map.set(msg.tool_call_id, msg);
+      if (msg.usage?.total_tokens) {
+        accumulatedTotal += msg.usage.total_tokens;
+        hasUsageCount++;
       }
     }
 
-    return map;
+    // 如果大部分消息都有 usage，认为数据可靠
+    // 但如果有摘要消息，说明发生过压缩，数据不可靠
+    const hasSummary = messages.some((m) => m.type === "summary");
+    const hasReliableUsage = hasUsageCount > messages.length * 0.5 && !hasSummary;
+
+    // 方法2：基于内容估算（始终可用）
+    const estimatedTotal = this.estimateMessagesTokens(messages);
+
+    return {
+      estimatedTotal,
+      accumulatedTotal,
+      hasReliableUsage,
+    };
   }
 
-  async compact(history: Message[],tools:any[]): Promise<{
-    isCompacted: boolean,
-    summaryMessage: Message | null,
-    list: Message[]
+  /**
+   * 估算消息列表的 token 数
+   */
+  private estimateMessagesTokens(messages: Message[]): number {
+    return messages.reduce((acc, m) => {
+      // 每条消息基础开销 4 tokens (role, name, newline)
+      return acc + this.estimateTokens(JSON.stringify(m)) + 4;
+    }, 0);
+  }
+
+  /**
+   * 执行压缩
+   * @param messages 当前消息列表
+   * @param sessionId 会话 ID
+   * @param memoryManager MemoryManager 实例（可选，用于持久化压缩记录）
+   * @returns 压缩结果
+   */
+  async compact(
+    messages: Message[],
+    sessionId?: string,
+    memoryManager?: IMemoryManager
+  ): Promise<{
+    isCompacted: boolean;
+    summaryMessage: Message | null;
+    messages: Message[];
+    record?: CompactionRecord;
   }> {
-    const totalUsed = this.calculateTotalUsage(history,tools);
+    const totalUsed = this.calculateTotalUsage(messages);
     const usableLimit = this.maxTokens - this.maxOutputTokens;
     const threshold = usableLimit * this.triggerRatio;
 
+    // 过滤系统消息用于压缩计算
+    const nonSystemMessages = messages.filter((msg) => msg.role !== "system");
+
     // 只有当消息数量超过保留数量且 token 达到阈值时，才触发压缩
-    const shouldCompact = history.length > this.keepMessagesNum && totalUsed >= threshold;
-     history = history.filter(msg => msg.role !== 'system');
+    const shouldCompact = nonSystemMessages.length > this.keepMessagesNum && totalUsed >= threshold;
+
     // 如果没达到压缩条件，直接返回原数据
     if (!shouldCompact) {
       return {
         isCompacted: false,
         summaryMessage: null,
-        list: history
+        messages,
       };
     }
 
-    this.logger.info(
-      `[Compaction] 触发压缩。当前 Token: ${totalUsed}, 阈值: ${Math.floor(threshold)}`
-    );
+    console.log(`[Compaction] 触发压缩。当前 Token: ${totalUsed}, 阈值: ${Math.floor(threshold)}`);
 
-    let activeMessages = history.slice(-this.keepMessagesNum); // 保护区
-    let pendingMessages = history.slice(0, -this.keepMessagesNum); // 待压缩区
+    // 分离保护区（最近 N 条）和待压缩区
+    const systemMessage = messages.find((msg) => msg.role === "system");
+    const activeMessages = nonSystemMessages.slice(-this.keepMessagesNum);
+    let pendingMessages = nonSystemMessages.slice(0, -this.keepMessagesNum);
 
-    // 限制保护区的最大膨胀倍数（防止从 6 条膨胀到 100+ 条）
-    const MAX_ACTIVE_SIZE = this.keepMessagesNum * 2;
+    // 处理工具调用配对
+    const processedMessages = this.processToolCallPairs(pendingMessages, activeMessages);
+    pendingMessages = processedMessages.pending;
+    const finalActiveMessages = processedMessages.active;
 
-    // 检查保护区的所有 tool 消息，确保它们的配对 assistant 以及所有相关的 tool 回复都被保留
-    // 需要处理多个 assistant 的情况（连续多次工具调用）
-
-    // 性能优化：一次性构建所有索引，避免 O(n²) 的多次查找
-    // 时间复杂度：O(n + m + k)，其中 n=history长度，m=pending长度，k=active长度
-    const toolCallToAssistantIndex = this.buildToolCallToAssistantIndex(history);
-    const pendingToolMap = this.buildToolMessageMap(pendingMessages);
-    const activeToolMap = this.buildToolMessageMap(activeMessages);
-
-    const toolMessagesInActive = activeMessages.filter(m =>
-      m.role === 'tool' && m.tool_call_id  // 过滤掉无效的 tool_call_id
-    );
-
-    if (toolMessagesInActive.length > 0) {
-      // 收集所有需要保留的 assistant 消息和需要重新排序的 tool 回复
-      // 修复：将 tool 回复与对应的 assistant 分组，确保消息顺序正确
-      const assistantsToKeep: Map<string, { message: Message; index: number; tools: Message[] }> = new Map();
-      // 跟踪从 pendingMessages 移到 toolsToKeep 的 tool_call_id
-      const movedToolCallIds = new Set<string>();
-
-      // 计算分割点，用于判断 assistant 在哪个区域
-      // history[:splitPoint] = pendingMessages
-      // history[splitPoint:] = activeMessages
-      const splitPoint = history.length - this.keepMessagesNum;
-
-      // 修复：识别唯一需要处理的 assistant 索引
-      // 这确保我们只处理每个 assistant 一次，但会收集该 assistant 的所有 tools
-      const uniqueAssistantIndices = new Set<number>();
-      for (const toolMessage of toolMessagesInActive) {
-        const toolCallId = toolMessage.tool_call_id;
-        if (!toolCallId) continue;
-        const assistantIndex = toolCallToAssistantIndex.get(toolCallId);
-        if (assistantIndex !== undefined) {
-          uniqueAssistantIndices.add(assistantIndex);
-        }
-      }
-
-      // 为每个唯一的 assistant 处理一次，收集其所有 tools
-      for (const assistantIndex of uniqueAssistantIndices) {
-        // 从 history 中获取 assistant 消息
-        const assistantMessage = history[assistantIndex];
-        if (!assistantMessage || !assistantMessage.tool_calls || assistantMessage.tool_calls.length === 0) {
-          continue;
-        }
-
-        const assistantKey = assistantIndex.toString();
-        const toolCalls = assistantMessage.tool_calls?.filter(call => call.id) || [];
-
-        // 收集该 assistant 的所有 tools（从两个区域按 tool_calls 顺序收集）
-        const allTools: Message[] = [];
-        for (const toolCall of toolCalls) {
-          // 先检查 active 区域，再检查 pending 区域
-          let toolMessage = activeToolMap.get(toolCall.id);
-          if (!toolMessage) {
-            toolMessage = pendingToolMap.get(toolCall.id);
-            if (toolMessage) {
-              movedToolCallIds.add(toolCall.id); // 跟踪从 pending 移动的 tool
-            }
-          }
-          if (toolMessage) {
-            allTools.push(toolMessage);
-          }
-        }
-
-        const toolCallIds = toolCalls.map(c => c.id);
-
-        // 无论 assistant 在哪个区域，都从 activeMessages 中移除它的 tools（稍后会重新添加）
-        // 这避免 tools 在 activeMessages 中被重复计算
-        activeMessages = activeMessages.filter(m => {
-          // 如果 assistant 在 active 区域，也要移除它
-          if (assistantIndex >= splitPoint && m === assistantMessage) return false;
-          // 移除这些 tool 回复（无论 assistant 在哪，都要移除 active 中的 tools）
-          if (m.role === 'tool' && toolCallIds.includes(m.tool_call_id || '')) return false;
-          return true;
-        });
-
-        // 记录这个 assistant 需要保留，以及它的所有 tools
-        assistantsToKeep.set(assistantKey, {
-          message: assistantMessage,
-          index: assistantIndex,
-          tools: allTools,
-        });
-
-        this.logger.info(
-          `[Compaction] 处理 assistant（索引 ${assistantIndex}）：` +
-          `${toolCalls.length} 个 tool_calls，收集到 ${allTools.length} 个 tool 回复`
-        );
-      }
-
-      // 将需要保留的 assistant 和 tool 回复按正确顺序加入保护区
-      if (assistantsToKeep.size > 0) {
-        // 按索引排序 assistants（保持原始顺序）
-        const sortedAssistantsWithTools = Array.from(assistantsToKeep.values())
-          .sort((a, b) => a.index - b.index);
-
-        // 从 pendingMessages 中移除这些 assistants（如果它们在 pendingMessages 中）
-        // 同时移除已移动的 tool 消息
-        // 修复：使用 splitPoint 而不是 pendingMessages.length
-        // item.index 是原 history 数组的索引，需要与 splitPoint 比较
-        const indicesToRemove = Array.from(assistantsToKeep.values())
-          .filter(item => item.index < splitPoint)
-          .map(item => item.index);
-
-        if (indicesToRemove.length > 0 || movedToolCallIds.size > 0) {
-          pendingMessages = pendingMessages.filter((msg, i) => {
-            // 移除 assistant 消息
-            if (indicesToRemove.includes(i)) return false;
-            // 移除已移动的 tool 消息
-            if (msg.role === 'tool' && msg.tool_call_id && movedToolCallIds.has(msg.tool_call_id)) return false;
-            return true;
-          });
-        }
-
-        // 构建新的 activeMessages，将每个 assistant 与它的 tools 交错排列
-        // 正确的结构应该是：Assistant1, Tool1, Tool2, Assistant2, Tool3, Tool4, ...
-        const newActiveMessages: Message[] = [];
-
-        for (const { message: assistantMsg, tools: assistantTools } of sortedAssistantsWithTools) {
-          newActiveMessages.push(assistantMsg);
-          newActiveMessages.push(...assistantTools);
-        }
-
-        // 添加剩余的 activeMessages
-        newActiveMessages.push(...activeMessages);
-
-        // 检查是否超过最大限制
-        if (newActiveMessages.length > MAX_ACTIVE_SIZE) {
-          this.logger.warn(
-            `[Compaction] 保护区膨胀：从 ${this.keepMessagesNum} 条增长到 ${newActiveMessages.length} 条` +
-            `(超过最大限制 ${MAX_ACTIVE_SIZE})，将进行裁剪`
-          );
-
-          // 计算 assistants 和 tools 的总消息数
-          const totalAssistantsAndTools = sortedAssistantsWithTools.reduce(
-            (sum, item) => sum + 1 + item.tools.length, 0);
-
-          // 裁剪：保留前面的 assistants 和 tools，裁剪后面的原始 activeMessages
-          const overflow = newActiveMessages.length - MAX_ACTIVE_SIZE;
-          if (overflow > 0 && totalAssistantsAndTools < MAX_ACTIVE_SIZE) {
-            // 可以安全地裁剪后面的消息
-            newActiveMessages.length = MAX_ACTIVE_SIZE;
-          }
-        }
-
-        activeMessages = newActiveMessages;
-
-        // 计算统计信息
-        const totalAssistants = sortedAssistantsWithTools.length;
-        const totalTools = sortedAssistantsWithTools.reduce((sum, item) => sum + item.tools.length, 0);
-
-        this.logger.info(
-          `[Compaction] 已将 ${totalAssistants} 个 assistant 和 ${totalTools} 个 tool 回复移到保护区` +
-          `（保护区大小：${activeMessages.length}）`
-        );
-      }
-    }
-
-    // 3. 提取之前的摘要（如果存在）
-    let previousSummary= "";
+    // 提取之前的摘要（如果存在）
+    let previousSummary = "";
     if (pendingMessages.length > 0 && pendingMessages[0].type === "summary") {
-      previousSummary = pendingMessages[0].content as string;
+      previousSummary = pendingMessages[0].content;
       pendingMessages = pendingMessages.slice(1);
     }
 
-    // 4. 将待压缩的消息序列化为文本
-    // 特别处理：将 tool 消息与其 result 格式化，方便 LLM 理解
-    const textToSummarize = pendingMessages
-      .map((m) => {
-        const prefix = m.type ? `[${m.role}:${m.type}]` : `[${m.role}]`;
-        // 如果内容过长（如巨大的代码输出），在摘要前进行初步截断
-        const content =
-          m.content.length > 2000
-            ? m.content.slice(0, 1000) + "...(省略)..."
-            : m.content;
-        return `${prefix}: ${content}`;
-      })
-      .join("\n");
-
-    // 5. 执行异步摘要
-    const newSummaryContent = await this.summarizer(
-      textToSummarize,
-      previousSummary,
+    // 生成新摘要
+    const summaryContent = await this.summarizer(
+      this.serializeMessages(pendingMessages),
+      previousSummary
     );
 
     const summaryMessage: Message = {
       messageId: uuid(),
       role: "assistant",
       type: "summary",
-      content: `${newSummaryContent}`,
+      content: summaryContent,
     };
 
-    // 6. 重组历史
-    const newHistory = [summaryMessage, ...activeMessages, {
-      messageId: uuid(),
-      role: "user" as const,
-      type: "text" as const,
-      content: "Confirm task completion. If the task is not finished, define next actions and continue execution until all user requirements are satisfied.",
-    }];
+    // 重组消息：系统消息 + 摘要 + 保护区
+    const newMessages: Message[] = [];
+    if (systemMessage) {
+      newMessages.push(systemMessage);
+    }
+    newMessages.push(summaryMessage);
+    newMessages.push(...finalActiveMessages);
+
+    // 如果有 MemoryManager，创建压缩记录
+    let record: CompactionRecord | undefined;
+    if (memoryManager && sessionId) {
+      record = await memoryManager.compactContext(sessionId, {
+        keepLastN: this.keepMessagesNum,
+        summaryMessage,
+        reason: "token_limit",
+        tokenCountBefore: totalUsed,
+        tokenCountAfter: this.calculateTotalUsage(newMessages),
+      });
+    }
+
+    console.log(`[Compaction] 压缩完成。消息数: ${messages.length} -> ${newMessages.length}`);
 
     return {
       isCompacted: true,
       summaryMessage,
-      list: newHistory
+      messages: newMessages,
+      record,
     };
-
   }
 
   /**
-   * 计算整个对话数组的 Token 用量
+   * 处理工具调用配对
+   * 确保保护区的 tool 消息有对应的 assistant 消息
    */
-  public calculateTotalUsage(messages: Message[], tools?: any[]): number {
-    const allMessages = [...messages];
-    if (tools && Array.isArray(tools)) {
-      allMessages.push(...tools);
+  private processToolCallPairs(
+    pendingMessages: Message[],
+    activeMessages: Message[]
+  ): { pending: Message[]; active: Message[] } {
+    // 构建工具调用映射
+    const toolCallMap = new Map<string, Message>();
+
+    for (const msg of [...pendingMessages, ...activeMessages]) {
+      if (msg.role === "assistant" && Array.isArray(msg.tool_calls)) {
+        const calls = msg.tool_calls;
+        for (const call of calls) {
+          if (call && typeof call.id === "string") {
+            toolCallMap.set(call.id, msg);
+          }
+        }
+      }
     }
-    return allMessages.reduce((acc, m) => {
-      // 每条消息基础开销 4 tokens (role, name, newline)
-      return acc + this.estimate(JSON.stringify(m)) + 4;
-    }, 0);
+
+    // 找出保护区中需要配对的 tool 消息
+    const toolsNeedingPair = activeMessages.filter(
+      (msg) => {
+        if (msg.role !== "tool") return false;
+        const toolCallId = (msg as { tool_call_id?: string }).tool_call_id;
+        return typeof toolCallId === "string" && toolCallMap.has(toolCallId);
+      }
+    );
+
+    if (toolsNeedingPair.length === 0) {
+      return { pending: pendingMessages, active: activeMessages };
+    }
+
+    // 收集需要移动的 assistant 消息
+    const assistantsToMove = new Map<string, Message>();
+    const toolCallIdsToMove = new Set<string>();
+
+    for (const toolMsg of toolsNeedingPair) {
+      const toolMsgCast = toolMsg as { tool_call_id?: string };
+      const toolCallId: string | undefined = toolMsgCast.tool_call_id;
+      if (typeof toolCallId !== "string") continue;
+      const assistantMsg = toolCallMap.get(toolCallId);
+      if (assistantMsg) {
+        assistantsToMove.set(assistantMsg.messageId, assistantMsg);
+        toolCallIdsToMove.add(toolCallId);
+      }
+    }
+
+    // 从 pending 中移除这些消息
+    const newPending = pendingMessages.filter((msg) => {
+      if (assistantsToMove.has(msg.messageId)) return false;
+      const msgToolCallId = (msg as { tool_call_id?: string }).tool_call_id;
+      if (msg.role === "tool" && typeof msgToolCallId === "string" && toolCallIdsToMove.has(msgToolCallId))
+        return false;
+      return true;
+    });
+
+    // 将 assistant 和 tool 按顺序添加到保护区前面
+    const newActive: Message[] = [];
+    const assistantList = Array.from(assistantsToMove.values());
+    for (const assistantMsg of assistantList) {
+      newActive.push(assistantMsg);
+      // 添加对应的 tool 消息
+      const toolCalls = Array.isArray(assistantMsg.tool_calls) ? assistantMsg.tool_calls : [];
+      for (const call of toolCalls) {
+        if (call && typeof call.id === "string") {
+          const toolMsg = activeMessages.find(
+            (m) => {
+              const mToolCallId = (m as { tool_call_id?: string }).tool_call_id;
+              return m.role === "tool" && mToolCallId === call.id;
+            }
+          );
+          if (toolMsg) {
+            newActive.push(toolMsg);
+          }
+        }
+      }
+    }
+
+    // 添加剩余的保护区消息
+    for (const msg of activeMessages) {
+      if (!assistantsToMove.has(msg.messageId)) {
+        // 检查是否是需要配对的 tool 消息
+        const msgToolCallId = (msg as { tool_call_id?: string }).tool_call_id;
+        if (msg.role === "tool" && typeof msgToolCallId === "string" && toolCallIdsToMove.has(msgToolCallId)) {
+          continue; // 已添加
+        }
+        newActive.push(msg);
+      }
+    }
+
+    return { pending: newPending, active: newActive };
   }
 
   /**
-   * 估算单段文本的 Token
+   * 将消息序列化为文本用于摘要
    */
-  private estimate(text: string): number {
-    if (!text) return 0;
-    return Math.ceil(
-      text.length / 4,
-    );
+  private serializeMessages(messages: Message[]): string {
+    return messages
+      .map((m) => {
+        const prefix = m.type ? `[${m.role}:${m.type}]` : `[${m.role}]`;
+        const content =
+          m.content.length > 2000 ? m.content.slice(0, 1000) + "...(省略)..." : m.content;
+        return `${prefix}: ${content}`;
+      })
+      .join("\n");
   }
 
-  async summarizer(textToSummarize: string, previousSummary?: string) {
+  /**
+   * 生成摘要
+   */
+  private async summarizer(textToSummarize: string, previousSummary?: string): Promise<string> {
+    console.log("[Compaction] 正在生成摘要...");
 
-
-    const spinner = this.logger.spinner("上下文压缩...");
-
-    const llmResponse = await this.llmProvider.generate(
+    const response = await this.llmProvider.generate(
       [
         {
           role: "user",
@@ -348,16 +341,11 @@ export class Compaction {
 7. **Pending Tasks**: Work items that remain unfinished.
 8. **Current Work**: The progress at the point conversation was interrupted.
 
-${previousSummary ? `<previous_summary>
-  ${previousSummary}
-</previous_summary>
-` : ''}
+${previousSummary ? `<previous_summary>\n${previousSummary}\n</previous_summary>\n` : ""}
 
-<current_mesage_history>
-${textToSummarize}
-</current_mesage_history>
+<current_message_history>\n${textToSummarize}\n</current_message_history>
 
-  ## Requirements:
+## Requirements:
 - Maintain high density and accuracy of information
 - Highlight key technical decisions and solutions
 - Ensure continuity of context
@@ -367,12 +355,42 @@ ${textToSummarize}
         },
       ],
       {
-        maxOutputTokens: 8000,
         temperature: 0.3,
-      },
+      }
     );
-    spinner.succeed("上下文压缩成功");
-    return llmResponse?.content || '';
 
+    console.log("[Compaction] 摘要生成完成");
+
+    // 处理流式或非流式响应
+    if (response && typeof response === 'object' && 'content' in response) {
+      return (response as { content?: string }).content || "";
+    }
+
+    return "";
+  }
+
+  /**
+   * 计算整个对话数组的 Token 用量
+   * 压缩后基于内容重新估算，而不是累加可能不准确的 usage
+   */
+  public calculateTotalUsage(messages: Message[]): number {
+    const { estimatedTotal, hasReliableUsage, accumulatedTotal } = this.getCurrentTokenCount(messages);
+
+    // 如果有可靠的 usage 数据（未压缩），使用它
+    if (hasReliableUsage && accumulatedTotal > 0) {
+      return accumulatedTotal;
+    }
+
+    // 否则使用估算值（压缩后更准确）
+    return estimatedTotal;
+  }
+
+  /**
+   * 估算单段文本的 Token
+   */
+  private estimateTokens(text: string): number {
+    if (!text) return 0;
+    // 简化估算：大约 4 个字符 = 1 个 token
+    return Math.ceil(text.length / 4);
   }
 }

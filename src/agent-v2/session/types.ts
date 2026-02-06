@@ -1,6 +1,6 @@
-import { BaseLLMMessage, FinishReason, Role, ToolCall } from "../../providers";
+import { BaseLLMMessage, FinishReason, Role, ToolCall, Usage } from "../../providers";
 
-export type MessageType = 'text' |'tool-call'|'tool-result';
+export type MessageType = 'text' |'tool-call'|'tool-result' | 'summary';
 
 export type Message = {
     messageId: string;
@@ -9,6 +9,8 @@ export type Message = {
     type?: MessageType;
     finish_reason?: FinishReason;
     id?: string;
+    /** 该消息的 Token 使用情况 */
+    usage?: Usage;
 } & BaseLLMMessage;
 
 export type SessionOptions = {

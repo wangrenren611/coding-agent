@@ -6,8 +6,9 @@ import type { LLMProvider } from '../../providers';
 import type { ToolRegistry } from '../tool/registry';
 import { AgentMessage } from './stream-types';
 import type { ITimeProvider } from './agent';
+import type { IMemoryManager } from '../memory/types';
 
-export enum AgentStatus { 
+export enum AgentStatus {
   THINKING = 'thinking',
   RUNNING = 'running',
   COMPLETED = 'completed',
@@ -16,9 +17,6 @@ export enum AgentStatus {
   IDLE = 'idle',
   ABORTED = 'aborted',
 }
-
-
-
 
 export type StreamCallback = <T extends AgentMessage>(message: T) => void;
 
@@ -44,4 +42,8 @@ export interface AgentOptions{
     timeProvider?: ITimeProvider;
     /** 流式缓冲区最大大小（字节，默认 100000） */
     maxBufferSize?: number;
+    /** MemoryManager 实例（可选，用于持久化存储） */
+    memoryManager?: IMemoryManager;
+    /** 会话ID（用于恢复已有会话） */
+    sessionId?: string;
 }

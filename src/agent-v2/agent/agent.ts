@@ -1,5 +1,5 @@
 import { Chunk, FinishReason, isRetryableError, LLMGenerateOptions, LLMResponse, Role, Usage } from "../../providers";
-import { Session } from "../session";
+import { Session, SessionConfig } from "../session";
 import { ToolRegistry } from "../tool/registry";
 import { AgentError, ToolError } from "./errors";
 import { AgentOptions, AgentStatus, StreamCallback } from "./types";
@@ -8,6 +8,7 @@ import { Message } from "../session/types";
 import { v4 as uuid } from "uuid";
 import { AgentMessageType } from "./stream-types";
 import { createDefaultToolRegistry } from "../tool";
+import { IMemoryManager } from "../memory/types";
 
 // ==================== 类型定义 ====================
 
@@ -107,6 +108,7 @@ export class Agent {
     private session: Session;
     private toolRegistry: ToolRegistry;
     private eventBus: EventBus;
+    private memoryManager?: IMemoryManager;
 
     // ==================== 类型安全：配置 ====================
     private systemPrompt: string;
@@ -140,7 +142,16 @@ export class Agent {
 
         this.provider = config.provider;
         this.systemPrompt = config.systemPrompt ?? '';
-        this.session = new Session({ systemPrompt: this.systemPrompt });
+        this.memoryManager = config.memoryManager;
+
+        // 初始化 Session，传入 memoryManager 和 sessionId
+        const sessionConfig: SessionConfig = {
+            systemPrompt: this.systemPrompt,
+            memoryManager: this.memoryManager,
+            sessionId: config.sessionId,
+        };
+        this.session = new Session(sessionConfig);
+
         this.toolRegistry = config.toolRegistry ?? createDefaultToolRegistry(
             { workingDirectory: process.cwd() },
             this.provider
@@ -176,6 +187,9 @@ export class Agent {
             throw new AgentError(`Agent is not idle, current status: ${this.status}`);
         }
 
+        // 初始化 Session（如果需要）
+        await this.session.initialize();
+
         this.initializeTask(query);
 
         try {
@@ -210,6 +224,14 @@ export class Agent {
      */
     getMessages(): Message[] {
         return this.session.getMessages();
+    }
+
+    /**
+     * 获取当前会话 ID
+     * @returns 会话 ID
+     */
+    getSessionId(): string {
+        return this.session.getSessionId();
     }
 
     /**
@@ -432,6 +454,9 @@ export class Agent {
         for await (const chunk of streamGenerator) {
             this.handleStreamChunk(chunk, messageId);
         }
+
+        // 流结束后，确保最后一条消息包含 usage（某些 provider 的 usage 在 finish_reason 之后发送）
+        this.updateSessionMessageWithUsage(messageId);
 
         return this.buildStreamResponse();
     }
@@ -676,6 +701,23 @@ export class Agent {
                 ...lastMessage,
                 messageId,
                 finish_reason: finishReason,
+                usage: this.streamLastChunk.usage,
+            });
+        }
+    }
+
+    /**
+     * 流结束后更新消息 usage（某些 provider 的 usage 在 finish_reason 之后发送）
+     */
+    private updateSessionMessageWithUsage(messageId: string): void {
+        if (!this.streamLastChunk.usage) return;
+
+        const lastMessage = this.session.getLastMessage();
+        if (lastMessage && lastMessage.messageId === messageId && !lastMessage.usage) {
+            this.session.addMessage({
+                ...lastMessage,
+                messageId,
+                usage: this.streamLastChunk.usage,
             });
         }
     }

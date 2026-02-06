@@ -10,3 +10,4 @@ dist
 /doc/*
 /web/.next/
 /web/.next/*
+data/*

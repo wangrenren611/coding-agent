@@ -286,7 +286,7 @@ async function main() {
             throw new Error('No streaming text messages received');
         }
 
-        const allContent = textMessages.map(m => m.payload?.content || '').join('');
+        const allContent = textMessages.map(m => (m as { payload?: { content?: string } }).payload?.content || '').join('');
         if (allContent.length === 0) {
             throw new Error('No content in streaming messages');
         }
@@ -321,7 +321,7 @@ async function main() {
             throw new Error('No status messages received');
         }
 
-        const states = statusMessages.map(m => m.payload?.state);
+        const states = statusMessages.map(m => (m as unknown as { payload: { state: string } }).payload.state);
         if (!states.includes(AgentStatus.RUNNING)) {
             throw new Error('No RUNNING state received');
         }

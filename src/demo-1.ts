@@ -7,6 +7,7 @@ import { EventType } from './agent-v2/eventbus';
 
 import fs from 'fs';
 import { AgentMessage, AgentMessageType } from './agent-v2/agent/stream-types';
+import { createMemoryManager } from './agent-v2';
 
 dotenv.config({
     path: './.env.development',
@@ -48,12 +49,18 @@ async function demo1() {
     toolRegistry.register([
         new BashTool(),
     ]);
+  const memoryManager = createMemoryManager({
+    type: 'file',
+    connectionString: './data/agent-memory',
+  });
 
+  await memoryManager.initialize();
     const agent = new Agent({
         provider: ProviderRegistry.createFromEnv('glm-4.7'),
         systemPrompt: '你是一个智能助手,现在系统环境是windows系统',
         toolRegistry,
         stream: true,
+        memoryManager,  // 传入 memoryManager 启用持久化
         // 只需设置这一个回调，就能获取所有信息
         streamCallback: handleStreamMessage,
     });
@@ -66,7 +73,18 @@ async function demo1() {
     const response = await agent.execute('当前目录有什么');
     console.log('\n\n最终响应:', response);
 
+    // 输出会话 ID，用于后续恢复会话
+    console.log('\n===================');
+    console.log('会话 ID:', agent.getSessionId());
+    console.log('===================');
+    console.log('提示: 使用以下命令恢复此会话继续对话:');
+    console.log(`SESSION_ID=${agent.getSessionId()} npx ts-node src/demo-session-restore.ts`);
+    console.log('===================\n');
+
     fs.writeFileSync('./demo-1.json', JSON.stringify(agent.getMessages(), null, 2));
+
+    // 关闭 memoryManager，确保数据保存
+    await memoryManager.close();
 }
 
 demo1();

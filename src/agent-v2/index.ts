@@ -49,10 +49,35 @@ export type { ToolSchema } from './tool/type';
 
 // 会话管理
 export { Session } from './session';
+export { Compaction } from './session/compaction';
 export type {
   SessionOptions,
+  SessionConfig,
   Message,
-} from './session/types';
+  CompactionConfig,
+} from './session';
+
+// MemoryManager
+export {
+  createMemoryManager,
+  FileMemoryManager,
+} from './memory';
+export type {
+  IMemoryManager,
+  MemoryManagerOptions,
+  SessionData,
+  CurrentContext,
+  HistoryMessage,
+  TaskData,
+  CompactionRecord,
+  QueryOptions,
+  HistoryQueryOptions,
+  SessionFilter,
+  TaskFilter,
+  HistoryFilter,
+  CompactContextOptions,
+  StorageItem,
+} from './memory/types';
 
 // 工具函数
 export { v4 as uuid } from 'uuid';
