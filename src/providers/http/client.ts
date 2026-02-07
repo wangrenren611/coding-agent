@@ -144,12 +144,15 @@ export class HTTPClient {
         }
        
         try {
-            console.log(`[HTTPClient] Sending request: ${options.method || 'GET'} ${url}`,JSON.parse(options.body).model, options.headers);
+            console.log(`[HTTPClient] start Sending request: ${options.method || 'GET'} ${url}`,JSON.parse(options.body).model);
+            // console.log(`[HTTPClient] Sending request: ${options.method || 'GET'} ${url}`,JSON.parse(options.body).model, options.headers);
             const response = await fetch(url, {
                 ...options,
                 signal: controller.signal,
                 headers: options.headers,
             });
+         console.log(`[HTTPClient] end Sending request: ${options.method || 'GET'} `);
+
             clearTimeout(timeoutId);
             return response;
         } catch (error) {

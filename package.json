@@ -17,7 +17,12 @@
     "test:ui": "vitest --ui",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "dev:cli": "cross-env NODE_ENV=development tsx src/cli-v2/index.tsx"
+    "dev:cli": "cross-env NODE_ENV=development tsx src/cli-v2/index.tsx",
+    "bench:agent:adapter": "tsx test-agent/agent-adapter.ts",
+    "bench:agent:ts-bench": "tsx test-agent/run-ts-bench.ts",
+    "bench:multi-swe": "tsx test-agent/multi-swe-bench-adapter.ts",
+    "batch:test": "tsx test-agent/batch-test-direct.ts",
+    "batch:test:skip-agent": "tsx test-agent/batch-test-direct.ts --skip-agent"
   },
   "devDependencies": {
     "@types/node": "^25.2.0",

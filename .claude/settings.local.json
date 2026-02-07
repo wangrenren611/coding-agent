@@ -32,7 +32,17 @@
       "Bash(bun run:*)",
       "Bash(where:*)",
       "Bash(npx ts-node:*)",
-      "Bash(npx tsup:*)"
+      "Bash(npx tsup:*)",
+      "Bash(git clone:*)",
+      "Bash(pnpm bench:agent:adapter:*)",
+      "Bash(pip install:*)",
+      "Bash(pnpm bench:multi-swe:*)",
+      "Bash(yarn test)",
+      "Bash(corepack yarn install:*)",
+      "Bash(corepack enable:*)",
+      "Bash(pnpm batch:test:skip-agent:*)",
+      "Bash(YARN_IGNORE_PATH=1 yarn test:*)",
+      "Bash(corepack disable:*)"
     ]
   },
   "enableAllProjectMcpServers": true,

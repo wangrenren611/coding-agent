@@ -57,7 +57,7 @@ async function demo1() {
 
   await memoryManager.initialize();
     const agent = new Agent({
-        provider: ProviderRegistry.createFromEnv('minimax-2.1'),
+        provider: ProviderRegistry.createFromEnv('glm-4.7'),
         systemPrompt:  operatorPrompt({
                   directory: process.cwd(),
                   language: 'Chinese',

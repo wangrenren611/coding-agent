@@ -12,3 +12,5 @@ dist
 /web/.next/*
 data/*
 src/cli-tui/.coding-agent
+test-agent
+typescript
