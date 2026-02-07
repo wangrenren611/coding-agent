@@ -32,6 +32,7 @@ import {
     responseHasToolCalls,
 } from "./types-internal";
 import { AgentMessageType } from "./stream-types";
+import { ToolContext } from "../tool/base";
 
 // ==================== 默认实现 ====================
 
@@ -579,7 +580,7 @@ export class Agent {
         const toolContext = this.injectToolContext();
 
         // 执行工具
-        const results = await this.toolRegistry.execute(toolCalls, toolContext);
+        const results = await this.toolRegistry.execute(toolCalls, toolContext as ToolContext);
         this.recordToolResults(results);
     }
 
