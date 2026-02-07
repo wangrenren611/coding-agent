@@ -73,7 +73,7 @@ async function demo1() {
         // 可以在这里添加额外的日志记录
     });
 
-    const response = await agent.execute('深度分析当前项目');
+    const response = await agent.execute('运行/Users/wrr/work/coding-agent/test-agent');
     console.log('\n\n最终响应:', response);
 
     // 输出会话 ID，用于后续恢复会话
