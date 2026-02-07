@@ -23,7 +23,9 @@
     "test:cli-tui-input": "cross-env NODE_ENV=development tsx src/cli-tui/test-input.tsx",
     "dev:web": "pnpm --filter coding-agent-web dev",
     "build:web": "pnpm --filter coding-agent-web build",
-    "start:web": "pnpm --filter coding-agent-web start"
+    "start:web": "pnpm --filter coding-agent-web start",
+    "bench:agent:adapter": "tsx test-agent/agent-adapter.ts",
+    "bench:agent:ts-bench": "tsx test-agent/run-ts-bench.ts"
   },
   "devDependencies": {
     "@types/node": "^25.2.0",
