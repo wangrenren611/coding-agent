@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { z } from 'zod';
-import { BaseTool, ToolResult } from './base';
+import { BaseTool, ToolContext, ToolResult } from './base';
 import { getBackupManager } from '../util/backup-manager';
 
 export class RollbackTool extends BaseTool<any> {
@@ -14,7 +14,7 @@ export class RollbackTool extends BaseTool<any> {
         backupId: z.string().describe('Backup ID to restore to'),
     });
 
-    async execute({ filePath, backupId }: z.infer<typeof this.schema>): Promise<ToolResult> {
+    async execute({ filePath, backupId }: z.infer<typeof this.schema>, _context?: ToolContext): Promise<ToolResult> {
         const fullPath = path.resolve(process.cwd(), filePath);
 
         // === 业务错误：文件不存在 ===
@@ -67,7 +67,7 @@ export class ListBackupsTool extends BaseTool<any> {
         filePath: z.string().describe('File path to list backups for'),
     });
 
-    async execute({ filePath }: z.infer<typeof this.schema>): Promise<ToolResult> {
+    async execute({ filePath }: z.infer<typeof this.schema>, _context?: ToolContext): Promise<ToolResult> {
         const fullPath = path.resolve(process.cwd(), filePath);
 
         const backupManager = getBackupManager();
@@ -102,7 +102,7 @@ export class CleanBackupsTool extends BaseTool<any> {
         confirm: z.boolean().describe('Set to true to confirm deletion').default(false),
     });
 
-    async execute({ filePath, confirm }: z.infer<typeof this.schema>): Promise<ToolResult> {
+    async execute({ filePath, confirm }: z.infer<typeof this.schema>, _context?: ToolContext): Promise<ToolResult> {
         // === 业务错误：未确认 ===
         if (!confirm) {
             return this.result({

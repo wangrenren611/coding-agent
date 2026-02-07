@@ -237,14 +237,26 @@ export class StreamProcessor {
         // 触发文本完成
         this.options.onTextComplete(this.currentMessageId);
 
-        // 更新消息 finish_reason
+        // 更新消息 finish_reason。
+        // 当 finish_reason 与 tool_calls 分片到不同 chunk 时，必须保留 tool_calls，
+        // 否则下一轮请求会出现 tool_call_id 找不到对应调用的问题。
+        const streamToolCalls = Array.from(this.toolCalls.values());
+        const hasToolCalls = streamToolCalls.length > 0;
+
         this.options.onMessageUpdate({
             messageId: this.currentMessageId,
             role: 'assistant',
             content: this.buffer,
             id: chunkId,
             finish_reason: finishReason,
-            type: 'text',
+            ...(hasToolCalls
+                ? {
+                    tool_calls: streamToolCalls,
+                    type: 'tool-call' as const,
+                }
+                : {
+                    type: 'text' as const,
+                }),
         });
     }
 

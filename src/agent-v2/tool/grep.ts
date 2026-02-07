@@ -3,7 +3,7 @@ import * as readline from 'node:readline';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
-import { BaseTool, ToolResult } from './base';
+import { BaseTool, ToolContext, ToolResult } from './base';
 
 const schema = z.object({
   pattern: z.string().min(1).describe('Regex pattern'),
@@ -57,14 +57,27 @@ export default class GrepTool extends BaseTool<typeof schema> {
   name = 'grep';
   timeoutMs = 1000 * 60;
 
-  description = `- Fast content search tool using ripgrep
-- Returns file paths and line numbers with matches
-- Safe for LLM: capped results + timeout
-`;
+  description = `A powerful search tool built on ripgrep
+
+Usage:
+- ALWAYS use Grep for search tasks. NEVER invoke \`grep\` or \`rg\` as a Bash command.
+  The Grep tool has been optimized for correct permissions and access.
+- Supports full regex syntax (e.g., "log.*Error", "function\\s+\\w+")
+- Filter files with glob parameter (e.g., "*.js", "**/*.tsx") or type parameter
+  (e.g., "js", "py", "rust", "go", "java", etc.). More efficient than include for
+  common file types.
+- Output modes: "content" shows matching lines (supports -A/-B/-C context, -n line
+  numbers, head_limit), "files_with_matches" shows only file paths (default),
+  "count" shows match counts (supports head_limit). Defaults to "files_with_matches".
+- Use Task tool for open-ended searches requiring multiple rounds
+- Pattern syntax: Uses ripgrep (not grep) - literal braces need escaping
+  (use interface\\{\\} to find interface{} in Go code)
+- Multiline matching: By default patterns match within single lines only.
+  For cross-line patterns like struct \\{[\\s\\S]*?field\`, use multiline: true`;
 
   schema = schema;
 
-  async execute(raw: unknown): Promise<ToolResult> {
+  async execute(raw: unknown, _context?: ToolContext): Promise<ToolResult> {
     const input: Input = schema.parse(raw);
     const {
       pattern,

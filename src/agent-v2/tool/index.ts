@@ -5,10 +5,9 @@ import GrepTool from "./grep";
 import { SurgicalEditTool } from "./surgical";
 import { WebSearchTool } from "./web-search";
 import { WebFetchTool } from "./web-fetch";
-import { TodoCreateTool, TodoGetAllTool, TodoGetActiveTool, TodoApplyOpsTool } from "./todo";
 import { BatchReplaceTool } from "./batch-replace";
 import { LspTool } from "./lsp";
-import { TaskTool } from "./task";
+import { TaskCreateTool, TaskGetTool, TaskListTool, TaskOutputTool, TaskStopTool, TaskTool, TaskUpdateTool } from "./task";
 import { ToolRegistry } from "./registry";
 import type { ToolRegistryConfig } from "./registry";
 import type { BaseTool } from "./base";
@@ -35,10 +34,12 @@ export function getDefaultTools(
         new SurgicalEditTool(),
         new WebSearchTool(),
         new WebFetchTool(),
-        new TodoCreateTool(),
-        new TodoGetAllTool(),
-        new TodoGetActiveTool(),
-        new TodoApplyOpsTool(),
+        new TaskCreateTool(),
+        new TaskGetTool(),
+        new TaskListTool(),
+        new TaskUpdateTool(),
+        new TaskOutputTool(),
+        new TaskStopTool(),
         new BatchReplaceTool(),
         new LspTool(),
     ];
@@ -74,10 +75,18 @@ export { default as GrepTool } from "./grep";
 export { SurgicalEditTool } from "./surgical";
 export { WebSearchTool } from "./web-search";
 export { WebFetchTool } from "./web-fetch";
-export { TodoCreateTool, TodoGetAllTool, TodoGetActiveTool, TodoApplyOpsTool } from "./todo";
 export { BatchReplaceTool } from "./batch-replace";
 export { LspTool } from "./lsp";
-export { TaskTool, SubagentType } from "./task";
+export {
+    TaskTool,
+    TaskCreateTool,
+    TaskGetTool,
+    TaskListTool,
+    TaskUpdateTool,
+    TaskOutputTool,
+    TaskStopTool,
+    SubagentType,
+} from "./task";
 export { ToolRegistry } from "./registry";
 export type { ToolRegistryConfig } from "./registry";
 export type { BaseTool, ToolResult };

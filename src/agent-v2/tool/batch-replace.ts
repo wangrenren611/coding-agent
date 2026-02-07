@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { z } from 'zod';
-import { BaseTool, ToolResult } from './base';
+import { BaseTool, ToolContext, ToolResult } from './base';
 
 /**
  * 批量替换工具
@@ -26,7 +26,7 @@ export class BatchReplaceTool extends BaseTool<any> {
     })).describe("Array of replacements to apply in order")
   });
 
-  async execute({ filePath, replacements }: z.infer<typeof this.schema>): Promise<ToolResult> {
+  async execute({ filePath, replacements }: z.infer<typeof this.schema>, _context?: ToolContext): Promise<ToolResult> {
     // === 边界条件：空替换数组 ===
     if (replacements.length === 0) {
       return this.result({

@@ -7,12 +7,9 @@ import { safeParse } from "../util";
 /** 默认工具执行超时时间（毫秒） */
 const DEFAULT_TOOL_TIMEOUT = 300000; // 5分钟
 
-/**
- * 静态上下文存储（用于工具访问会话信息）
- */
-interface StaticContext {
+interface ExecutionContext {
     sessionId?: string;
-    sessionPath?: string;
+    memoryManager?: ToolContext['memoryManager'];
 }
 
 /**
@@ -48,31 +45,18 @@ export class ToolRegistry {
     private toolTimeout: number;
     private eventCallbacks?: ToolEventCallbacks;
 
-    /** 静态上下文存储 */
-    private static context: StaticContext = {};
-
     constructor(config: ToolRegistryConfig) {
         this.workingDirectory = config.workingDirectory;
         this.toolTimeout = config.toolTimeout ?? DEFAULT_TOOL_TIMEOUT;
     }
 
-    /**
-     * 设置静态上下文（供工具访问会话信息）
-     */
-    static setContext(ctx: StaticContext): void {
-        ToolRegistry.context = ctx;
-    }
-
-    /**
-     * 获取静态上下文
-     */
-    static getContext(): ToolContext {
+    private buildToolContext(ctx?: ExecutionContext): ToolContext {
         return {
-            environment: process.cwd(),
+            environment: this.workingDirectory,
             platform: process.platform,
             time: new Date().toISOString(),
-            sessionId: ToolRegistry.context.sessionId,
-            sessionPath: ToolRegistry.context.sessionPath,
+            sessionId: ctx?.sessionId,
+            memoryManager: ctx?.memoryManager,
         };
     }
 
@@ -99,7 +83,11 @@ export class ToolRegistry {
     /**
      * 执行工具
      */
-    async execute(toolCalls: ToolCall[]): Promise<{tool_call_id: string, name: string, arguments: string, result: any}[]> {
+    async execute(
+      toolCalls: ToolCall[],
+      context?: ExecutionContext,
+    ): Promise<{tool_call_id: string, name: string, arguments: string, result: any}[]> {
+      const toolContext = this.buildToolContext(context);
 
       const results = await Promise.all(toolCalls.map(async toolCall => {
           const { name, arguments: paramsStr } = toolCall.function;
@@ -160,7 +148,7 @@ export class ToolRegistry {
         try {
           const timeoutSignal = AbortSignal.timeout(this.toolTimeout);
           const result = await Promise.race([
-              tool.execute(resultSchema.data),
+              tool.execute(resultSchema.data, toolContext),
               new Promise((_, reject) => {
                   timeoutSignal.addEventListener('abort', () => {
                       reject(new Error(`Tool "${name}" execution timeout (${this.toolTimeout}ms)`));

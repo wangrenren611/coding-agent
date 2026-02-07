@@ -1,0 +1,364 @@
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { LLMProvider } from '../../../providers';
+import type { LLMGenerateOptions, LLMRequestMessage, LLMResponse } from '../../../providers';
+import type { ToolContext } from '../base';
+import { TestEnvironment } from './test-utils';
+import { createMemoryManager } from '../../memory';
+import type { IMemoryManager } from '../../memory';
+import {
+  TaskCreateTool,
+  TaskGetTool,
+  TaskListTool,
+  TaskOutputTool,
+  TaskStopTool,
+  TaskTool,
+  TaskUpdateTool,
+  clearTaskState,
+} from '../task';
+
+class MockProvider extends LLMProvider {
+  private readonly text: string;
+  private readonly delayMs: number;
+
+  constructor(text = 'done', delayMs = 0) {
+    super({
+      apiKey: 'mock',
+      baseURL: 'https://mock.local',
+      model: 'mock-model',
+      max_tokens: 1024,
+      LLMMAX_TOKENS: 8192,
+      temperature: 0,
+    });
+    this.text = text;
+    this.delayMs = delayMs;
+  }
+
+  async generate(
+    _messages: LLMRequestMessage[],
+    options?: LLMGenerateOptions
+  ): Promise<LLMResponse | null> {
+    if (this.delayMs > 0) {
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, this.delayMs);
+        options?.abortSignal?.addEventListener('abort', () => {
+          clearTimeout(timer);
+          reject(new Error('aborted'));
+        }, { once: true });
+      });
+    }
+
+    if (options?.abortSignal?.aborted) {
+      throw new Error('aborted');
+    }
+
+    return {
+      id: 'mock-response',
+      object: 'chat.completion',
+      created: Date.now(),
+      model: 'mock-model',
+      choices: [{
+        index: 0,
+        message: {
+          role: 'assistant',
+          content: this.text,
+        },
+        finish_reason: 'stop',
+      }],
+    };
+  }
+
+  getTimeTimeout(): number {
+    return 10_000;
+  }
+
+  getLLMMaxTokens(): number {
+    return 8192;
+  }
+
+  getMaxOutputTokens(): number {
+    return 1024;
+  }
+}
+
+describe('Task tools', () => {
+  const MANAGED_TASK_PARENT_ID = '__task_tool_managed__';
+  let env: TestEnvironment;
+  let sessionId: string;
+  let memoryManager: IMemoryManager;
+  let toolContext: ToolContext;
+  const withContext = <T extends { execute: (...args: any[]) => any }>(tool: T): T => {
+    const rawExecute = tool.execute.bind(tool);
+    (tool as any).execute = (args?: unknown) => rawExecute(args as never, toolContext);
+    return tool;
+  };
+
+  beforeEach(async () => {
+    env = new TestEnvironment('task-tools');
+    await env.setup();
+    memoryManager = createMemoryManager({
+      type: 'file',
+      connectionString: `${env.getTestDir()}/agent-memory`,
+    });
+    await memoryManager.initialize();
+    sessionId = `task-session-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    toolContext = {
+      environment: process.cwd(),
+      platform: process.platform,
+      time: new Date().toISOString(),
+      sessionId,
+      memoryManager,
+    };
+    clearTaskState();
+  });
+
+  afterEach(async () => {
+    clearTaskState();
+    await memoryManager.close();
+    await env.teardown();
+  });
+
+  it('should create/list/get/update/delete managed tasks', async () => {
+    const create = withContext(new TaskCreateTool());
+    const list = withContext(new TaskListTool());
+    const get = withContext(new TaskGetTool());
+    const update = withContext(new TaskUpdateTool());
+
+    const createA = await create.execute({
+      subject: 'Implement auth flow',
+      description: 'Add login endpoint and validation',
+      activeForm: 'Implementing auth flow',
+    });
+    const createB = await create.execute({
+      subject: 'Run test suite',
+      description: 'Run all unit tests',
+      activeForm: 'Running test suite',
+    });
+
+    expect(createA.success).toBe(true);
+    expect(createB.success).toBe(true);
+    expect(createA.metadata?.id).toBe('1');
+    expect(createB.metadata?.id).toBe('2');
+
+    const storedTasks = await memoryManager.queryTasks({
+      sessionId,
+      parentTaskId: MANAGED_TASK_PARENT_ID,
+    });
+    expect(storedTasks).toHaveLength(2);
+    await expect(fs.access(path.join(env.getTestDir(), 'task-list.json'))).rejects.toThrow();
+
+    const updateDep = await update.execute({
+      taskId: '2',
+      addBlockedBy: ['1'],
+      owner: 'agent-1',
+    });
+    expect(updateDep.success).toBe(true);
+
+    const task1 = await get.execute({ taskId: '1' });
+    const task2 = await get.execute({ taskId: '2' });
+    expect(task1.success).toBe(true);
+    expect(task2.success).toBe(true);
+    expect(task1.metadata?.blocks).toContain('2');
+    expect(task2.metadata?.blockedBy).toContain('1');
+
+    const step1 = await update.execute({ taskId: '1', status: 'in_progress' });
+    const step2 = await update.execute({ taskId: '1', status: 'completed' });
+    expect(step1.success).toBe(true);
+    expect(step2.success).toBe(true);
+
+    const listed = await list.execute();
+    expect(listed.success).toBe(true);
+    expect(listed.metadata?.count).toBe(2);
+    const listedTask2 = listed.metadata?.tasks.find((t: any) => t.id === '2');
+    expect(listedTask2?.blockedBy).toEqual([]);
+
+    const deleted = await update.execute({ taskId: '2', status: 'deleted' });
+    expect(deleted.success).toBe(true);
+    const missing = await get.execute({ taskId: '2' });
+    expect(missing.success).toBe(false);
+  });
+
+  it('should reject invalid status transition', async () => {
+    const create = withContext(new TaskCreateTool());
+    const update = withContext(new TaskUpdateTool());
+    await create.execute({
+      subject: 'Build app',
+      description: 'Build once',
+      activeForm: 'Building app',
+    });
+
+    const invalid = await update.execute({
+      taskId: '1',
+      status: 'completed',
+    });
+    expect(invalid.success).toBe(false);
+    expect(invalid.output).toContain('Invalid status transition');
+  });
+
+  it('should migrate legacy task-list.json data into memory manager storage', async () => {
+    const legacyTask = {
+      id: '1',
+      subject: 'Legacy task',
+      description: 'Imported from legacy file',
+      activeForm: 'Importing legacy task',
+      status: 'pending',
+      owner: '',
+      metadata: { source: 'legacy' },
+      blocks: [],
+      blockedBy: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    const legacyFilePath = path.join('.memory', sessionId, 'task-list.json');
+    await fs.mkdir(path.dirname(legacyFilePath), { recursive: true });
+    await fs.writeFile(legacyFilePath, JSON.stringify([legacyTask], null, 2), 'utf-8');
+
+    const list = withContext(new TaskListTool());
+    const listed = await list.execute();
+    expect(listed.success).toBe(true);
+    expect(listed.metadata?.count).toBe(1);
+
+    const storedTasks = await memoryManager.queryTasks({
+      sessionId,
+      parentTaskId: MANAGED_TASK_PARENT_ID,
+    });
+    expect(storedTasks).toHaveLength(1);
+  });
+
+  it('should persist foreground task run metadata without duplicating full messages', async () => {
+    const taskTool = withContext(new TaskTool(new MockProvider('foreground done')));
+    const result = await taskTool.execute({
+      description: 'Analyze modules',
+      prompt: 'Summarize modules',
+      subagent_type: 'explore',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.metadata?.storage).toBe('memory_manager');
+    const runId = result.metadata?.task_id as string;
+    const childSessionId = result.metadata?.child_session_id as string;
+    const run = await memoryManager.getSubTaskRun(runId);
+    expect(run).toBeTruthy();
+    expect(run?.status).toBe('completed');
+    expect(run?.parentSessionId).toBe(sessionId);
+    expect(run?.childSessionId).toBe(childSessionId);
+    expect(run?.messageCount).toBeGreaterThan(0);
+    expect(run?.messages).toBeUndefined();
+
+    const childContext = await memoryManager.getCurrentContext(childSessionId);
+    expect(childContext).toBeTruthy();
+    expect((childContext?.messages || []).length).toBeGreaterThan(1);
+
+    const subTaskFilePath = path.join(
+      env.getTestDir(),
+      'agent-memory',
+      'tasks',
+      `subtask-run-${encodeURIComponent(runId)}.json`,
+    );
+    const raw = await fs.readFile(subTaskFilePath, 'utf-8');
+    const stored = JSON.parse(raw);
+    expect(stored.runId).toBe(runId);
+    expect(stored.status).toBe('completed');
+    expect(stored.messages).toBeUndefined();
+    expect(stored.messageCount).toBeGreaterThan(0);
+  });
+
+  it('should run background task and retrieve output', async () => {
+    const taskTool = withContext(new TaskTool(new MockProvider('background done')));
+    const outputTool = withContext(new TaskOutputTool());
+
+    const started = await taskTool.execute({
+      description: 'Explore codebase',
+      prompt: 'Summarize repo structure',
+      subagent_type: 'explore',
+      run_in_background: true,
+    });
+    expect(started.success).toBe(true);
+    const taskId = started.metadata?.task_id as string;
+    expect(taskId).toBeTruthy();
+    expect(started.metadata?.status).toBe('queued');
+    expect(started.metadata?.storage).toBe('memory_manager');
+
+    const output = await outputTool.execute({
+      task_id: taskId,
+      block: true,
+      timeout: 5000,
+    });
+    expect(output.success).toBe(true);
+    expect(output.metadata?.status).toBe('completed');
+    expect(output.metadata?.wait?.timeout_reached).toBe(false);
+    expect(output.metadata?.progress?.message_count).toBeGreaterThan(0);
+    expect(output.output).toContain('background done');
+    expect(output.metadata?.message_count).toBeGreaterThan(0);
+    const run = await memoryManager.getSubTaskRun(taskId);
+    expect(run?.status).toBe('completed');
+    expect(run?.messageCount).toBeGreaterThan(0);
+    expect(run?.messages).toBeUndefined();
+
+    const childContext = await memoryManager.getCurrentContext(run?.childSessionId || '');
+    expect(childContext).toBeTruthy();
+  });
+
+  it('should stop a running background task', async () => {
+    const taskTool = withContext(new TaskTool(new MockProvider('late result', 1000)));
+    const stopTool = withContext(new TaskStopTool());
+    const outputTool = withContext(new TaskOutputTool());
+
+    const started = await taskTool.execute({
+      description: 'Long task',
+      prompt: 'Do something long',
+      subagent_type: 'explore',
+      run_in_background: true,
+    });
+    const taskId = started.metadata?.task_id as string;
+
+    const stopped = await stopTool.execute({ task_id: taskId });
+    expect(stopped.success).toBe(true);
+    expect(['cancelling', 'cancelled', 'completed']).toContain(stopped.metadata?.status);
+
+    const output = await outputTool.execute({
+      task_id: taskId,
+      block: false,
+      timeout: 10,
+    });
+    expect(output.success).toBe(true);
+    expect(['cancelled', 'completed']).toContain(output.metadata?.status);
+    const run = await memoryManager.getSubTaskRun(taskId);
+    expect(['cancelled', 'completed']).toContain(run?.status);
+    expect(run?.messageCount).toBeGreaterThanOrEqual(0);
+    expect(run?.messages).toBeUndefined();
+  });
+
+  it('should report wait timeout without auto-cancelling running task', async () => {
+    const taskTool = withContext(new TaskTool(new MockProvider('slow done', 150)));
+    const outputTool = withContext(new TaskOutputTool());
+
+    const started = await taskTool.execute({
+      description: 'Slow background task',
+      prompt: 'Wait and then respond',
+      subagent_type: 'explore',
+      run_in_background: true,
+    });
+
+    const taskId = started.metadata?.task_id as string;
+    const timed = await outputTool.execute({
+      task_id: taskId,
+      block: true,
+      timeout: 30,
+    });
+    expect(timed.success).toBe(true);
+    expect(timed.metadata?.wait?.timeout_reached).toBe(true);
+    expect(['running', 'cancelling']).toContain(timed.metadata?.status);
+    expect(timed.metadata?.progress?.message_count).toBeGreaterThan(0);
+
+    const eventually = await outputTool.execute({
+      task_id: taskId,
+      block: true,
+      timeout: 2000,
+    });
+    expect(eventually.success).toBe(true);
+    expect(eventually.metadata?.status).toBe('completed');
+    expect(eventually.metadata?.wait?.timeout_reached).toBe(false);
+  });
+});

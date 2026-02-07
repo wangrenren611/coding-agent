@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { isBinaryFile } from 'isbinaryfile';
 import { z } from 'zod';
-import { BaseTool, ToolResult } from './base';
+import { BaseTool, ToolContext, ToolResult } from './base';
 
 const readFileSchema = z.object({
   filePath: z.string(),
@@ -12,23 +12,34 @@ const readFileSchema = z.object({
 
 export class ReadFileTool extends BaseTool<typeof readFileSchema> {
   name = "read_file";
-  description = `Read file content with line numbers.
+  description = `Read a file from the local filesystem. You can access any file directly by using this tool.
 
-IMPORTANT USAGE GUIDELINES:
-- DEFAULT: Read the ENTIRE file by omitting startLine/endLine parameters
-- ONLY use range reading for files larger than 500 lines
-- If you need to read a file, ALWAYS try reading it completely first
-- The tool will return line numbers to help you navigate
-- Most files are small enough to read entirely. Avoid premature optimization
+Assume that the file path provided by the user is valid.
 
-Path formats supported:
-- Relative paths: "src/file.ts", "./src/file.ts"
-- Absolute paths: "/home/user/file.ts" (Unix), "C:\\Users\\user\\file.ts" (Windows)
-- The tool automatically normalizes paths for cross-platform compatibility`;
+It is okay to read a file that does not exist; an error will be returned.
+
+Usage:
+- The file_path parameter must be an absolute path, not a relative path
+- By default, reads up to 2000 lines starting from the beginning of the file
+- You can optionally specify a line offset and limit (especially handy for long files),
+  but it's recommended to read the whole file by not providing these parameters
+- Any lines longer than 2000 characters will be truncated
+- Results are returned using cat -n format, with line numbers starting at 1
+- This tool can read images (eg PNG, JPG, etc). When reading an image file the contents
+  are presented visually as Claude Code is a multimodal LLM.
+- This tool can read PDF files (.pdf). PDFs are processed page by page, extracting both
+  text and visual content for analysis.
+- This tool can read Jupyter notebooks (.ipynb files) and returns all cells with their
+  outputs, combining code, text, and visualizations.
+- This tool can only read files, not directories. To read a directory, use an ls command
+  via the Bash tool.
+- It's often better to speculatively read multiple potentially useful files in parallel
+  in a single response. When this is the case, prefer reading in parallel: one message
+  with multiple Read tool calls.`;
 
   schema = readFileSchema;
 
-  async execute(args: { filePath: string; startLine?: number; endLine?: number; }): Promise<ToolResult> {
+  async execute(args: { filePath: string; startLine?: number; endLine?: number; }, _context?: ToolContext): Promise<ToolResult> {
     const { filePath, startLine, endLine } = args;
     const fullPath = this.resolvePath(filePath);
 
@@ -131,28 +142,27 @@ export class WriteFileTool extends BaseTool<typeof writeFileSchema> {
 
   name = "write_file";
 
-  description =
-    "Write the entire file content to a specified path. " +
-    "CRITICAL: You MUST provide BOTH filePath AND content parameters.\n\n" +
-    "Parameters:\n" +
-    "- filePath: The file path (required). Supports relative and absolute paths.\n" +
-    "- content: The file content as raw string (required)\n\n" +
-    "Example:\n" +
-    '{\n' +
-    '  "filePath": "src/example.ts",\n' +
-    '  "content": "console.log(\\"Hello\\");"\n' +
-    '}\n\n' +
-    "IMPORTANT: For the content parameter, provide the raw file content directly as a plain string. " +
-    "Do NOT wrap it in markdown code blocks (```), backticks, or any other formatting. " +
-    "Just pass the actual file content as-is.\n\n" +
-    "Path formats supported:\n" +
-    "- Relative: \"src/file.ts\"\n" +
-    "- Absolute Unix: \"/home/user/file.ts\"\n" +
-    "- Absolute Windows: \"C:\\Users\\user\\file.ts\"";
+  description = `Writes a file to the local filesystem.
+
+This tool will overwrite the existing file if there is one at the provided path.
+
+If this is an existing file, you MUST use the Read tool first to read the file's contents.
+This tool will fail if you did not read the file first.
+
+ALWAYS prefer editing existing files in the codebase. NEVER write new files unless
+explicitly required.
+
+NEVER proactively create documentation files (*.md) or README files. Only create
+documentation files if explicitly requested by the User.
+
+Only use emojis if the user explicitly requests it. Avoid adding emojis to files
+unless asked.
+
+When the user provides a path to a file assume that path is valid.`;
 
   schema = writeFileSchema;
 
-  async execute({ filePath, content }: z.infer<typeof writeFileSchema>): Promise<ToolResult> {
+  async execute({ filePath, content }: z.infer<typeof writeFileSchema>, _context?: ToolContext): Promise<ToolResult> {
     const fullPath = this.resolvePath(filePath);
 
     // === 业务错误：路径是目录 ===

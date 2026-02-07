@@ -8,6 +8,7 @@ import { EventType } from './agent-v2/eventbus';
 import fs from 'fs';
 import { AgentMessage, AgentMessageType } from './agent-v2/agent/stream-types';
 import { createMemoryManager } from './agent-v2';
+import { operatorPrompt } from './agent-v2/prompts/operator';
 
 dotenv.config({
     path: './.env.development',
@@ -57,7 +58,10 @@ async function demo1() {
   await memoryManager.initialize();
     const agent = new Agent({
         provider: ProviderRegistry.createFromEnv('minimax-2.1'),
-        systemPrompt: '你是一个智能助手,现在系统环境是windows系统',
+        systemPrompt:  operatorPrompt({
+                  directory: process.cwd(),
+                  language: 'Chinese',
+                }),
         stream: true,
         memoryManager,  // 传入 memoryManager 启用持久化
         // 只需设置这一个回调，就能获取所有信息
@@ -69,7 +73,7 @@ async function demo1() {
         // 可以在这里添加额外的日志记录
     });
 
-    const response = await agent.execute('当前目录有什么');
+    const response = await agent.execute('深度分析当前项目');
     console.log('\n\n最终响应:', response);
 
     // 输出会话 ID，用于后续恢复会话
@@ -79,13 +83,13 @@ async function demo1() {
     console.log('提示: 使用以下命令恢复此会话继续对话:');
     console.log(`SESSION_ID=${agent.getSessionId()} npx ts-node src/demo-session-restore.ts`);
     console.log('===================\n');
-    await agent.execute('帮我看一下/Users/wrr/work/coding-agent/src/providers 目录实现了什么');
+    // await agent.execute('帮我看一下/Users/wrr/work/coding-agent/src/providers 目录实现了什么');
         console.log('\n===================');
-    console.log('会话 ID:', agent.getSessionId());
+    // console.log('会话 ID:', agent.getSessionId());
     console.log('===================');
-    await agent.execute('帮我看一下https://claude.com/blog/complete-guide-to-building-skills-for-claude 这个文章将了什么');
+    // await agent.execute('帮我看一下https://claude.com/blog/complete-guide-to-building-skills-for-claude 这个文章将了什么');
         console.log('\n===================');
-    console.log('会话 ID:', agent.getSessionId());
+    // console.log('会话 ID:', agent.getSessionId());
     console.log('===================');
     fs.writeFileSync('./demo-1.json', JSON.stringify(agent.getMessages(), null, 2));
 

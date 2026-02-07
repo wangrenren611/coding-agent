@@ -124,6 +124,41 @@ export interface TaskData extends StorageItem {
 }
 
 /**
+ * 子任务运行数据（用于记录 task 工具触发的子 Agent 运行状态与索引）
+ * 详细对话内容存储在 childSessionId 对应的 contexts/histories 中。
+ */
+export interface SubTaskRunData extends StorageItem {
+  runId: string;
+  /** 父会话 ID（调用 task 工具的会话） */
+  parentSessionId: string;
+  /** 子 Agent 会话 ID（独立于父会话） */
+  childSessionId: string;
+  /** 任务运行模式 */
+  mode: 'foreground' | 'background';
+  status: 'queued' | 'running' | 'cancelling' | 'cancelled' | 'completed' | 'failed';
+  description: string;
+  prompt: string;
+  subagentType: string;
+  model?: string;
+  resume?: string;
+  startedAt: number;
+  finishedAt?: number;
+  /** 最近一次有进展的时间 */
+  lastActivityAt?: number;
+  /** 最近一次调用的工具名 */
+  lastToolName?: string;
+  turns?: number;
+  toolsUsed: string[];
+  output?: string;
+  error?: string;
+  /** 子会话消息数量（实际消息存于 contexts/histories） */
+  messageCount?: number;
+  /** 兼容历史数据：旧版本可能会直接内嵌 messages */
+  messages?: Message[];
+  metadata?: Record<string, unknown>;
+}
+
+/**
  * 查询选项接口
  */
 export interface QueryOptions {
@@ -161,6 +196,17 @@ export interface TaskFilter {
   taskId?: string;
   parentTaskId?: string | null;
   status?: TaskData['status'];
+}
+
+/**
+ * 子任务运行查询过滤条件
+ */
+export interface SubTaskRunFilter {
+  runId?: string;
+  parentSessionId?: string;
+  childSessionId?: string;
+  status?: SubTaskRunData['status'];
+  mode?: SubTaskRunData['mode'];
 }
 
 /**
@@ -373,6 +419,33 @@ export interface IMemoryManager {
    * @param taskId 任务ID
    */
   deleteTask(taskId: string): Promise<void>;
+
+  // ==================== 子任务运行管理 ====================
+
+  /**
+   * 保存或更新子任务运行记录
+   * @param run 子任务运行数据
+   */
+  saveSubTaskRun(run: Omit<SubTaskRunData, 'createdAt' | 'updatedAt'>): Promise<void>;
+
+  /**
+   * 获取子任务运行记录
+   * @param runId 运行 ID
+   */
+  getSubTaskRun(runId: string): Promise<SubTaskRunData | null>;
+
+  /**
+   * 查询子任务运行记录
+   * @param filter 过滤条件
+   * @param options 查询选项
+   */
+  querySubTaskRuns(filter?: SubTaskRunFilter, options?: QueryOptions): Promise<SubTaskRunData[]>;
+
+  /**
+   * 删除子任务运行记录
+   * @param runId 运行 ID
+   */
+  deleteSubTaskRun(runId: string): Promise<void>;
 
   // ==================== 通用操作 ====================
 

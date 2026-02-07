@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { BaseTool, ToolResult } from './base';
+import { BaseTool, ToolContext, ToolResult } from './base';
 import TurndownService from 'turndown';
 
 // 常量定义
@@ -19,7 +19,7 @@ export class WebFetchTool extends BaseTool<typeof schema> {
   description = 'Fetch webpage content from a URL and return it in the specified format (markdown, text, or html).';
   schema = schema;
 
-  async execute(params: z.infer<typeof schema>): Promise<ToolResult> {
+  async execute(params: z.infer<typeof schema>, _context?: ToolContext): Promise<ToolResult> {
     const startTime = Date.now();
 
     try {

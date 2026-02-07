@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { BaseTool, ToolResult } from './base';
+import { BaseTool, ToolContext, ToolResult } from './base';
 import { tavily } from '@tavily/core';
 
 const schema = z.object({
@@ -12,7 +12,7 @@ export class WebSearchTool extends BaseTool<typeof schema> {
   description = "Performs a web search using Tavily API.";
   schema = schema;
 
-  async execute({ query, maxResults = 3 }: z.infer<typeof schema>): Promise<ToolResult> {
+  async execute({ query, maxResults = 3 }: z.infer<typeof schema>, _context?: ToolContext): Promise<ToolResult> {
     // === 业务错误：API Key 未配置 ===
     if (!process.env.TAVILY_API_KEY) {
       return this.result({

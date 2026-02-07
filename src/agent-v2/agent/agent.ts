@@ -575,9 +575,22 @@ export class Agent {
             : '';
         this.emitToolCallCreated(toolCalls, messageId, messageContent);
 
+        // 在执行工具前注入最新会话上下文，确保工具可读取 session 级数据
+        const toolContext = this.injectToolContext();
+
         // 执行工具
-        const results = await this.toolRegistry.execute(toolCalls);
+        const results = await this.toolRegistry.execute(toolCalls, toolContext);
         this.recordToolResults(results);
+    }
+
+    private injectToolContext(): { sessionId: string; memoryManager?: unknown } {
+        const sessionId = this.session.getSessionId();
+        const memoryManager = this.session.getMemoryManager();
+        const context = {
+            sessionId,
+            ...(memoryManager ? { memoryManager } : {}),
+        };
+        return context;
     }
 
     private recordToolResults(results: ToolExecutionResult[]): void {

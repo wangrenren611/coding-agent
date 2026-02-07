@@ -4,7 +4,7 @@
  */
 
 import { z } from 'zod';
-import { BaseTool, ToolResult } from './base';
+import { BaseTool, ToolContext, ToolResult } from './base';
 import * as ts from 'typescript';
 import * as fs from 'fs/promises';
 import * as path from 'path';
@@ -658,7 +658,8 @@ Note: goToDefinition and documentSymbol work with any file.
    * 执行 LSP 操作
    */
   async execute(
-    args: z.infer<typeof this.schema>
+    args: z.infer<typeof this.schema>,
+    _context?: ToolContext,
   ): Promise<ToolResult> {
     try {
       // 解析文件路径

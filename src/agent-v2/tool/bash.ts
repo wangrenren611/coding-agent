@@ -7,7 +7,7 @@
  * - 命令执行
  */
 
-import { BaseTool, ToolResult } from './base';
+import { BaseTool, ToolContext, ToolResult } from './base';
 import { z } from 'zod';
 import BASH_DESCRIPTION from './bash.description';
 import { execaCommand } from 'execa';
@@ -257,7 +257,7 @@ export default class BashTool extends BaseTool<typeof schema> {
      * - 业务错误（参数验证、安全检查）→ return { success: false, error: ... }
      * - 底层异常（执行失败）→ throw 供 Registry 捕获
      */
-    async execute(args: z.infer<typeof this.schema>): Promise<ToolResult> {
+    async execute(args: z.infer<typeof this.schema>, _context?: ToolContext): Promise<ToolResult> {
         const { command, timeout, } = args;
 
         if (!command) {

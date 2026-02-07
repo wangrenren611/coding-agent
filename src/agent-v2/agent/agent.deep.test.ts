@@ -4,6 +4,7 @@ import { AgentStatus } from './types';
 import { AgentMessageType, type AgentMessage } from './stream-types';
 import { EventType } from '../eventbus';
 import { ToolRegistry } from '../tool/registry';
+import { BaseTool, z } from '../tool/base';
 import { LLMProvider } from '../../providers';
 import type {
   Chunk,
@@ -182,6 +183,10 @@ function createMemoryManager(overrides: Partial<IMemoryManager> = {}): IMemoryMa
     getTask: vi.fn(async () => null),
     queryTasks: vi.fn(async () => []),
     deleteTask: vi.fn(async () => undefined),
+    saveSubTaskRun: vi.fn(async () => undefined),
+    getSubTaskRun: vi.fn(async () => null),
+    querySubTaskRuns: vi.fn(async () => []),
+    deleteSubTaskRun: vi.fn(async () => undefined),
     initialize: vi.fn(async () => undefined),
     close: vi.fn(async () => undefined),
     isHealthy: vi.fn(async () => true),
@@ -296,7 +301,12 @@ describe('Agent deep behavior tests', () => {
 
     expect(result.content).toBe('tool result consumed');
     expect((toolRegistry as any).execute).toHaveBeenCalledTimes(1);
-    expect((toolRegistry as any).execute).toHaveBeenCalledWith(toolCalls);
+    expect((toolRegistry as any).execute).toHaveBeenCalledWith(
+      toolCalls,
+      expect.objectContaining({
+        sessionId: agent.getSessionId(),
+      }),
+    );
 
     const messages = agent.getMessages();
     expect(messages.map((m) => m.role)).toEqual(['system', 'user', 'assistant', 'tool', 'assistant']);
@@ -313,6 +323,88 @@ describe('Agent deep behavior tests', () => {
 
     expect(provider.calls).toHaveLength(2);
     expect(provider.calls[1]?.messages.map((m) => m.role)).toEqual(['system', 'user', 'assistant', 'tool']);
+    expect((toolRegistry as any).execute).toHaveBeenCalledWith(
+      toolCalls,
+      expect.objectContaining({
+        sessionId: agent.getSessionId(),
+      }),
+    );
+  });
+
+  it('should isolate tool context for concurrent agents', async () => {
+    const captured: Array<{ label: string; before?: string; after?: string }> = [];
+    const captureContextSchema = z.object({
+      delayMs: z.number().int().min(0).default(0),
+    }).strict();
+
+    class CaptureContextTool extends BaseTool<typeof captureContextSchema> {
+      name = 'capture_context';
+      description = 'capture tool context session id';
+      schema = captureContextSchema;
+
+      constructor(private readonly label: string) {
+        super();
+      }
+
+      async execute(args: z.infer<typeof captureContextSchema>, context?: any) {
+        const before = context?.sessionId;
+        if (args.delayMs > 0) {
+          await new Promise((resolve) => setTimeout(resolve, args.delayMs));
+        }
+        const after = context?.sessionId;
+        captured.push({ label: this.label, before, after });
+        return this.result({
+          success: true,
+          metadata: { before, after },
+          output: `${before || ''}->${after || ''}`,
+        });
+      }
+    }
+
+    const makeAgent = (sessionId: string, label: string) => {
+      const provider = new ScriptedProvider([
+        async () => toolCallResponse([{
+          id: `call_${label}`,
+          type: 'function',
+          index: 0,
+          function: {
+            name: 'capture_context',
+            arguments: '{"delayMs":30}',
+          },
+        }]),
+        async () => textResponse(`${label} done`),
+      ]);
+
+      const registry = new ToolRegistry({ workingDirectory: process.cwd() });
+      registry.register([new CaptureContextTool(label)]);
+
+      return new Agent({
+        provider,
+        toolRegistry: registry,
+        stream: false,
+        systemPrompt: 'system prompt',
+        sessionId,
+        memoryManager: createMemoryManager(),
+      });
+    };
+
+    const agentA = makeAgent('session-A', 'A');
+    const agentB = makeAgent('session-B', 'B');
+
+    await Promise.all([
+      agentA.execute('run tool'),
+      agentB.execute('run tool'),
+    ]);
+
+    expect(captured).toHaveLength(2);
+    const recordA = captured.find((item) => item.label === 'A');
+    const recordB = captured.find((item) => item.label === 'B');
+    expect(recordA).toBeDefined();
+    expect(recordB).toBeDefined();
+    expect(recordA?.before).toBe('session-A');
+    expect(recordA?.after).toBe('session-A');
+    expect(recordB?.before).toBe('session-B');
+    expect(recordB?.after).toBe('session-B');
   });
 
   it('should sanitize sensitive keys in tool result callback and stored message', async () => {
@@ -660,6 +752,118 @@ describe('Agent deep behavior tests', () => {
       toolName: 'lookup',
       args: '{"q":"release"}',
     });
+  });
+
+  it('should preserve assistant tool_calls when finish_reason arrives in a later chunk', async () => {
+    const provider = new ScriptedProvider([
+      async () => {
+        return streamFromChunks([
+          {
+            index: 0,
+            id: 'tool-split-1',
+            choices: [{
+              index: 0,
+              delta: {
+                role: 'assistant',
+                content: 'Checking ',
+              },
+            }],
+          },
+          {
+            index: 0,
+            id: 'tool-split-2',
+            choices: [{
+              index: 0,
+              delta: {
+                role: 'assistant',
+                tool_calls: [{
+                  id: 'call_stream_split_1',
+                  type: 'function',
+                  index: 0,
+                  function: {
+                    name: 'lookup',
+                    arguments: '{"q":"release"}',
+                  },
+                }],
+              },
+            }],
+          },
+          {
+            index: 0,
+            id: 'tool-split-3',
+            choices: [{
+              index: 0,
+              delta: {
+                role: 'assistant',
+                content: '',
+              },
+              finish_reason: 'tool_calls',
+            }],
+          },
+        ]);
+      },
+      async (messages) => {
+        const assistantWithToolCall = messages.find(
+          (m) =>
+            m.role === 'assistant' &&
+            Array.isArray((m as { tool_calls?: unknown[] }).tool_calls) &&
+            ((m as { tool_calls?: unknown[] }).tool_calls?.length ?? 0) > 0
+        );
+        const toolMessage = messages.find(
+          (m) =>
+            m.role === 'tool' &&
+            typeof (m as { tool_call_id?: unknown }).tool_call_id === 'string'
+        );
+
+        expect(assistantWithToolCall).toBeDefined();
+        expect(toolMessage).toBeDefined();
+
+        const toolCalls = (assistantWithToolCall as { tool_calls: ToolCall[] }).tool_calls;
+        const toolCallIds = toolCalls.map((call) => call.id);
+        const toolCallId = (toolMessage as { tool_call_id: string }).tool_call_id;
+        expect(toolCallIds).toContain(toolCallId);
+        expect(toolCallIds).toContain('call_stream_split_1');
+
+        return streamFromChunks([
+          {
+            index: 0,
+            id: 'tool-split-4',
+            choices: [{
+              index: 0,
+              delta: {
+                role: 'assistant',
+                content: 'Done',
+              },
+              finish_reason: 'stop',
+            }],
+          },
+        ]);
+      },
+    ]);
+
+    const toolRegistry = createToolRegistryStub([
+      {
+        tool_call_id: 'call_stream_split_1',
+        name: 'lookup',
+        arguments: '{"q":"release"}',
+        result: {
+          success: true,
+          output: 'ok',
+        },
+      },
+    ]);
+
+    const agent = new Agent({
+      provider,
+      toolRegistry,
+      stream: true,
+    });
+
+    const result = await agent.execute('stream split tool flow');
+
+    expect(result.content).toBe('Done');
+    expect((toolRegistry as any).execute).toHaveBeenCalledTimes(1);
+    expect(provider.calls).toHaveLength(2);
   });
 
   it('should reject invalid user input content parts', async () => {

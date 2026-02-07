@@ -5,7 +5,22 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { OpenAICompatibleProvider } from './openai-compatible';
 import { StandardAdapter } from './adapters/standard';
-import type { LLMGenerateOptions, LLMRequestMessage } from './types';
+import type { Chunk, LLMGenerateOptions, LLMRequestMessage } from './types';
+
+async function collectChunks(stream: AsyncGenerator<Chunk>): Promise<Chunk[]> {
+  const chunks: Chunk[] = [];
+  for await (const chunk of stream) {
+    chunks.push(chunk);
+  }
+  return chunks;
+}
+
+function collectTextFromChunks(chunks: Chunk[]): string {
+  return chunks
+    .flatMap((chunk) => chunk.choices || [])
+    .map((choice) => choice.delta?.content || '')
+    .join('');
+}
 
 describe('OpenAICompatibleProvider', () => {
   let provider: OpenAICompatibleProvider;
@@ -144,13 +159,10 @@ describe('OpenAICompatibleProvider', () => {
         body: stream,
       } as Response);
 
-      const streamCallback = vi.fn();
-      const result = await provider.generate(mockMessages, { stream: true, streamCallback });
-
-      expect(result).toBeDefined();
-      expect(result.choices).toHaveLength(1);
-      expect(result.choices[0].message.content).toBe('Hello World');
-      expect(streamCallback).toHaveBeenCalled();
+      const streamResult = provider.generate(mockMessages, { stream: true }) as AsyncGenerator<Chunk>;
+      const chunks = await collectChunks(streamResult);
+      expect(chunks.length).toBeGreaterThan(0);
+      expect(collectTextFromChunks(chunks)).toBe('Hello World');
     });
 
     it('should pass options to adapter transformRequest', async () => {
@@ -254,11 +266,11 @@ describe('OpenAICompatibleProvider', () => {
         body: stream,
       } as Response);
 
-      const result = await provider.generate([{ role: 'user', content: 'Hi' }], {
+      const streamResult = provider.generate([{ role: 'user', content: 'Hi' }], {
         stream: true,
-      });
-
-      expect(result.choices[0].message.content).toBe('ABC');
+      }) as AsyncGenerator<Chunk>;
+      const chunks = await collectChunks(streamResult);
+      expect(collectTextFromChunks(chunks)).toBe('ABC');
     });
 
     it('should handle tool calls in stream', async () => {
@@ -283,13 +295,29 @@ describe('OpenAICompatibleProvider', () => {
         body: stream,
       } as Response);
 
-      const result = await provider.generate([{ role: 'user', content: 'Hi' }], {
+      const streamResult = provider.generate([{ role: 'user', content: 'Hi' }], {
         stream: true,
-      });
-
-      expect(result.choices[0].message.tool_calls).toHaveLength(1);
-      expect(result.choices[0].message.tool_calls?.[0].function.name).toBe('test');
-      expect(result.choices[0].message.tool_calls?.[0].function.arguments).toBe('{}');
+      }) as AsyncGenerator<Chunk>;
+      const chunks = await collectChunks(streamResult);
+      const mergedCalls = new Map<number, { id?: string; name?: string; arguments?: string }>();
+      for (const chunk of chunks) {
+        for (const choice of chunk.choices || []) {
+          const toolCalls = choice.delta?.tool_calls || [];
+          for (const call of toolCalls) {
+            const index = call.index ?? 0;
+            const prev = mergedCalls.get(index) || {};
+            mergedCalls.set(index, {
+              id: call.id || prev.id,
+              name: call.function?.name || prev.name,
+              arguments: `${prev.arguments || ''}${call.function?.arguments || ''}`,
+            });
+          }
+        }
+      }
+      const call0 = mergedCalls.get(0);
+      expect(call0).toBeDefined();
+      expect(call0?.name).toBe('test');
+      expect(call0?.arguments).toBe('{}');
     });
 
     it('should not throw error for empty stream with length finish reason', async () => {
@@ -340,12 +368,14 @@ describe('OpenAICompatibleProvider', () => {
         body: stream,
       } as Response);
 
-      const result = await provider.generate([{ role: 'user', content: 'Hi' }], {
+      const streamResult = provider.generate([{ role: 'user', content: 'Hi' }], {
         stream: true,
-      });
-
-      expect(result.choices[0].message.content).toBe('');
-      expect(result.choices[0].finish_reason).toBe('stop');
+      }) as AsyncGenerator<Chunk>;
+      const chunks = await collectChunks(streamResult);
+      const hasStop = chunks.some((chunk) =>
+        (chunk.choices || []).some((choice) => choice.finish_reason === 'stop')
+      );
+      expect(hasStop).toBe(true);
     });
 
     it('should update metadata from stream chunks', async () => {
@@ -369,14 +399,14 @@ describe('OpenAICompatibleProvider', () => {
         body: stream,
       } as Response);
 
-      const result = await provider.generate([{ role: 'user', content: 'Hello' }], {
+      const streamResult = provider.generate([{ role: 'user', content: 'Hello' }], {
         stream: true,
-      });
-
-      expect(result.id).toBe('test-id');
-      expect(result.object).toBe('chat.completion.chunk');
-      expect(result.created).toBe(1234567890);
-      expect(result.model).toBe('gpt-4');
+      }) as AsyncGenerator<Chunk>;
+      const chunks = await collectChunks(streamResult);
+      expect(chunks[0]?.id).toBe('test-id');
+      expect(chunks[0]?.object).toBe('chat.completion.chunk');
+      expect(chunks[0]?.created).toBe(1234567890);
+      expect(chunks[0]?.model).toBe('gpt-4');
     });
   });
 

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import fg from 'fast-glob';
 import { resolve } from 'path';
-import { BaseTool, ToolResult } from './base';
+import { BaseTool, ToolContext, ToolResult } from './base';
 
 const schema = z.object({
     pattern: z.string().describe('Glob pattern like **/*.ts or src/**/*.test.ts'),
@@ -19,12 +19,11 @@ export default class GlobTool extends BaseTool<typeof schema> {
 - When you are doing an open ended search that may require multiple rounds of globbing
   and grepping, use the Agent tool instead
 - You can call multiple tools in a single response. It is always better to speculatively
-  perform multiple searches in parallel if potentially useful.
-`;
+  perform multiple searches in parallel if potentially useful.`;
 
     schema = schema;
 
-    async execute({ pattern, path = '.' }: z.infer<typeof schema>): Promise<ToolResult> {
+    async execute({ pattern, path = '.' }: z.infer<typeof schema>, _context?: ToolContext): Promise<ToolResult> {
         const searchPath = resolve(process.cwd(), path);
 
         // === 底层异常：glob 匹配失败 ===

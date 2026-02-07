@@ -35,9 +35,9 @@ export class LLMRetryableError extends LLMError {
     }
 }
 
-export class LLMRateLimitError extends LLMError {
-    constructor(message: string) {
-        super(message, 'RATE_LIMIT');
+export class LLMRateLimitError extends LLMRetryableError {
+    constructor(message: string, retryAfter?: number) {
+        super(message, retryAfter, 'RATE_LIMIT');
         this.name = 'LLMRateLimitError';
     }
 }
@@ -128,7 +128,7 @@ export function createErrorFromStatus(
 }
 
 export function isRetryableError(error: unknown): error is LLMRetryableError {
-    return error instanceof LLMRetryableError;
+    return error instanceof LLMRetryableError || error instanceof LLMRateLimitError;
 }
 
 export function isPermanentError(error: unknown): error is LLMPermanentError {

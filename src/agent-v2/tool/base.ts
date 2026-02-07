@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { IMemoryManager } from '../memory/types';
 
 /**
  * 统一的工具执行结果接口
@@ -19,7 +20,7 @@ export type ToolContext = {
     platform: string;
     time: string;
     sessionId?: string;
-    sessionPath?: string;
+    memoryManager?: IMemoryManager;
 };
 
 
@@ -47,7 +48,7 @@ export abstract class BaseTool<T extends z.ZodType> {
      * @param args - 解析后的参数
      * @returns 统一的工具结果
      */
-    abstract execute(args?: z.infer<T>): Promise<ToolResult> | ToolResult;
+    abstract execute(args?: z.infer<T>, context?: ToolContext): Promise<ToolResult> | ToolResult;
 
 
     /**

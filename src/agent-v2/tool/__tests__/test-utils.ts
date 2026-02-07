@@ -73,7 +73,6 @@ export function createMockToolContext(sessionId?: string) {
         platform: process.platform,
         time: new Date().toISOString(),
         sessionId,
-        sessionPath: undefined,
     };
 }
 

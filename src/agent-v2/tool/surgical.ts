@@ -1,30 +1,31 @@
 import fs from 'fs';
 import path from 'path';
 import { z } from 'zod';
-import { BaseTool, ToolResult } from './base';
+import { BaseTool, ToolContext, ToolResult } from './base';
 
 export class SurgicalEditTool extends BaseTool<any> {
 
   name = "precise_replace";
 
-  description = `Precise code replacement using line numbers and exact text matching.
+  description = `Performs exact string replacements in files.
 
-IMPORTANT: Supports multi-line replacement. The 'line' parameter specifies the STARTING line number of 'oldText'.
-
-How it works:
-1. Find the text segment starting at 'line' that exactly matches 'oldText'
-2. Replace that entire segment with 'newText'
-3. Both 'oldText' and 'newText' can span multiple lines
-
-Example: If lines 5-10 contain 'old_func', and you want to replace with 'new_func':
-- line: 5 (starting line)
-- oldText: (exact text from lines 5-10)
-- newText: (replacement text)
-
-Use this tool when:
-- You need precise control over what gets replaced
-- Read/Write tool failed or is too slow
-- Working with large files`;
+Usage:
+- You must use the Read tool at least once in the conversation before editing.
+  This tool will error if you attempt an edit without reading the file.
+- When editing text from Read tool output, ensure you preserve the exact indentation
+  (tabs/spaces) as it appears AFTER the line number prefix. The line number prefix
+  format is: spaces + line number + tab. Everything after that tab is the actual
+  file content to match. Never include any part of the line number prefix in the
+  old_string or new_string.
+- ALWAYS prefer editing existing files in the codebase. NEVER write new files unless
+  explicitly required.
+- Only use emojis if the user explicitly requests it. Avoid adding emojis to files
+  unless asked.
+- The edit will FAIL if \`old_string\` is not unique in the file. Either provide a
+  larger string with more surrounding context to make it unique or use replace_all
+  to change every instance of \`old_string\`.
+- Use \`replace_all\` for replacing and renaming strings across the file. This
+  parameter is useful for example if you want to rename a variable.`;
 
   schema = z.object({
     filePath: z.string().describe("The absolute or relative path to the file"),
@@ -33,7 +34,7 @@ Use this tool when:
     newText: z.string().describe("The replacement text - can span multiple lines")
   }).strict();
 
-  async execute({ filePath, line, oldText, newText }: z.infer<typeof this.schema>): Promise<ToolResult> {
+  async execute({ filePath, line, oldText, newText }: z.infer<typeof this.schema>, _context?: ToolContext): Promise<ToolResult> {
     const fullPath = path.resolve(process.cwd(), filePath);
 
     // === 业务错误：文件不存在 ===

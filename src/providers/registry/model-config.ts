@@ -18,7 +18,7 @@ export const MODEL_DEFINITIONS: Record<ModelId, Omit<ModelConfig, 'apiKey'>> = {
         baseURL: 'https://open.bigmodel.cn/api/paas/v4',
         endpointPath: '/chat/completions',
         envApiKey: 'GLM_API_KEY',
-        envBaseURL: 'GLM_BASE_URL',
+        envBaseURL: 'GLM_API_BASE',
         model: 'GLM-4.7',
         max_tokens: 8000,
         LLMMAX_TOKENS: 200 * 1000,
