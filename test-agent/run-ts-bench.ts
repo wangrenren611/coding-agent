@@ -1,12 +1,14 @@
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs';
 import { execa } from 'execa';
 
 type RunnerOptions = {
-  tsBenchDir: string;
+  tsBenchDir?: string;
   adapterPath: string;
   agent: string;
   model?: string;
+  bunBin?: string;
   args: string[];
 };
 
@@ -15,10 +17,11 @@ function parseArgs(argv: string[]): RunnerOptions {
   const projectRoot = path.resolve(path.dirname(thisFile), '..');
 
   const options: RunnerOptions = {
-    tsBenchDir: process.env.TS_BENCH_DIR || path.resolve(projectRoot, '../ts-bench'),
+    tsBenchDir: process.env.TS_BENCH_DIR,
     adapterPath: path.resolve(projectRoot, 'test-agent/agent-adapter.ts'),
     agent: process.env.TS_BENCH_AGENT || 'custom',
     model: process.env.TS_BENCH_MODEL,
+    bunBin: process.env.BUN_BIN,
     args: [],
   };
 
@@ -45,6 +48,11 @@ function parseArgs(argv: string[]): RunnerOptions {
       i++;
       continue;
     }
+    if (arg === '--bun-bin' && next) {
+      options.bunBin = path.resolve(next);
+      i++;
+      continue;
+    }
     if (arg === '--help' || arg === '-h') {
       printHelp();
       process.exit(0);
@@ -53,6 +61,62 @@ function parseArgs(argv: string[]): RunnerOptions {
   }
 
   return options;
+}
+
+function isTsBenchDir(dir: string): boolean {
+  return fs.existsSync(path.join(dir, 'src', 'index.ts'));
+}
+
+function discoverTsBenchDir(projectRoot: string, explicitDir?: string): {
+  dir?: string;
+  tried: string[];
+} {
+  const tried = new Set<string>();
+
+  const addTry = (candidate?: string) => {
+    if (!candidate) return;
+    tried.add(path.resolve(candidate));
+  };
+
+  addTry(explicitDir);
+  addTry(process.env.TS_BENCH_DIR);
+  addTry(path.resolve(projectRoot, '../ts-bench'));
+  addTry(path.resolve(projectRoot, '../../ts-bench'));
+
+  const workspaceParent = path.resolve(projectRoot, '..');
+  if (fs.existsSync(workspaceParent)) {
+    for (const entry of fs.readdirSync(workspaceParent, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      if (!/ts[-_]?bench/i.test(entry.name)) continue;
+      addTry(path.join(workspaceParent, entry.name));
+    }
+  }
+
+  for (const candidate of tried) {
+    if (isTsBenchDir(candidate)) {
+      return { dir: candidate, tried: Array.from(tried) };
+    }
+  }
+
+  return { tried: Array.from(tried) };
+}
+
+function resolveBunBinary(explicitBin?: string): string {
+  if (explicitBin && fs.existsSync(explicitBin)) {
+    return explicitBin;
+  }
+
+  if (process.env.BUN_BIN && fs.existsSync(process.env.BUN_BIN)) {
+    return process.env.BUN_BIN;
+  }
+
+  const nodeDir = path.dirname(process.execPath);
+  const siblingBun = path.join(nodeDir, 'bun');
+  if (fs.existsSync(siblingBun)) {
+    return siblingBun;
+  }
+
+  return 'bun';
 }
 
 function printHelp(): void {
@@ -64,6 +128,7 @@ Options:
   --adapter <path>          Custom adapter entry (default: test-agent/agent-adapter.ts)
   --agent <name>            ts-bench agent name (default: custom)
   --model <modelId>         Model id passed to adapter via env
+  --bun-bin <path>          Bun binary path (or use env BUN_BIN)
   -h, --help                Show help
 
 This runner injects adapter command via environment variables, so you can map
@@ -73,6 +138,26 @@ ts-bench "custom" agent to this repository's Agent implementation.
 
 async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
+  const thisFile = fileURLToPath(import.meta.url);
+  const projectRoot = path.resolve(path.dirname(thisFile), '..');
+  const { dir: tsBenchDir, tried } = discoverTsBenchDir(projectRoot, options.tsBenchDir);
+
+  if (!tsBenchDir) {
+    throw new Error(
+      [
+        'Cannot find ts-bench directory.',
+        'Tried:',
+        ...tried.map((item) => `  - ${item}`),
+        '',
+        'Fix:',
+        '  1) Clone ts-bench to any local path',
+        '  2) Run with --ts-bench-dir <your-path>',
+        '',
+        'Example:',
+        '  pnpm bench:agent:ts-bench -- --ts-bench-dir "/absolute/path/to/ts-bench"',
+      ].join('\n')
+    );
+  }
 
   const adapterCommand = `tsx "${options.adapterPath}"`;
   const benchArgs = [
@@ -95,12 +180,15 @@ async function main(): Promise<void> {
     env.TS_BENCH_MODEL = options.model;
   }
 
-  console.log('[run-ts-bench] ts-bench dir:', options.tsBenchDir);
-  console.log('[run-ts-bench] adapter:', options.adapterPath);
-  console.log('[run-ts-bench] command: bun', benchArgs.join(' '));
+  const bunBinary = resolveBunBinary(options.bunBin);
 
-  await execa('bun', benchArgs, {
-    cwd: options.tsBenchDir,
+  console.log('[run-ts-bench] ts-bench dir:', tsBenchDir);
+  console.log('[run-ts-bench] adapter:', options.adapterPath);
+  console.log('[run-ts-bench] bun:', bunBinary);
+  console.log('[run-ts-bench] command:', bunBinary, benchArgs.join(' '));
+
+  await execa(bunBinary, benchArgs, {
+    cwd: tsBenchDir,
     env,
     stdio: 'inherit',
   });
