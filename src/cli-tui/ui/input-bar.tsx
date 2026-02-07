@@ -81,16 +81,16 @@ export const InputBar: React.FC<InputBarProps> = ({
   );
 
   return (
-    <box flexDirection="column" width="100%" flexShrink={0}>
+    <box flexDirection="column" width="100%" flexShrink={0} paddingTop={0}>
       <box
         borderStyle="single"
         borderLeft={false}
         borderRight={false}
         borderColor={COLORS.border}
-        paddingX={1}
+        paddingX={0}
       >
         <text fg={COLORS.user} bold>
-          {ICONS.user}{' '}
+          {ICONS.user} {'>'}{' '}
         </text>
         <input
           value={localValue}
@@ -103,9 +103,9 @@ export const InputBar: React.FC<InputBarProps> = ({
           focused={isActive}
         />
       </box>
-      <box paddingX={1}>
+      <box>
         <text fg={COLORS.textMuted}>
-          Enter to send | {KEY_BINDINGS.exit} to exit | {KEY_BINDINGS.openHelp} for help
+          Enter send | {KEY_BINDINGS.exit} exit | {KEY_BINDINGS.openHelp} help | /clear reset
         </text>
       </box>
     </box>

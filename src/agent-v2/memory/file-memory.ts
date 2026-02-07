@@ -323,37 +323,27 @@ export class FileMemoryManager implements IMemoryManager {
       throw new Error(`Context not found for session: ${sessionId}`);
     }
 
-    // 添加到上下文
-    const lastMessage = context.messages[context.messages.length - 1];
-    if (lastMessage?.messageId === message.messageId) {
-      // 更新最后一条消息
-      context.messages[context.messages.length - 1] = message;
-    } else {
-      // 添加新消息
-      context.messages.push(message);
-      context.version++;
-    }
+    const isNewContextMessage = this.upsertContextMessage(context, message);
 
     context.updatedAt = Date.now();
 
     // 同时添加到历史（默认启用）
     if (options.addToHistory !== false) {
-      const history = this.cache.histories.get(sessionId) || [];
-      const historyMessage: HistoryMessage = {
-        ...message,
-        sequence: history.length + 1,
-      };
-      history.push(historyMessage);
-      this.cache.histories.set(sessionId, history);
+      const history = this.ensureHistoryList(sessionId);
+      this.upsertHistoryMessage(history, message);
       await this.saveHistoryFile(sessionId);
 
       // 更新会话统计
       const session = this.cache.sessions.get(sessionId);
       if (session) {
         session.totalMessages = history.length;
-        session.updatedAt = Date.now();
+        session.updatedAt = context.updatedAt;
         await this.saveSessionFile(sessionId);
       }
+    }
+
+    if (isNewContextMessage) {
+      context.version++;
     }
 
     await this.saveContextFile(sessionId);
@@ -371,39 +361,29 @@ export class FileMemoryManager implements IMemoryManager {
       throw new Error(`Context not found for session: ${sessionId}`);
     }
 
-    // 批量添加到上下文
+    let newContextMessages = 0;
     for (const message of messages) {
-      const lastMessage = context.messages[context.messages.length - 1];
-      if (lastMessage?.messageId === message.messageId) {
-        context.messages[context.messages.length - 1] = message;
-      } else {
-        context.messages.push(message);
+      if (this.upsertContextMessage(context, message)) {
+        newContextMessages++;
       }
     }
-    context.version += messages.length;
+    context.version += newContextMessages;
     context.updatedAt = Date.now();
 
     // 同时添加到历史
     if (options.addToHistory !== false) {
-      const history = this.cache.histories.get(sessionId) || [];
-      let sequence = history.length;
-
+      const history = this.ensureHistoryList(sessionId);
       for (const message of messages) {
-        const historyMessage: HistoryMessage = {
-          ...message,
-          sequence: ++sequence,
-        };
-        history.push(historyMessage);
+        this.upsertHistoryMessage(history, message);
       }
 
-      this.cache.histories.set(sessionId, history);
       await this.saveHistoryFile(sessionId);
 
       // 更新会话统计
       const session = this.cache.sessions.get(sessionId);
       if (session) {
         session.totalMessages = history.length;
-        session.updatedAt = Date.now();
+        session.updatedAt = context.updatedAt;
         await this.saveSessionFile(sessionId);
       }
     }
@@ -423,13 +403,32 @@ export class FileMemoryManager implements IMemoryManager {
       throw new Error(`Context not found for session: ${sessionId}`);
     }
 
-    const index = context.messages.findIndex((m) => m.messageId === messageId);
+    const index = this.findLastContextIndex(context.messages, messageId);
     if (index === -1) {
       throw new Error(`Message not found in context: ${messageId}`);
     }
 
     context.messages[index] = { ...context.messages[index], ...updates };
     context.updatedAt = Date.now();
+
+    const history = this.cache.histories.get(sessionId);
+    if (history) {
+      const historyIndex = this.findLastHistoryIndex(history, messageId);
+      if (historyIndex !== -1) {
+        history[historyIndex] = {
+          ...history[historyIndex],
+          ...updates,
+          sequence: history[historyIndex].sequence,
+        };
+      }
+      await this.saveHistoryFile(sessionId);
+    }
+
+    const session = this.cache.sessions.get(sessionId);
+    if (session) {
+      session.updatedAt = context.updatedAt;
+      await this.saveSessionFile(sessionId);
+    }
 
     await this.saveContextFile(sessionId);
   }
@@ -923,6 +922,61 @@ export class FileMemoryManager implements IMemoryManager {
   private async deleteTaskFile(taskId: string): Promise<void> {
     const filePath = path.join(this.tasksPath, `${taskId}.json`);
     await fs.unlink(filePath).catch(() => {});
+  }
+
+  private ensureHistoryList(sessionId: string): HistoryMessage[] {
+    const existing = this.cache.histories.get(sessionId);
+    if (existing) return existing;
+
+    const created: HistoryMessage[] = [];
+    this.cache.histories.set(sessionId, created);
+    return created;
+  }
+
+  private upsertContextMessage(context: CurrentContext, message: Message): boolean {
+    const lastMessage = context.messages[context.messages.length - 1];
+    if (lastMessage?.messageId === message.messageId) {
+      context.messages[context.messages.length - 1] = message;
+      return false;
+    }
+
+    context.messages.push(message);
+    return true;
+  }
+
+  private upsertHistoryMessage(history: HistoryMessage[], message: Message): void {
+    const existingIndex = this.findLastHistoryIndex(history, message.messageId);
+    if (existingIndex === -1) {
+      history.push({
+        ...message,
+        sequence: history.length + 1,
+      });
+      return;
+    }
+
+    history[existingIndex] = {
+      ...history[existingIndex],
+      ...message,
+      sequence: history[existingIndex].sequence,
+    };
+  }
+
+  private findLastHistoryIndex(history: HistoryMessage[], messageId: string): number {
+    for (let i = history.length - 1; i >= 0; i--) {
+      if (history[i].messageId === messageId) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  private findLastContextIndex(messages: Message[], messageId: string): number {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].messageId === messageId) {
+        return i;
+      }
+    }
+    return -1;
   }
 
   // ==================== 私有方法 - 工具 ====================

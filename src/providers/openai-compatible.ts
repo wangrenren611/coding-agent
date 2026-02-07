@@ -91,14 +91,16 @@ export class OpenAICompatibleProvider extends LLMProvider {
             return Promise.resolve(null);
         }
 
+        const resolvedOptions = this.resolveGenerateOptions(options);
+
         // 构建请求体
         const requestBody = this.adapter.transformRequest({
-            model: options?.model ?? this.config.model,
-            max_tokens: options?.max_tokens,
+            model: resolvedOptions?.model ?? this.config.model,
+            max_tokens: resolvedOptions?.max_tokens,
             temperature: this.config.temperature,
             messages,
-            thinking: options?.thinking||this.config.thinking,
-            ...(options ?? {}),
+            thinking: resolvedOptions?.thinking ?? this.config.thinking,
+            ...(resolvedOptions ?? {}),
         });
 
         // 构建请求参数
@@ -106,7 +108,7 @@ export class OpenAICompatibleProvider extends LLMProvider {
             url: this._resolveEndpoint(),
             body: requestBody,
             headers: this.adapter.getHeaders(this.config.apiKey),
-            abortSignal: options?.abortSignal,
+            abortSignal: resolvedOptions?.abortSignal,
         };
 
         // 根据是否流式选择处理方式
@@ -115,6 +117,30 @@ export class OpenAICompatibleProvider extends LLMProvider {
         }
 
         return this._generateNonStream(requestParams);
+    }
+
+    /**
+     * 统一处理生成选项，补齐流式 usage 配置
+     */
+    private resolveGenerateOptions(options?: LLMGenerateOptions): LLMGenerateOptions {
+        if (!options) return {};
+
+        const resolved: LLMGenerateOptions = { ...options };
+
+        if (resolved.stream && this.shouldIncludeStreamUsage(resolved)) {
+            resolved.stream_options = {
+                ...(resolved.stream_options || {}),
+                include_usage: true,
+            };
+        }
+
+        return resolved;
+    }
+
+    private shouldIncludeStreamUsage(options: LLMGenerateOptions): boolean {
+        if (!options.stream) return false;
+        if (options.stream_options?.include_usage === false) return false;
+        return this.config.enableStreamUsage !== false;
     }
 
     /**

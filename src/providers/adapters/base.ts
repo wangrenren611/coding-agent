@@ -5,7 +5,14 @@
  * 请求/响应转换。
  */
 
-import type { LLMRequest, LLMResponse, LLMRequestMessage, Role } from '../types';
+import type {
+    InputContentPart,
+    LLMRequest,
+    LLMResponse,
+    LLMRequestMessage,
+    MessageContent,
+    Role
+} from '../types';
 
 export abstract class BaseAPIAdapter {
     /**
@@ -60,8 +67,9 @@ export abstract class BaseAPIAdapter {
         const cleaned: LLMRequestMessage[] = [];
 
         for (const item of msg) {
+            const normalizedContent = this.normalizeMessageContent(item.content);
             const message: LLMRequestMessage = {
-                content: String(item.content),
+                content: normalizedContent,
                 role:item.role as Role,
             };
 
@@ -81,5 +89,35 @@ export abstract class BaseAPIAdapter {
         }
 
         return cleaned;
+    }
+
+    /**
+     * 标准化消息 content，保留 OpenAI 多模态数组结构
+     */
+    private normalizeMessageContent(content: unknown): MessageContent {
+        if (typeof content === 'string') return content;
+
+        if (Array.isArray(content)) {
+            return content
+                .filter((part): part is InputContentPart => this.isValidContentPart(part));
+        }
+
+        if (content === undefined || content === null) {
+            return '';
+        }
+
+        return String(content);
+    }
+
+    private isValidContentPart(part: unknown): part is InputContentPart {
+        if (!part || typeof part !== 'object') return false;
+        const type = (part as { type?: unknown }).type;
+        return (
+            type === 'text' ||
+            type === 'image_url' ||
+            type === 'input_audio' ||
+            type === 'input_video' ||
+            type === 'file'
+        );
     }
 }

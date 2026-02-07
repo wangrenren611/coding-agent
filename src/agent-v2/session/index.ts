@@ -1,6 +1,6 @@
 import { v4 as uuid } from "uuid";
 import { Message, SessionOptions } from "./types";
-import type { IMemoryManager, CurrentContext } from "../memory/types";
+import type { IMemoryManager } from "../memory/types";
 import { Compaction, CompactionConfig } from "./compaction";
 import { LLMProvider } from "../../providers";
 
@@ -10,7 +10,7 @@ export interface SessionConfig extends SessionOptions {
   /** 是否启用自动压缩 */
   enableCompaction?: boolean;
   /** 压缩配置 */
-  compactionConfig?: Omit<CompactionConfig, "llmProvider">;
+  compactionConfig?: Partial<Omit<CompactionConfig, "llmProvider">>;
   /** LLM Provider（启用压缩时需要） */
   provider?: LLMProvider;
 }
@@ -38,6 +38,8 @@ export class Session {
   private persistQueue: Promise<void> = Promise.resolve();
   private compaction?: Compaction;
   private enableCompaction: boolean;
+  private initialized = false;
+  private initializePromise: Promise<void> | null = null;
 
   constructor(options: SessionConfig) {
     this.sessionId = options.sessionId || uuid();
@@ -45,11 +47,17 @@ export class Session {
     this.memoryManager = options.memoryManager;
     this.enableCompaction = options.enableCompaction ?? false;
 
+    if (this.enableCompaction && !options.provider) {
+      throw new Error('Session compaction requires a provider');
+    }
+
     // 初始化压缩器
     if (this.enableCompaction && options.provider) {
+      const maxTokens = options.compactionConfig?.maxTokens ?? options.provider.getLLMMaxTokens() ?? 200 * 1000;
+      const maxOutputTokens = options.compactionConfig?.maxOutputTokens ?? options.provider.getMaxOutputTokens() ?? 8000;
       this.compaction = new Compaction({
-        maxTokens: options.provider.getLLMMaxTokens() ?? 200*1000,
-        maxOutputTokens: options.provider.getMaxOutputTokens() ?? 8000,
+        maxTokens,
+        maxOutputTokens,
         llmProvider: options.provider,
         keepMessagesNum: options.compactionConfig?.keepMessagesNum ?? 40,
         triggerRatio: options.compactionConfig?.triggerRatio ?? 0.90,
@@ -67,6 +75,8 @@ export class Session {
     if (this.memoryManager) {
       // 注意：构造函数不能是 async，所以这里只启动初始化
       // 调用者应该在使用前确保初始化完成
+    } else {
+      this.initialized = true;
     }
   }
 
@@ -75,36 +85,58 @@ export class Session {
    * 使用 MemoryManager 时需要先调用此方法
    */
   async initialize(): Promise<void> {
-    if (!this.memoryManager) return;
+    if (this.initialized) return;
+    if (!this.memoryManager) {
+      this.initialized = true;
+      return;
+    }
 
-    // 尝试加载已有会话
-    const existingSession = await this.memoryManager.getSession(this.sessionId);
+    if (this.initializePromise) {
+      await this.initializePromise;
+      return;
+    }
 
-    if (existingSession) {
-      // 加载已有会话的上下文
-      const context = await this.memoryManager.getCurrentContext(this.sessionId);
-      if (context) {
-        this.messages = context.messages;
-        this.systemPrompt = context.systemPrompt;
+    this.initializePromise = (async () => {
+      if (!this.memoryManager) return;
+
+      // 尝试加载已有会话
+      const existingSession = await this.memoryManager.getSession(this.sessionId);
+
+      if (existingSession) {
+        // 加载已有会话的上下文
+        const context = await this.memoryManager.getCurrentContext(this.sessionId);
+        if (context) {
+          this.messages = context.messages;
+          this.systemPrompt = context.systemPrompt;
+        }
+      } else {
+        // 创建新会话
+        await this.memoryManager.createSession(this.sessionId, this.systemPrompt);
       }
-    } else {
-      // 创建新会话
-      await this.memoryManager.createSession(this.sessionId, this.systemPrompt);
+
+      this.initialized = true;
+    })();
+
+    try {
+      await this.initializePromise;
+    } finally {
+      this.initializePromise = null;
     }
   }
 
   /**
    * 添加或更新消息
-   * - 如果 message.id 存在且与最后一条消息的 id 相同，则更新最后一条消息
+   * - 如果 message.messageId 与最后一条消息一致，则更新最后一条消息
    * - 否则添加新消息
    * @returns 返回消息的 messageId
    */
   addMessage(message: Message): string {
     const messageIdentifier = message.messageId;
     const lastMessage = this.getLastMessage();
+    const isUpdate = Boolean(messageIdentifier && lastMessage?.messageId === messageIdentifier);
 
     // 如果是同一条消息的更新，替换最后一条消息
-    if (messageIdentifier && lastMessage?.messageId === messageIdentifier) {
+    if (isUpdate) {
       this.messages[this.messages.length - 1] = message;
     } else {
       // 添加新消息
@@ -118,35 +150,10 @@ export class Session {
 
     // 异步持久化到 MemoryManager
     if (this.memoryManager) {
-      this.queuePersistMessage(message);
-    }
-
-    // 如果启用了自动压缩，检查是否需要压缩
-    if (this.enableCompaction && this.compaction) {
-      this.checkAndCompactAsync();
+      this.queuePersistOperation(message, isUpdate ? 'update' : 'add');
     }
 
     return messageIdentifier;
-  }
-
-  /**
-   * 异步检查并执行压缩
-   */
-  private async checkAndCompactAsync(): Promise<void> {
-    if (!this.compaction) return;
-
-    const info = this.compaction.getTokenInfo(this.messages);
-    if (info.shouldCompact) {
-      console.log(`[Session] 自动触发压缩，当前 Token: ${info.totalUsed}`);
-      try {
-        const compacted = await this.compact();
-        if (compacted) {
-          console.log(`[Session] 自动压缩完成，新消息数: ${this.messages.length}`);
-        }
-      } catch (error) {
-        console.error('[Session] 自动压缩失败:', error);
-      }
-    }
   }
 
   /**
@@ -155,23 +162,16 @@ export class Session {
   addMessages(messages: Message[]): void {
     for (const message of messages) {
       const lastMessage = this.getLastMessage();
-      if (message.messageId && lastMessage?.messageId === message.messageId) {
+      const isUpdate = Boolean(message.messageId && lastMessage?.messageId === message.messageId);
+      if (isUpdate) {
         this.messages[this.messages.length - 1] = message;
       } else {
         this.messages.push(message);
       }
-    }
 
-    // 异步持久化
-    if (this.memoryManager) {
-      for (const message of messages) {
-        this.queuePersistMessage(message);
+      if (this.memoryManager) {
+        this.queuePersistOperation(message, isUpdate ? 'update' : 'add');
       }
-    }
-
-    // 如果启用了自动压缩，检查是否需要压缩
-    if (this.enableCompaction && this.compaction) {
-      this.checkAndCompactAsync();
     }
   }
 
@@ -206,31 +206,12 @@ export class Session {
   }
 
   /**
-   * 获取压缩配置
-   */
-  private getCompactionConfig(): { maxTokens: number; triggerRatio: number; keepMessagesNum: number } | null {
-    if (!this.compaction) return null;
-    return this.compaction.getConfig();
-  }
-
-  /**
    * 检查是否需要压缩
    * 压缩后基于内容重新估算 token 数，而不是累加可能不准确的 usage
    */
   shouldCompact(): boolean {
     if (!this.compaction) return false;
-
-    const tokenInfo = this.compaction.getCurrentTokenCount(this.messages);
-    const config = this.getCompactionConfig();
-    if (!config) return false;
-
-    const threshold = config.maxTokens * config.triggerRatio;
-
-    // 使用估算值（压缩后更准确）
-    return (
-      tokenInfo.estimatedTotal >= threshold &&
-      this.messages.length > config.keepMessagesNum
-    );
+    return this.compaction.shouldCompact(this.messages);
   }
 
   /**
@@ -265,6 +246,9 @@ export class Session {
   async compact(): Promise<boolean> {
     if (!this.compaction) return false;
 
+    // 压缩前等待消息持久化队列，确保 MemoryManager 侧上下文与内存一致
+    await this.persistQueue;
+
     const result = await this.compaction.compact(
       this.messages,
       this.sessionId,
@@ -277,6 +261,27 @@ export class Session {
     }
 
     return false;
+  }
+
+  /**
+   * 在发起下一次 LLM 请求前进行压缩检查
+   * 仅在启用压缩时生效
+   */
+  async compactBeforeLLMCall(): Promise<boolean> {
+    if (!this.enableCompaction || !this.compaction) {
+      return false;
+    }
+
+    if (this.memoryManager) {
+      await this.persistQueue;
+    }
+
+    if (!this.compaction.shouldCompact(this.messages)) {
+      return false;
+    }
+
+    console.log('[Session] LLM 调用前触发压缩检查，执行上下文压缩');
+    return this.compact();
   }
 
   /**
@@ -309,16 +314,11 @@ export class Session {
     }
   }
 
-  contextLeft() {
-    // TODO: 返回剩余上下文
-    return this.messages;
-  }
-
   /**
    * 计算 Token 使用量
    */
   calculateTokens(): number {
-    return this.messages.reduce((acc, msg) => acc + msg.content.length, 0);
+    return this.messages.reduce((acc, msg) => acc + this.getContentLength(msg.content), 0);
   }
 
   /**
@@ -348,17 +348,37 @@ export class Session {
   }
 
   /**
-   * 将会话数据持久化到 MemoryManager
-   * 使用队列确保顺序执行，避免竞态条件
+   * 将消息持久化操作串行化，避免流式更新时出现竞态
    */
-  private queuePersistMessage(message: Message): void {
+  private queuePersistOperation(
+    message: Message,
+    operation: 'add' | 'update'
+  ): void {
     this.persistQueue = this.persistQueue
       .then(async () => {
         if (!this.memoryManager) return;
+
+        if (operation === 'update') {
+          const { messageId: _messageId, ...updates } = message;
+          await this.memoryManager.updateMessageInContext(
+            this.sessionId,
+            message.messageId,
+            updates
+          );
+          return;
+        }
+
         await this.memoryManager.addMessageToContext(this.sessionId, message);
       })
       .catch((error) => {
-        console.error('Failed to persist message:', error);
+        console.error(`Failed to persist message (${operation}):`, error);
       });
+  }
+
+  private getContentLength(content: Message['content']): number {
+    if (typeof content === 'string') {
+      return content.length;
+    }
+    return JSON.stringify(content).length;
   }
 }

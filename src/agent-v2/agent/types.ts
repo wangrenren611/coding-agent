@@ -5,8 +5,9 @@
 import type { LLMProvider } from '../../providers';
 import type { ToolRegistry } from '../tool/registry';
 import { AgentMessage } from './stream-types';
-import type { ITimeProvider } from './agent';
+import type { ITimeProvider } from './types-internal';
 import type { IMemoryManager } from '../memory/types';
+import type { CompactionConfig } from '../session';
 
 export enum AgentStatus {
   THINKING = 'thinking',
@@ -46,4 +47,8 @@ export interface AgentOptions{
     memoryManager?: IMemoryManager;
     /** 会话ID（用于恢复已有会话） */
     sessionId?: string;
+    /** 是否启用自动上下文压缩 */
+    enableCompaction?: boolean;
+    /** 压缩配置（可选，未提供字段会使用 provider 默认值） */
+    compactionConfig?: Partial<Omit<CompactionConfig, 'llmProvider'>>;
 }

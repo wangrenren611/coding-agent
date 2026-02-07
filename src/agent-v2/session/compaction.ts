@@ -1,6 +1,6 @@
 import { v4 as uuid } from "uuid";
 import { Message } from "./types";
-import { LLMProvider } from "../../providers";
+import { InputContentPart, LLMProvider, LLMResponse } from "../../providers";
 import { IMemoryManager, CompactionRecord } from "../memory/types";
 
 export interface CompactionConfig {
@@ -51,13 +51,23 @@ export class Compaction {
    */
   getTokenInfo(messages: Message[]) {
     const totalUsed = this.calculateTotalUsage(messages);
-    const usableLimit = this.maxTokens;
+    const usableLimit = Math.max(1, this.maxTokens - this.maxOutputTokens);
+    const nonSystemMessages = messages.filter((msg) => msg.role !== "system");
+    const threshold = usableLimit * this.triggerRatio;
 
     return {
       totalUsed,
-      usableLimit: usableLimit * this.triggerRatio,
-      shouldCompact: totalUsed >= usableLimit * this.triggerRatio && messages.length > this.keepMessagesNum,
+      usableLimit,
+      threshold,
+      shouldCompact: totalUsed >= threshold && nonSystemMessages.length > this.keepMessagesNum,
     };
+  }
+
+  /**
+   * 判断当前消息是否需要压缩
+   */
+  shouldCompact(messages: Message[]): boolean {
+    return this.getTokenInfo(messages).shouldCompact;
   }
 
   /**
@@ -131,7 +141,7 @@ export class Compaction {
     record?: CompactionRecord;
   }> {
     const totalUsed = this.calculateTotalUsage(messages);
-    const usableLimit = this.maxTokens - this.maxOutputTokens;
+    const usableLimit = Math.max(1, this.maxTokens - this.maxOutputTokens);
     const threshold = usableLimit * this.triggerRatio;
 
     // 过滤系统消息用于压缩计算
@@ -164,7 +174,7 @@ export class Compaction {
     // 提取之前的摘要（如果存在）
     let previousSummary = "";
     if (pendingMessages.length > 0 && pendingMessages[0].type === "summary") {
-      previousSummary = pendingMessages[0].content;
+      previousSummary = this.contentToText(pendingMessages[0].content);
       pendingMessages = pendingMessages.slice(1);
     }
 
@@ -314,8 +324,9 @@ export class Compaction {
     return messages
       .map((m) => {
         const prefix = m.type ? `[${m.role}:${m.type}]` : `[${m.role}]`;
+        const contentText = this.contentToText(m.content);
         const content =
-          m.content.length > 2000 ? m.content.slice(0, 1000) + "...(省略)..." : m.content;
+          contentText.length > 2000 ? contentText.slice(0, 1000) + "...(省略)..." : contentText;
         return `${prefix}: ${content}`;
       })
       .join("\n");
@@ -361,12 +372,13 @@ ${previousSummary ? `<previous_summary>\n${previousSummary}\n</previous_summary>
 
     console.log("[Compaction] 摘要生成完成");
 
-    // 处理流式或非流式响应
-    if (response && typeof response === 'object' && 'content' in response) {
-      return (response as { content?: string }).content || "";
+    if (!response || typeof response !== 'object' || !('choices' in response)) {
+      return "";
     }
 
-    return "";
+    const llmResponse = response as LLMResponse;
+    const content = llmResponse.choices?.[0]?.message?.content;
+    return this.contentToText(content || "");
   }
 
   /**
@@ -392,5 +404,33 @@ ${previousSummary ? `<previous_summary>\n${previousSummary}\n</previous_summary>
     if (!text) return 0;
     // 简化估算：大约 4 个字符 = 1 个 token
     return Math.ceil(text.length / 4);
+  }
+
+  private contentToText(content: Message['content']): string {
+    if (typeof content === 'string') {
+      return content;
+    }
+
+    return content
+      .map((part) => this.stringifyContentPart(part))
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  private stringifyContentPart(part: InputContentPart): string {
+    switch (part.type) {
+      case 'text':
+        return part.text || '';
+      case 'image_url':
+        return `[image] ${part.image_url?.url || ''}`.trim();
+      case 'file':
+        return `[file] ${part.file?.filename || part.file?.file_id || ''}`.trim();
+      case 'input_audio':
+        return '[audio]';
+      case 'input_video':
+        return `[video] ${part.input_video?.url || part.input_video?.file_id || ''}`.trim();
+      default:
+        return '';
+    }
   }
 }

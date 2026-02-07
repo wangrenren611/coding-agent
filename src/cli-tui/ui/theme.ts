@@ -61,54 +61,61 @@ const isLight = THEME_MODE === 'light';
 
 export const COLORS = {
   // Base colors
-  primary: isLight ? '#2563eb' : '#6366f1',
-  secondary: isLight ? '#0f766e' : '#8b5cf6',
-  accent: isLight ? '#0891b2' : '#06b6d4',
+  primary: isLight ? '#2563eb' : '#60a5fa',
+  secondary: isLight ? '#0f766e' : '#22d3ee',
+  accent: isLight ? '#0ea5e9' : '#38bdf8',
 
   // Semantic colors
-  user: isLight ? '#047857' : '#10b981',
-  assistant: isLight ? '#0f172a' : '#e5e7eb',
-  tool: isLight ? '#b45309' : '#f59e0b',
-  system: isLight ? '#b91c1c' : '#ef4444',
-  info: isLight ? '#1d4ed8' : '#60a5fa',
-  warning: isLight ? '#b45309' : '#eab308',
-  success: isLight ? '#15803d' : '#22c55e',
-  error: isLight ? '#b91c1c' : '#dc2626',
+  user: isLight ? '#059669' : '#34d399',
+  assistant: isLight ? '#111827' : '#e5e7eb',
+  tool: isLight ? '#2563eb' : '#60a5fa',
+  system: isLight ? '#b91c1c' : '#f87171',
+  info: isLight ? '#1d4ed8' : '#93c5fd',
+  warning: isLight ? '#b45309' : '#fbbf24',
+  success: isLight ? '#15803d' : '#4ade80',
+  error: isLight ? '#b91c1c' : '#f87171',
 
   // Text colors
-  text: isLight ? '#0f172a' : '#f8fafc',
-  textMuted: isLight ? '#334155' : '#94a3b8',
+  text: isLight ? '#111827' : '#f8fafc',
+  textMuted: isLight ? '#475569' : '#94a3b8',
 
   // Neutral colors
-  muted: isLight ? '#475569' : '#64748b',
-  border: isLight ? '#94a3b8' : '#334155',
-  background: isLight ? '#f8fafc' : '#0f172a',
-  surface: isLight ? '#eef2f7' : '#111827',
+  muted: isLight ? '#64748b' : '#64748b',
+  border: isLight ? '#cbd5e1' : '#334155',
+  background: isLight ? '#f8fafc' : '#0b1220',
+  surface: isLight ? '#ffffff' : '#111827',
+  panel: isLight ? '#f1f5f9' : '#0f172a',
+  panelStrong: isLight ? '#e2e8f0' : '#1e293b',
 
   // Diff colors
   diffAdd: isLight ? '#15803d' : '#22c55e',
   diffRemove: isLight ? '#b91c1c' : '#ef4444',
   diffHeader: isLight ? '#475569' : '#64748b',
+
+  // Tool status colors
+  toolRunning: isLight ? '#2563eb' : '#60a5fa',
+  toolSuccess: isLight ? '#15803d' : '#4ade80',
+  toolError: isLight ? '#b91c1c' : '#f87171',
 } as const;
 
 // ==================== Icons (Unicode) ====================
 
 export const ICONS = {
   user: '●',
-  assistant: '◆',
-  tool: '⚙',
-  result: '→',
+  assistant: '●',
+  tool: '●',
+  result: '└',
   success: '✓',
   error: '✗',
   running: '⟳',
   diff: '±',
-  info: 'ⓘ',
+  info: 'i',
   warning: '⚠',
-  thinking: '⋯',
+  thinking: '...',
   edit: '✎',
-  folder: '📁',
-  file: '📄',
-  search: '🔍',
+  folder: '[dir]',
+  file: '[file]',
+  search: '[search]',
 } as const;
 
 // ==================== Display Constants ====================
@@ -120,8 +127,8 @@ export const DISPLAY = {
   minViewHeight: 6,
   minContentWidth: 20,
   scrollbarWidth: 1,
-  maxStreamLines: 5,
-  messageGapLines: 2,
+  maxStreamLines: 8,
+  messageGapLines: 1,
   maxMessageLines: 1000, // Maximum lines per message before truncation
 } as const;
 

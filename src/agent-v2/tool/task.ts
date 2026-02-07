@@ -209,7 +209,7 @@ export class TaskTool extends BaseTool<typeof schema> {
                 success: true,
                 turns: loopCount,
                 toolsUsed,
-                output: finalMessage.content || 'Task completed with no output',
+                output: this.messageContentToText(finalMessage.content) || 'Task completed with no output',
             };
 
             // 返回结果
@@ -270,6 +270,49 @@ export class TaskTool extends BaseTool<typeof schema> {
         }
 
         return Array.from(tools);
+    }
+
+    private messageContentToText(content: unknown): string {
+        if (typeof content === 'string') {
+            return content;
+        }
+
+        if (!Array.isArray(content)) {
+            return '';
+        }
+
+        return content
+            .map((part) => {
+                if (!part || typeof part !== 'object' || !('type' in part)) {
+                    return '';
+                }
+
+                const typedPart = part as {
+                    type?: string;
+                    text?: string;
+                    image_url?: { url?: string };
+                    file?: { filename?: string; file_id?: string };
+                    input_audio?: unknown;
+                    input_video?: { url?: string; file_id?: string };
+                };
+
+                switch (typedPart.type) {
+                    case 'text':
+                        return typedPart.text || '';
+                    case 'image_url':
+                        return `[image] ${typedPart.image_url?.url || ''}`.trim();
+                    case 'file':
+                        return `[file] ${typedPart.file?.filename || typedPart.file?.file_id || ''}`.trim();
+                    case 'input_audio':
+                        return '[audio]';
+                    case 'input_video':
+                        return `[video] ${typedPart.input_video?.url || typedPart.input_video?.file_id || ''}`.trim();
+                    default:
+                        return '';
+                }
+            })
+            .filter(Boolean)
+            .join('\n');
     }
 }
 

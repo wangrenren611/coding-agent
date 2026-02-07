@@ -183,6 +183,11 @@ export interface SetStatusMessageAction {
   payload: { message?: string };
 }
 
+export interface SetMessagesAction {
+  type: 'set-messages';
+  payload: { messages: Message[] };
+}
+
 export type ChatAction =
   | AddUserMessageAction
   | AddSystemMessageAction
@@ -190,7 +195,8 @@ export type ChatAction =
   | ClearMessagesAction
   | SetLoadingAction
   | SetExecutionStateAction
-  | SetStatusMessageAction;
+  | SetStatusMessageAction
+  | SetMessagesAction;
 
 // ==================== Overlay Types ====================
 

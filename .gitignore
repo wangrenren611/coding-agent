@@ -11,3 +11,4 @@ dist
 /web/.next/
 /web/.next/*
 data/*
+src/cli-tui/.coding-agent

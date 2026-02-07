@@ -1,6 +1,6 @@
 /**
  * cli-tui Status Bar Component
- * Shows loading state and status messages
+ * Shows compact runtime status
  */
 
 import React, { useMemo } from 'react';
@@ -10,6 +10,8 @@ interface StatusBarProps {
   isLoading?: boolean;
   statusMessage?: string;
   executionState?: 'idle' | 'running' | 'thinking' | 'error' | 'completed';
+  model?: string;
+  messageCount?: number;
 }
 
 let spinnerIndex = 0;
@@ -23,35 +25,63 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   isLoading = false,
   statusMessage,
   executionState = 'idle',
+  model,
+  messageCount = 0,
 }) => {
   const statusContent = useMemo(() => {
-    if (statusMessage) {
-      return <text fg={COLORS.info}>{statusMessage}</text>;
-    }
-
-    if (executionState === 'thinking') {
-      return <text fg={COLORS.warning}>{ICONS.thinking} Thinking...</text>;
-    }
-
     if (executionState === 'error') {
-      return <text fg={COLORS.error}>{ICONS.error} Error occurred</text>;
+      return {
+        color: COLORS.error,
+        text: `${ICONS.error} error`,
+      };
+    }
+    if (executionState === 'thinking') {
+      return {
+        color: COLORS.warning,
+        text: `${ICONS.thinking} thinking`,
+      };
+    }
+    if (isLoading || executionState === 'running') {
+      return {
+        color: COLORS.toolRunning,
+        text: `${getNextSpinnerFrame()} running`,
+      };
+    }
+    if (executionState === 'completed') {
+      return {
+        color: COLORS.success,
+        text: `${ICONS.success} done`,
+      };
     }
 
-    if (isLoading) {
-      return <text fg={COLORS.warning}>{getNextSpinnerFrame()} Processing...</text>;
-    }
-
-    return <text fg={COLORS.textMuted}>Ready</text>;
-  }, [isLoading, statusMessage, executionState]);
+    return {
+      color: COLORS.textMuted,
+      text: 'ready',
+    };
+  }, [isLoading, executionState]);
 
   return (
     <box
       width="100%"
-      borderStyle="single"
-      borderColor={COLORS.border}
-      height={3}
+      flexDirection="row"
+      paddingTop={0}
+      paddingBottom={0}
     >
-      {statusContent}
+      <text fg={statusContent.color}>{statusContent.text}</text>
+      <text fg={COLORS.textMuted}> | </text>
+      <text fg={COLORS.textMuted}>messages {messageCount}</text>
+      {model ? (
+        <>
+          <text fg={COLORS.textMuted}> | </text>
+          <text fg={COLORS.textMuted}>model {model}</text>
+        </>
+      ) : null}
+      {statusMessage ? (
+        <>
+          <text fg={COLORS.textMuted}> | </text>
+          <text fg={COLORS.info}>{statusMessage}</text>
+        </>
+      ) : null}
     </box>
   );
 };

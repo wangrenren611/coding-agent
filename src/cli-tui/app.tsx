@@ -3,7 +3,7 @@
  * OpenTUI-based terminal UI application
  */
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { createCliRenderer } from '@opentui/core';
 import { createRoot } from '@opentui/react';
 import { ProviderRegistry, type ModelId } from '../providers';
@@ -20,6 +20,8 @@ export const App: React.FC = () => {
   const [model, setModel] = useState<ModelId>(DEFAULT_MODEL);
   const [inputValue, setInputValue] = useState('');
   const [showHelp, setShowHelp] = useState(false);
+  const [showSessionScrollbar, setShowSessionScrollbar] = useState(false);
+  const cwd = process.cwd().replace(process.env.HOME || '', '~');
 
   const {
     messages,
@@ -33,6 +35,26 @@ export const App: React.FC = () => {
   } = useAgentRunner(model);
 
   const modelList = ProviderRegistry.getModelIds();
+
+  const messageRenderSignature = useMemo(
+    () =>
+      messages
+        .map(message => {
+          const toolSig = (message.toolCalls || [])
+            .map(tool => `${tool.id}:${tool.status}:${(tool.streamOutput || '').length}`)
+            .join(',');
+          return `${message.id}:${message.content.length}:${message.isStreaming ? 1 : 0}:${toolSig}`;
+        })
+        .join('|'),
+    [messages]
+  );
+
+  useEffect(() => {
+    if (!(process.stdout.isTTY ?? false)) return;
+    if (process.env.CLI_TUI_CLEAR_SCROLLBACK_ON_UPDATE === '0') return;
+    // Keep terminal scrollback shallow as messages grow.
+    process.stdout.write('\x1b[3J');
+  }, [messageRenderSignature]);
 
   const handleSubmit = useCallback(
     (value: string) => {
@@ -75,9 +97,36 @@ export const App: React.FC = () => {
       case '/status':
         addSystemMessage(
           'info',
-          `Model=${model} | State=${executionState} | Messages=${messages.length}`
+          `Model=${model} | State=${executionState} | Messages=${messages.length} | Scrollbar=${showSessionScrollbar ? 'on' : 'off'}`
         );
         break;
+      case '/scrollbar': {
+        const option = (args[0] || 'toggle').toLowerCase();
+        if (option === 'toggle') {
+          setShowSessionScrollbar(prev => {
+            const next = !prev;
+            addSystemMessage('info', `Session scrollbar ${next ? 'enabled' : 'disabled'}`);
+            return next;
+          });
+          break;
+        }
+        if (option === 'on' || option === '1' || option === 'true') {
+          setShowSessionScrollbar(true);
+          addSystemMessage('info', 'Session scrollbar enabled');
+          break;
+        }
+        if (option === 'off' || option === '0' || option === 'false') {
+          setShowSessionScrollbar(false);
+          addSystemMessage('info', 'Session scrollbar disabled');
+          break;
+        }
+        if (option === 'status') {
+          addSystemMessage('info', `Session scrollbar is ${showSessionScrollbar ? 'enabled' : 'disabled'}`);
+          break;
+        }
+        addSystemMessage('warn', 'Usage: /scrollbar [toggle|on|off|status]');
+        break;
+      }
       case '/models': {
         const available = modelList.join(', ');
         addSystemMessage('info', `Available models: ${available}`);
@@ -114,6 +163,7 @@ export const App: React.FC = () => {
     messages.length,
     model,
     modelList,
+    showSessionScrollbar,
     stopCurrentRun,
   ]);
 
@@ -123,62 +173,73 @@ export const App: React.FC = () => {
       flexDirection="column"
       width="100%"
       height="100%"
-      paddingX={1}
-      paddingY={1}
+      backgroundColor={COLORS.background}
     >
-      {/* Message list - takes remaining space */}
-      <box flexGrow={1} flexShrink={1} overflow="hidden">
+      {/* Top bar */}
+      <box
+        flexDirection="row"
+        flexShrink={0}
+        paddingTop={0}
+        paddingBottom={0}
+      >
+        <text fg={COLORS.assistant} bold>
+          Q CLI
+        </text>
+        <text fg={COLORS.textMuted}> | {cwd}</text>
+      </box>
+
+      {/* Message list */}
+      <box flexGrow={1} flexShrink={1} overflow="hidden" paddingTop={1}>
         <MessageList
           messages={messages}
           isLoading={isLoading}
+          showScrollbar={showSessionScrollbar}
         />
       </box>
 
-      {/* Status bar - fixed height */}
+      {/* Status bar */}
       <StatusBar
         isLoading={isLoading}
-        statusMessage={statusMessage ?? `Model: ${model} | Messages: ${messages.length}`}
+        statusMessage={statusMessage}
         executionState={executionState}
+        model={model}
+        messageCount={messages.length}
       />
 
-      {/* Help overlay - shown above input */}
+      {/* Help overlay */}
       {showHelp && (
         <box
           position="absolute"
-          top={1}
-          left={1}
-          borderStyle="double"
+          top={2}
+          left={2}
+          right={2}
+          borderStyle="single"
           borderColor={COLORS.primary}
           paddingX={2}
           paddingY={1}
-          backgroundColor={COLORS.surface}
+          backgroundColor={COLORS.panel}
         >
-          <text fg={COLORS.text} bold>AI Coding Agent - Help</text>
+          <text fg={COLORS.text} bold>
+            Commands
+          </text>
+          <text fg={COLORS.textMuted}>{'\n/help  /clear  /model <id>  /models  /status  /scrollbar  /stop  /exit'}</text>
           <text>{'\n\n'}</text>
-          <text fg={COLORS.text}>Commands:</text>
-          <text fg={COLORS.textMuted}>{'\n  /help      Toggle this help'}</text>
-          <text fg={COLORS.textMuted}>{'\n  /clear     Clear screen'}</text>
-          <text fg={COLORS.textMuted}>{'\n  /model     Show or switch model'}</text>
-          <text fg={COLORS.textMuted}>{'\n  /models    List models'}</text>
-          <text fg={COLORS.textMuted}>{'\n  /status    Show current status'}</text>
-          <text fg={COLORS.textMuted}>{'\n  /stop      Stop current run'}</text>
-          <text fg={COLORS.textMuted}>{'\n  /exit      Exit application'}</text>
+          <text fg={COLORS.text} bold>
+            Shortcuts
+          </text>
+          <text fg={COLORS.textMuted}>{'\nEnter send | Ctrl+C exit | Ctrl+H toggle help'}</text>
           <text>{'\n\n'}</text>
-          <text fg={COLORS.text}>Keyboard Shortcuts:</text>
-          <text fg={COLORS.textMuted}>{'\n  Enter      Send message'}</text>
-          <text fg={COLORS.textMuted}>{'\n  Ctrl+C     Exit'}</text>
-          <text>{'\n\n'}</text>
-          <text fg={COLORS.textMuted}>Press /help again to close</text>
+          <text fg={COLORS.info}>Press /help again to close.</text>
         </box>
       )}
 
-      {/* Input bar - fixed size, never shrinks */}
+      {/* Input bar */}
       <box flexShrink={0}>
         <InputBar
           value={inputValue}
           onChange={setInputValue}
           onSubmit={handleSubmit}
-          placeholder="Type your message... (/help for commands)"
+          placeholder="Type your message..."
           isActive={true}
         />
       </box>
@@ -190,7 +251,9 @@ export const App: React.FC = () => {
 
 export async function main() {
   const renderer = await createCliRenderer({
-    exitOnCtrlC: true,
+   exitOnCtrlC: true,
+  targetFps: 30,
+  consoleOptions: undefined,  
   });
 
   const root = createRoot(renderer);

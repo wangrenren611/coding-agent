@@ -353,6 +353,13 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         statusMessage: undefined,
         streamingMessageId: null,
       };
+    case 'set-messages':
+      return {
+        ...state,
+        messages: action.payload.messages,
+        executionState: 'idle',
+        streamingMessageId: null,
+      };
     case 'set-loading':
       return {
         ...state,

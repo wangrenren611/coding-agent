@@ -56,9 +56,8 @@ async function demo1() {
 
   await memoryManager.initialize();
     const agent = new Agent({
-        provider: ProviderRegistry.createFromEnv('glm-4.7'),
+        provider: ProviderRegistry.createFromEnv('minimax-2.1'),
         systemPrompt: '你是一个智能助手,现在系统环境是windows系统',
-        toolRegistry,
         stream: true,
         memoryManager,  // 传入 memoryManager 启用持久化
         // 只需设置这一个回调，就能获取所有信息
@@ -80,7 +79,14 @@ async function demo1() {
     console.log('提示: 使用以下命令恢复此会话继续对话:');
     console.log(`SESSION_ID=${agent.getSessionId()} npx ts-node src/demo-session-restore.ts`);
     console.log('===================\n');
-
+    await agent.execute('帮我看一下/Users/wrr/work/coding-agent/src/providers 目录实现了什么');
+        console.log('\n===================');
+    console.log('会话 ID:', agent.getSessionId());
+    console.log('===================');
+    await agent.execute('帮我看一下https://claude.com/blog/complete-guide-to-building-skills-for-claude 这个文章将了什么');
+        console.log('\n===================');
+    console.log('会话 ID:', agent.getSessionId());
+    console.log('===================');
     fs.writeFileSync('./demo-1.json', JSON.stringify(agent.getMessages(), null, 2));
 
     // 关闭 memoryManager，确保数据保存

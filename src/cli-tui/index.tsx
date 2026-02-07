@@ -6,6 +6,28 @@
 import dotenv from 'dotenv';
 import { main } from './app';
 
+const DEFAULT_ROWS = 40;
+const DEFAULT_COLS = 120;
+
+const toPositiveInt = (value: string | undefined, fallback: number): number => {
+  const n = Number(value);
+  return Number.isInteger(n) && n > 0 ? n : fallback;
+};
+
+const applyTerminalPreset = (hasTTY: boolean): void => {
+  if (!hasTTY) return;
+  if (process.env.CLI_TUI_LOCK_WINDOW === '0') return;
+
+  const rows = toPositiveInt(process.env.CLI_TUI_ROWS, DEFAULT_ROWS);
+  const cols = toPositiveInt(process.env.CLI_TUI_COLS, DEFAULT_COLS);
+
+  // Resize terminal window (supported by iTerm2/Terminal.app and many xterm-compatible terminals)
+  process.stdout.write(`\x1b[8;${rows};${cols}t`);
+
+  // Clear screen + scrollback to reduce native scrollbar history before entering TUI alternate screen.
+  process.stdout.write('\x1b[2J\x1b[3J\x1b[H');
+};
+
 // Load environment variables
 const env = process.env.NODE_ENV || 'development';
 dotenv.config({ path: `.env.${env}`, override: true, quiet: true });
@@ -19,11 +41,7 @@ if (!hasTTY) {
   console.warn('For interactive input, run in a proper terminal.\n');
 }
 
-// Reduce native terminal scrollbar by clearing current screen + scrollback
-// before switching to the TUI alternate screen buffer.
-if (hasTTY) {
-  process.stdout.write('\x1b[2J\x1b[3J\x1b[H');
-}
+// applyTerminalPreset(hasTTY);
 
 // Error handling
 let hasFatalError = false;

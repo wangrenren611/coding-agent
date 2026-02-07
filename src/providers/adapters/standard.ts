@@ -33,10 +33,28 @@ export class StandardAdapter extends BaseAPIAdapter {
      * 转换请求 - 基础实现
      */
     transformRequest(options?: LLMRequest): LLMRequest {
-        const { model, max_tokens, messages, temperature, stream, tools } = options || {} as LLMRequest;
+        const {
+            model,
+            max_tokens,
+            messages,
+            temperature,
+            stream,
+            tools,
+            thinking,
+            abortSignal,
+            ...rest
+        } = options || {} as LLMRequest & { abortSignal?: AbortSignal; thinking?: unknown };
+        void thinking;
+        void abortSignal;
+
+        const extras = Object.fromEntries(
+            Object.entries(rest).filter(([, value]) => value !== undefined)
+        );
+
         const body: LLMRequest = {
+            ...extras,
             model: model || this.defaultModel,
-            messages: this.cleanMessage(messages),
+            messages: this.cleanMessage(messages || []),
             max_tokens: max_tokens,
             temperature: temperature,
             stream: stream ?? false,

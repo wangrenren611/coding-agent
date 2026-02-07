@@ -19,6 +19,7 @@
     "test:coverage": "vitest run --coverage",
     "dev:cli": "cross-env NODE_ENV=development tsx src/cli-v2/index.tsx",
     "dev:cli-tui": "cross-env NODE_ENV=development tsx src/cli-tui/index.tsx",
+    "dev:cli-tui-webterm": "cross-env NODE_ENV=development bun run src/cli-tui/webterm/server.ts",
     "test:cli-tui-input": "cross-env NODE_ENV=development tsx src/cli-tui/test-input.tsx",
     "dev:web": "pnpm --filter coding-agent-web dev",
     "build:web": "pnpm --filter coding-agent-web build",

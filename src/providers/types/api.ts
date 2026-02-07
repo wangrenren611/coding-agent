@@ -23,6 +23,61 @@ export type ToolCall = {
 export type Role = 'system' | 'assistant' | 'user' | 'tool';
 
 /**
+ * 多模态消息内容片段（OpenAI Chat Completions 风格）
+ */
+export interface TextContentPart {
+    type: 'text';
+    text: string;
+}
+
+export interface ImageUrlContentPart {
+    type: 'image_url';
+    image_url: {
+        url: string;
+        detail?: 'auto' | 'low' | 'high';
+    };
+}
+
+export interface InputAudioContentPart {
+    type: 'input_audio';
+    input_audio: {
+        data: string;
+        format: 'wav' | 'mp3';
+    };
+}
+
+export interface InputVideoContentPart {
+    type: 'input_video';
+    input_video: {
+        url?: string;
+        file_id?: string;
+        data?: string;
+        format?: 'mp4' | 'mov' | 'webm';
+    };
+}
+
+export interface FileContentPart {
+    type: 'file';
+    file: {
+        file_id?: string;
+        file_data?: string;
+        filename?: string;
+    };
+}
+
+export type InputContentPart =
+    | TextContentPart
+    | ImageUrlContentPart
+    | InputAudioContentPart
+    | InputVideoContentPart
+    | FileContentPart;
+
+/**
+ * 消息内容：纯文本或多模态数组
+ */
+export type MessageContent = string | InputContentPart[];
+
+/**
  * Token 使用情况（统一类型，移除重复定义）
  */
 export interface Usage {
@@ -39,11 +94,23 @@ export interface Usage {
 }
 
 /**
+ * 流式输出选项
+ */
+export interface StreamOptions {
+    /**
+     * 请求服务端在流结束时返回 usage 信息
+     * 兼容 OpenAI `stream_options.include_usage` 语义
+     */
+    include_usage?: boolean;
+    [key: string]: unknown;
+}
+
+/**
  * 基础消息类型
  */
 export interface BaseLLMMessage {
     /** 消息 ID */
-    content: string;
+    content: MessageContent;
     role: Role;
     reasoning_content?: string;
     [key: string]: unknown; // 添加索引签名以兼容 Record<string, unknown>
@@ -131,6 +198,8 @@ export interface LLMGenerateOptions {
     temperature?: number;
     /** 是否启用流式响应 */
     stream?: boolean;
+    /** 流式输出选项 */
+    stream_options?: StreamOptions;
     /** 中止信号 */
     abortSignal?: AbortSignal;
     /** 工具列表 */

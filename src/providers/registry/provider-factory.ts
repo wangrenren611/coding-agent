@@ -44,7 +44,7 @@ export class ProviderFactory {
             temperature: modelConfig.temperature||0.3,
             max_tokens: modelConfig.max_tokens,
             maxOutputTokens: modelConfig.LLMMAX_TOKENS,
-            thinking: modelConfig.thinking || false,
+            thinking: modelConfig.thinking,
         };
 
         // Config overrides take precedence over env vars
