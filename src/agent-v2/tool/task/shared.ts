@@ -11,7 +11,6 @@ export enum SubagentType {
   GeneralPurpose = 'general-purpose',
   Explore = 'explore',
   Plan = 'plan',
-  ClaudeCodeGuide = 'claude-code-guide',
   UiSketcher = 'ui-sketcher',
   BugAnalyzer = 'bug-analyzer',
   CodeReviewer = 'code-reviewer',
@@ -66,10 +65,13 @@ export interface BackgroundExecution {
 }
 
 export interface SubagentResult {
+  status: 'completed' | 'failed' | 'cancelled';
   turns: number;
   toolsUsed: string[];
   output: string;
   messages: Message[];
+  errorCode?: string;
+  errorMessage?: string;
 }
 
 export interface AgentConfig {
@@ -349,14 +351,34 @@ export function compareTaskIds(a: string, b: string): number {
   return a.localeCompare(b);
 }
 
-export function nextTaskId(tasks: ManagedTask[]): string {
+const taskIdCounters = new Map<string, number>();
+
+function taskCounterKey(sessionId?: string): string {
+  return sessionId || '__memory__';
+}
+
+export function nextTaskId(tasks: ManagedTask[], sessionId?: string): string {
   let maxId = 0;
   for (const task of tasks) {
     if (/^\d+$/.test(task.id)) {
       maxId = Math.max(maxId, Number.parseInt(task.id, 10));
     }
   }
-  return String(maxId + 1);
+
+  const counterKey = taskCounterKey(sessionId);
+  const lastIssued = taskIdCounters.get(counterKey) ?? 0;
+  const nextId = Math.max(maxId, lastIssued) + 1;
+  taskIdCounters.set(counterKey, nextId);
+  return String(nextId);
+}
+
+export function clearTaskIdCounterState(sessionId?: string): void {
+  if (!sessionId) {
+    taskIdCounters.clear();
+    return;
+  }
+
+  taskIdCounters.delete(taskCounterKey(sessionId));
 }
 
 export function isStatusTransitionAllowed(from: TaskStatus, to: TaskStatus): boolean {

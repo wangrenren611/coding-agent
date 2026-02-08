@@ -209,6 +209,29 @@ async function waitUntil(
   }
 }
 
+function assertToolCallsClosed(messages: LLMRequestMessage[]): void {
+  for (let i = 0; i < messages.length; i++) {
+    const message = messages[i] as LLMRequestMessage & { tool_calls?: ToolCall[] };
+    if (message.role !== 'assistant' || !Array.isArray(message.tool_calls) || message.tool_calls.length === 0) {
+      continue;
+    }
+
+    const expected = new Set(message.tool_calls.map((call) => call.id));
+    let cursor = i + 1;
+    while (cursor < messages.length && messages[cursor]?.role === 'tool') {
+      const respondedId = (messages[cursor] as { tool_call_id?: string }).tool_call_id;
+      if (respondedId) {
+        expected.delete(respondedId);
+      }
+      cursor++;
+    }
+
+    if (expected.size > 0) {
+      throw new Error(`Unmatched tool calls: ${Array.from(expected).join(',')}`);
+    }
+  }
+}
+
 describe('Agent deep behavior tests', () => {
   it('should complete non-streaming run and pass messages/options correctly', async () => {
     const provider = new ScriptedProvider([
@@ -510,6 +533,127 @@ describe('Agent deep behavior tests', () => {
       return m.type === AgentMessageType.STATUS && m.payload.state === AgentStatus.RETRYING;
     });
     expect(retryStatus).toBeDefined();
+  });
+
+  it('should immediately compensate empty stop response without backoff sleep', async () => {
+    const timeProvider = new MockTimeProvider();
+    const provider = new ScriptedProvider([
+      async () => textResponse('', 'stop'),
+      async (messages) => {
+        const emptyAssistantStops = messages.filter((message) => {
+          const candidate = message as LLMRequestMessage & { tool_calls?: ToolCall[] };
+          return (
+            candidate.role === 'assistant'
+            && typeof candidate.content === 'string'
+            && candidate.content.length === 0
+            && (!Array.isArray(candidate.tool_calls) || candidate.tool_calls.length === 0)
+          );
+        });
+        expect(emptyAssistantStops).toHaveLength(0);
+        return textResponse('recovered');
+      },
+    ]);
+
+    const toolRegistry = createToolRegistryStub([]);
+    const streamMessages: AgentMessage[] = [];
+
+    const agent = new Agent({
+      provider,
+      toolRegistry,
+      stream: false,
+      timeProvider,
+      maxRetries: 0,
+      streamCallback: (message) => streamMessages.push(message),
+    });
+
+    const result = await agent.execute('retry empty stop');
+
+    expect(result.content).toBe('recovered');
+    expect(provider.calls).toHaveLength(2);
+    expect(timeProvider.sleeps).toEqual([]);
+    expect(agent.getRetryCount()).toBe(0);
+
+    const retryStatus = streamMessages.find((m) => {
+      return m.type === AgentMessageType.STATUS && m.payload.state === AgentStatus.RETRYING;
+    });
+    expect(retryStatus).toBeDefined();
+  });
+
+  it('should fail after maximum compensation retries for repeated empty stop responses', async () => {
+    const timeProvider = new MockTimeProvider();
+    const provider = new ScriptedProvider([
+      async () => textResponse('', 'stop'),
+      async () => textResponse('', 'stop'),
+    ]);
+
+    const toolRegistry = createToolRegistryStub([]);
+    const agent = new Agent({
+      provider,
+      toolRegistry,
+      stream: false,
+      timeProvider,
+      maxRetries: 0,
+    });
+
+    await expect(agent.execute('still empty')).rejects.toThrow('maximum compensation retries (1)');
+    expect(provider.calls).toHaveLength(2);
+    expect(timeProvider.sleeps).toEqual([]);
+  });
+
+  it('should keep empty-content assistant tool-call messages when sending next request', async () => {
+    const provider = new ScriptedProvider([
+      async () => toolCallResponse([
+        {
+          id: 'call_keep_1',
+          type: 'function',
+          index: 0,
+          function: {
+            name: 'lookup',
+            arguments: '{"q":"release"}',
+          },
+        },
+      ], '', 'tool_calls'),
+      async (messages) => {
+        const assistantToolCall = messages.find((message) => {
+          const candidate = message as LLMRequestMessage & { tool_calls?: ToolCall[] };
+          return (
+            candidate.role === 'assistant'
+            && Array.isArray(candidate.tool_calls)
+            && candidate.tool_calls.some((toolCall) => toolCall.id === 'call_keep_1')
+          );
+        });
+        const toolResult = messages.find((message) => {
+          const candidate = message as LLMRequestMessage & { tool_call_id?: string };
+          return candidate.role === 'tool' && candidate.tool_call_id === 'call_keep_1';
+        });
+
+        expect(assistantToolCall).toBeDefined();
+        expect(toolResult).toBeDefined();
+
+        return textResponse('tool chain completed');
+      },
+    ]);
+
+    const toolRegistry = createToolRegistryStub([
+      {
+        tool_call_id: 'call_keep_1',
+        name: 'lookup',
+        arguments: '{"q":"release"}',
+        result: {
+          success: true,
+          output: 'ok',
+        },
+      },
+    ]);
+
+    const agent = new Agent({
+      provider,
+      toolRegistry,
+      stream: false,
+    });
+
+    const result = await agent.execute('keep tool call message');
+    expect(result.content).toBe('tool chain completed');
   });
 
   it('should fail after max retries and emit TASK_FAILED event', async () => {
@@ -953,5 +1097,94 @@ describe('Agent deep behavior tests', () => {
     } finally {
       logSpy.mockRestore();
     }
+  });
+
+  it('should auto-repair interrupted tool-call chain before first resumed LLM request', async () => {
+    const now = Date.now();
+    const sessionId = 'session-resume-interrupted-tool';
+    const pendingToolCallId = 'call_resume_1';
+    const existingSession: SessionData = {
+      id: sessionId,
+      sessionId,
+      systemPrompt: 'system',
+      currentContextId: 'ctx-1',
+      totalMessages: 2,
+      compactionCount: 0,
+      status: 'active',
+      createdAt: now,
+      updatedAt: now,
+    };
+    const existingContext: CurrentContext = {
+      id: 'ctx-1',
+      contextId: 'ctx-1',
+      sessionId,
+      systemPrompt: 'system',
+      messages: [
+        {
+          messageId: 'system',
+          role: 'system',
+          content: 'system',
+        },
+        {
+          messageId: 'assistant-pending-tool',
+          role: 'assistant',
+          content: 'need tool',
+          type: 'tool-call',
+          finish_reason: 'tool_calls',
+          tool_calls: [
+            {
+              id: pendingToolCallId,
+              type: 'function',
+              index: 0,
+              function: {
+                name: 'lookup',
+                arguments: '{"q":"resume"}',
+              },
+            },
+          ],
+        },
+      ],
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+      stats: {
+        totalMessagesInHistory: 2,
+        compactionCount: 0,
+      },
+    };
+
+    const memoryManager = createMemoryManager({
+      getSession: vi.fn(async () => existingSession),
+      getCurrentContext: vi.fn(async () => existingContext),
+    });
+
+    const provider = new ScriptedProvider([
+      async (messages) => {
+        expect(() => assertToolCallsClosed(messages)).not.toThrow();
+        const repairedTool = messages.find((msg) => {
+          return msg.role === 'tool' && (msg as { tool_call_id?: string }).tool_call_id === pendingToolCallId;
+        });
+        expect(repairedTool).toBeDefined();
+
+        const parsed = JSON.parse(String(repairedTool?.content));
+        expect(parsed.error).toBe('TOOL_CALL_INTERRUPTED');
+        expect(parsed.interrupted).toBe(true);
+        return textResponse('resume ok');
+      },
+    ]);
+
+    const toolRegistry = createToolRegistryStub([]);
+    const agent = new Agent({
+      provider,
+      toolRegistry,
+      memoryManager,
+      sessionId,
+      systemPrompt: 'system',
+    });
+
+    const result = await agent.execute('continue');
+
+    expect(result.content).toBe('resume ok');
+    expect(provider.calls).toHaveLength(1);
   });
 });

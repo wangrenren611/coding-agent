@@ -146,15 +146,20 @@ export class ToolRegistry {
         this.eventCallbacks?.onToolStart?.(name, paramsStr || '');
         
         try {
-          const timeoutSignal = AbortSignal.timeout(this.toolTimeout);
-          const result = await Promise.race([
-              tool.execute(resultSchema.data, toolContext),
-              new Promise((_, reject) => {
-                  timeoutSignal.addEventListener('abort', () => {
-                      reject(new Error(`Tool "${name}" execution timeout (${this.toolTimeout}ms)`));
-                  });
-              })
-          ]);
+          const timeoutMs = tool.executionTimeoutMs === undefined
+            ? this.toolTimeout
+            : tool.executionTimeoutMs;
+          const result = timeoutMs === null || timeoutMs <= 0
+            ? await tool.execute(resultSchema.data, toolContext)
+            : await Promise.race([
+                tool.execute(resultSchema.data, toolContext),
+                new Promise((_, reject) => {
+                    const timeoutSignal = AbortSignal.timeout(timeoutMs);
+                    timeoutSignal.addEventListener('abort', () => {
+                        reject(new Error(`Tool "${name}" execution timeout (${timeoutMs}ms)`));
+                    });
+                }),
+              ]);
 
            
 

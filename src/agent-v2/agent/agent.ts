@@ -1,6 +1,8 @@
 import {
     Chunk,
     InputContentPart,
+    LLMError,
+    isAbortedError,
     isRetryableError,
     LLMGenerateOptions,
     LLMResponse,
@@ -8,8 +10,15 @@ import {
 } from "../../providers";
 import { Session } from "../session";
 import { ToolRegistry } from "../tool/registry";
-import { AgentError, ToolError } from "./errors";
-import { AgentOptions, AgentStatus, StreamCallback } from "./types";
+import { AgentError, CompensationRetryError, ToolError } from "./errors";
+import {
+    AgentExecutionResult,
+    AgentFailure,
+    AgentFailureCode,
+    AgentOptions,
+    AgentStatus,
+    StreamCallback
+} from "./types";
 import { EventBus, EventType } from "../eventbus";
 import { Message } from "../session/types";
 import { v4 as uuid } from "uuid";
@@ -65,13 +74,16 @@ export class Agent {
     // 状态
     private status: AgentStatus;
     private abortController: AbortController | null = null;
+    private lastFailure?: AgentFailure;
 
     // 执行追踪
     private taskStartTime = 0;
     private loopCount = 0;
     private retryCount = 0;
+    private compensationRetryCount = 0;
     private timeProvider: ITimeProvider;
     private loopMax: number;
+    private maxCompensationRetries: number;
 
     // 流式处理
     private streamProcessor: StreamProcessor;
@@ -102,6 +114,7 @@ export class Agent {
         this.timeProvider = config.timeProvider ?? new DefaultTimeProvider();
         this.maxBufferSize = config.maxBufferSize ?? 100000;
         this.loopMax = 3000;
+        this.maxCompensationRetries = 1;
 
         // 初始化流式处理器
         this.streamProcessor = new StreamProcessor({
@@ -143,6 +156,29 @@ export class Agent {
         }
     }
 
+    async executeWithResult(query: MessageContent): Promise<AgentExecutionResult> {
+        try {
+            const finalMessage = await this.execute(query);
+            return {
+                status: 'completed',
+                finalMessage,
+                loopCount: this.loopCount,
+                retryCount: this.retryCount,
+                sessionId: this.session.getSessionId(),
+            };
+        } catch (error) {
+            const failure = this.lastFailure ?? this.buildFailure(error, this.sanitizeError(error));
+            const status = this.status === AgentStatus.ABORTED ? 'aborted' : 'failed';
+            return {
+                status,
+                failure,
+                loopCount: this.loopCount,
+                retryCount: this.retryCount,
+                sessionId: this.session.getSessionId(),
+            };
+        }
+    }
+
     on(type: EventType, listener: (data: unknown) => void): void {
         this.eventBus.on(type, listener);
     }
@@ -166,6 +202,11 @@ export class Agent {
     abort(): void {
         this.abortController?.abort();
         this.status = AgentStatus.ABORTED;
+        this.lastFailure = {
+            code: 'AGENT_ABORTED',
+            userMessage: 'Task was aborted.',
+            internalMessage: 'Agent aborted by user.',
+        };
         this.emitStatus(AgentStatus.ABORTED, 'Agent aborted by user.');
     }
 
@@ -188,6 +229,9 @@ export class Agent {
             if (lastMessage.finish_reason) {
                 // 如果是工具调用，需要继续获取最终响应
                 if (lastMessage.finish_reason === 'tool_calls' || lastMessage.tool_calls) {
+                    return false;
+                }
+                if (this.isCompensationRetryCandidate(lastMessage)) {
                     return false;
                 }
                 return true;
@@ -326,6 +370,8 @@ export class Agent {
         this.taskStartTime = this.timeProvider.getCurrentTime();
         this.loopCount = 0;
         this.retryCount = 0;
+        this.compensationRetryCount = 0;
+        this.lastFailure = undefined;
 
         this.session.addMessage(createUserMessage(query));
     }
@@ -363,6 +409,37 @@ export class Agent {
         return content.length > 0;
     }
 
+    private isCompensationRetryCandidate(message: Message): boolean {
+        if (message.role !== 'assistant') return false;
+        if (message.finish_reason !== 'stop') return false;
+        if (Array.isArray(message.tool_calls) && message.tool_calls.length > 0) return false;
+        return !this.hasMessageContent(message.content);
+    }
+
+    private shouldSendMessageToLLM(message: Message): boolean {
+        if (message.role === 'system') return true;
+        if (message.role === 'assistant') {
+            if (Array.isArray(message.tool_calls) && message.tool_calls.length > 0) return true;
+            return this.hasMessageContent(message.content);
+        }
+        if (message.role === 'tool') {
+            const hasToolCallId = typeof message.tool_call_id === 'string' && message.tool_call_id.length > 0;
+            return hasToolCallId || this.hasMessageContent(message.content);
+        }
+        return this.hasMessageContent(message.content);
+    }
+
+    private getMessagesForLLM(): Message[] {
+        return this.session.getMessages().filter((message) => this.shouldSendMessageToLLM(message));
+    }
+
+    private throwIfCompensationRetryNeeded(): void {
+        const lastMessage = this.session.getLastMessage();
+        if (!lastMessage) return;
+        if (!this.isCompensationRetryCandidate(lastMessage)) return;
+        throw new CompensationRetryError('Assistant returned an empty stop response.');
+    }
+
     private completeTask(): void {
         this.status = AgentStatus.COMPLETED;
         this.emitStatus(AgentStatus.COMPLETED, 'Task completed successfully');
@@ -371,6 +448,7 @@ export class Agent {
     private failTask(error: unknown): void {
         this.status = AgentStatus.FAILED;
         const safeError = this.sanitizeError(error);
+        this.lastFailure = this.buildFailure(error, safeError);
 
         this.eventBus.emit(EventType.TASK_FAILED, {
             timestamp: this.timeProvider.getCurrentTime(),
@@ -380,6 +458,50 @@ export class Agent {
         } as TaskFailedEvent);
 
         this.emitStatus(AgentStatus.FAILED, safeError.userMessage);
+    }
+
+    private buildFailure(error: unknown, safeError: SafeError): AgentFailure {
+        return {
+            code: this.classifyFailureCode(error),
+            userMessage: safeError.userMessage,
+            internalMessage: safeError.internalMessage,
+        };
+    }
+
+    private classifyFailureCode(error: unknown): AgentFailureCode {
+        if (this.status === AgentStatus.ABORTED || isAbortedError(error) || this.isAbortLikeError(error)) {
+            return 'AGENT_ABORTED';
+        }
+        if (error instanceof AgentError && /maximum retries/i.test(error.message)) {
+            return 'AGENT_MAX_RETRIES_EXCEEDED';
+        }
+        if (error instanceof ToolError) {
+            return 'TOOL_EXECUTION_FAILED';
+        }
+        if (this.isTimeoutLikeError(error)) {
+            return 'LLM_TIMEOUT';
+        }
+        if (error instanceof LLMError) {
+            return 'LLM_REQUEST_FAILED';
+        }
+        return 'AGENT_RUNTIME_ERROR';
+    }
+
+    private isAbortLikeError(error: unknown): boolean {
+        if (!(error instanceof Error)) return false;
+        const message = `${error.name} ${error.message}`.toLowerCase();
+        return message.includes('abort') || message.includes('aborted');
+    }
+
+    private isTimeoutLikeError(error: unknown): boolean {
+        if (!(error instanceof Error)) return false;
+        const message = `${error.name} ${error.message}`.toLowerCase();
+        return (
+            message.includes('timeout')
+            || message.includes('timed out')
+            || message.includes('time out')
+            || message.includes('signal timed out')
+        );
     }
 
     // ==================== 主循环 ====================
@@ -407,7 +529,22 @@ export class Agent {
             try {
                 await this.executeLLMCall();
                 this.retryCount = 0;
+                this.compensationRetryCount = 0;
             } catch (error) {
+                if (error instanceof CompensationRetryError) {
+                    if (this.compensationRetryCount >= this.maxCompensationRetries) {
+                        throw new AgentError(
+                            `Agent failed after maximum compensation retries (${this.maxCompensationRetries}).`
+                        );
+                    }
+                    this.compensationRetryCount++;
+                    this.status = AgentStatus.RETRYING;
+                    this.emitStatus(
+                        AgentStatus.RETRYING,
+                        `Agent is retrying immediately... (${this.compensationRetryCount}/${this.maxCompensationRetries})`
+                    );
+                    continue;
+                }
                 if (!this.shouldRetry(error)) {
                     throw error;
                 }
@@ -443,7 +580,7 @@ export class Agent {
             AbortSignal.timeout(this.provider.getTimeTimeout()),
         ]);
 
-        const messages = this.session.getMessages();
+        const messages = this.getMessagesForLLM();
         const llmOptions: LLMGenerateOptions = {
             tools: this.toolRegistry.toLLMTools(),
             abortSignal: timeoutSignal,
@@ -459,6 +596,7 @@ export class Agent {
             }
 
             await this.handleResponse(response, messageId);
+            this.throwIfCompensationRetryNeeded();
         } finally {
             this.cleanup();
         }

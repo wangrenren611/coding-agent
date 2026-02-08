@@ -60,6 +60,7 @@ export class FileMemoryManager implements IMemoryManager {
   private historiesPath: string;
   private compactionsPath: string;
   private tasksPath: string;
+  private subTaskRunsPath: string;
   private saveTimer?: NodeJS.Timeout;
   private initialized = false;
 
@@ -87,6 +88,7 @@ export class FileMemoryManager implements IMemoryManager {
     this.historiesPath = path.join(this.basePath, 'histories');
     this.compactionsPath = path.join(this.basePath, 'compactions');
     this.tasksPath = path.join(this.basePath, 'tasks');
+    this.subTaskRunsPath = path.join(this.basePath, 'subtask-runs');
   }
 
   // ==================== 初始化与生命周期 ====================
@@ -101,6 +103,7 @@ export class FileMemoryManager implements IMemoryManager {
       await fs.mkdir(this.historiesPath, { recursive: true });
       await fs.mkdir(this.compactionsPath, { recursive: true });
       await fs.mkdir(this.tasksPath, { recursive: true });
+      await fs.mkdir(this.subTaskRunsPath, { recursive: true });
 
       // 加载已有数据
       await this.loadAllData();
@@ -269,9 +272,9 @@ export class FileMemoryManager implements IMemoryManager {
     for (const [taskId, task] of this.cache.tasks.entries()) {
       if (task.sessionId === sessionId) {
         this.cache.tasks.delete(taskId);
-        await this.deleteTaskFile(taskId);
       }
     }
+    await this.deleteTaskListFile(sessionId);
 
     // 删除关联的子任务运行记录
     for (const [runId, run] of this.cache.subTaskRuns.entries()) {
@@ -661,7 +664,7 @@ export class FileMemoryManager implements IMemoryManager {
     };
 
     this.cache.tasks.set(task.taskId, taskData);
-    await this.saveTaskFile(task.taskId);
+    await this.saveTaskListFile(taskData.sessionId);
   }
 
   async getTask(taskId: string): Promise<TaskData | null> {
@@ -712,9 +715,11 @@ export class FileMemoryManager implements IMemoryManager {
 
   async deleteTask(taskId: string): Promise<void> {
     this.ensureInitialized();
-
+    const existing = this.cache.tasks.get(taskId);
     this.cache.tasks.delete(taskId);
-    await this.deleteTaskFile(taskId);
+    if (existing?.sessionId) {
+      await this.saveTaskListFile(existing.sessionId);
+    }
   }
 
   async saveSubTaskRun(run: Omit<SubTaskRunData, 'createdAt' | 'updatedAt'>): Promise<void> {
@@ -722,14 +727,10 @@ export class FileMemoryManager implements IMemoryManager {
 
     const now = Date.now();
     const existing = this.cache.subTaskRuns.get(run.runId);
-    const normalizedMessageCount =
-      run.messageCount ??
-      (Array.isArray(run.messages) ? run.messages.length : 0);
-    const { messages: _legacyMessages, ...runWithoutMessages } = run as SubTaskRunData;
+    const normalized = this.normalizeSubTaskRun(run as SubTaskRunData);
 
     const runData: SubTaskRunData = {
-      ...runWithoutMessages,
-      messageCount: normalizedMessageCount,
+      ...normalized,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     };
@@ -825,18 +826,58 @@ export class FileMemoryManager implements IMemoryManager {
       }
     }
 
-    // 加载任务
+    // 加载任务（仅 task_*，不包含 sub task run）
     const taskFiles = await fs.readdir(this.tasksPath).catch(() => []);
+    const migratedLegacyTaskSessions = new Set<string>();
+    const migratedLegacyTaskIds: string[] = [];
     for (const file of taskFiles) {
       if (file.endsWith('.json')) {
-        if (file.startsWith('subtask-run-')) {
-          const encodedRunId = file.replace('subtask-run-', '').replace('.json', '');
-          const runId = decodeURIComponent(encodedRunId);
-          await this.loadSubTaskRunFile(runId);
-        } else {
-          const taskId = file.replace('.json', '');
-          await this.loadTaskFile(taskId);
+        if (file.startsWith('subtask-run-')) continue;
+        if (file.startsWith('task-list-')) {
+          const sessionId = this.decodeTaskListFileName(file);
+          await this.loadTaskListFile(sessionId);
+          continue;
         }
+
+        const taskId = file.replace('.json', '');
+        const loaded = await this.loadTaskFile(taskId);
+        if (loaded?.sessionId) {
+          migratedLegacyTaskSessions.add(loaded.sessionId);
+          migratedLegacyTaskIds.push(taskId);
+        }
+      }
+    }
+
+    // 迁移旧格式任务文件（tasks/<taskId>.json -> tasks/task-list-<sessionId>.json）
+    for (const sessionId of migratedLegacyTaskSessions) {
+      await this.saveTaskListFile(sessionId);
+    }
+    for (const taskId of migratedLegacyTaskIds) {
+      await this.deleteTaskFile(taskId);
+    }
+
+    // 加载 sub task run（新目录）
+    const runFiles = await fs.readdir(this.subTaskRunsPath).catch(() => []);
+    for (const file of runFiles) {
+      if (file.endsWith('.json')) {
+        const runId = this.decodeSubTaskRunFileName(file);
+        await this.loadSubTaskRunFile(runId);
+      }
+    }
+
+    // 迁移旧目录中的 sub task run（tasks/subtask-run-*.json -> subtask-runs/）
+    for (const file of taskFiles) {
+      if (file.endsWith('.json') && file.startsWith('subtask-run-')) {
+        const runId = this.decodeSubTaskRunFileName(file);
+        if (this.cache.subTaskRuns.has(runId)) {
+          await this.deleteLegacySubTaskRunFile(runId);
+          continue;
+        }
+        await this.loadLegacySubTaskRunFile(runId);
+        if (this.cache.subTaskRuns.has(runId)) {
+          await this.saveSubTaskRunFile(runId);
+        }
+        await this.deleteLegacySubTaskRunFile(runId);
       }
     }
 
@@ -850,7 +891,7 @@ export class FileMemoryManager implements IMemoryManager {
       const data = await fs.readFile(metadataPath, 'utf-8');
       const parsed = JSON.parse(data);
       // 元数据仅用于信息展示，不影响核心功能
-      console.log('Loaded metadata:', parsed.metadata);
+      // console.log('Loaded metadata:', parsed.metadata);
     } catch {
       // 元数据文件不存在或损坏，忽略
     }
@@ -900,14 +941,29 @@ export class FileMemoryManager implements IMemoryManager {
     }
   }
 
-  private async loadTaskFile(taskId: string): Promise<void> {
+  private async loadTaskFile(taskId: string): Promise<TaskData | null> {
     const filePath = path.join(this.tasksPath, `${taskId}.json`);
     try {
       const data = await fs.readFile(filePath, 'utf-8');
       const task: TaskData = JSON.parse(data);
       this.cache.tasks.set(taskId, task);
+      return task;
     } catch (error) {
       console.error(`Error loading task ${taskId}:`, error);
+      return null;
+    }
+  }
+
+  private async loadTaskListFile(sessionId: string): Promise<void> {
+    const filePath = this.getTaskListFilePath(sessionId);
+    try {
+      const data = await fs.readFile(filePath, 'utf-8');
+      const tasks = JSON.parse(data) as TaskData[];
+      for (const task of tasks) {
+        this.cache.tasks.set(task.taskId, task);
+      }
+    } catch (error) {
+      console.error(`Error loading task list ${sessionId}:`, error);
     }
   }
 
@@ -915,21 +971,25 @@ export class FileMemoryManager implements IMemoryManager {
     const filePath = this.getSubTaskRunFilePath(runId);
     try {
       const data = await fs.readFile(filePath, 'utf-8');
-      const parsed: SubTaskRunData = JSON.parse(data);
-      const normalizedMessageCount =
-        parsed.messageCount ??
-        (Array.isArray(parsed.messages) ? parsed.messages.length : 0);
-      const { messages: _legacyMessages, ...runWithoutMessages } = parsed as SubTaskRunData;
-      const run: SubTaskRunData = {
-        ...runWithoutMessages,
-        messageCount: normalizedMessageCount,
-      };
+      const parsed = JSON.parse(data) as SubTaskRunData;
+      const run = this.normalizeSubTaskRun(parsed);
       this.cache.subTaskRuns.set(runId, run);
-      if (parsed.messages !== undefined || parsed.messageCount !== normalizedMessageCount) {
+      if (parsed.messages !== undefined || parsed.messageCount !== run.messageCount) {
         await this.saveSubTaskRunFile(runId);
       }
     } catch (error) {
       console.error(`Error loading sub task run ${runId}:`, error);
+    }
+  }
+
+  private async loadLegacySubTaskRunFile(runId: string): Promise<void> {
+    const filePath = this.getLegacySubTaskRunFilePath(runId);
+    try {
+      const data = await fs.readFile(filePath, 'utf-8');
+      const run = this.normalizeSubTaskRun(JSON.parse(data) as SubTaskRunData);
+      this.cache.subTaskRuns.set(runId, run);
+    } catch (error) {
+      console.error(`Error loading legacy sub task run ${runId}:`, error);
     }
   }
 
@@ -949,8 +1009,11 @@ export class FileMemoryManager implements IMemoryManager {
     for (const sessionId of this.cache.compactionRecords.keys()) {
       await this.saveCompactionFile(sessionId);
     }
-    for (const taskId of this.cache.tasks.keys()) {
-      await this.saveTaskFile(taskId);
+    const taskSessions = new Set(
+      Array.from(this.cache.tasks.values()).map((task) => task.sessionId),
+    );
+    for (const sessionId of taskSessions) {
+      await this.saveTaskListFile(sessionId);
     }
     for (const runId of this.cache.subTaskRuns.keys()) {
       await this.saveSubTaskRunFile(runId);
@@ -1004,12 +1067,13 @@ export class FileMemoryManager implements IMemoryManager {
     await fs.writeFile(filePath, JSON.stringify(records, null, 2));
   }
 
-  private async saveTaskFile(taskId: string): Promise<void> {
-    const task = this.cache.tasks.get(taskId);
-    if (!task) return;
+  private async saveTaskListFile(sessionId: string): Promise<void> {
+    const tasks = Array.from(this.cache.tasks.values())
+      .filter((task) => task.sessionId === sessionId)
+      .sort((a, b) => a.createdAt - b.createdAt);
 
-    const filePath = path.join(this.tasksPath, `${taskId}.json`);
-    await fs.writeFile(filePath, JSON.stringify(task, null, 2));
+    const filePath = this.getTaskListFilePath(sessionId);
+    await fs.writeFile(filePath, JSON.stringify(tasks, null, 2));
   }
 
   private async saveSubTaskRunFile(runId: string): Promise<void> {
@@ -1045,13 +1109,66 @@ export class FileMemoryManager implements IMemoryManager {
     await fs.unlink(filePath).catch(() => {});
   }
 
+  private async deleteTaskListFile(sessionId: string): Promise<void> {
+    const filePath = this.getTaskListFilePath(sessionId);
+    await fs.unlink(filePath).catch(() => {});
+  }
+
   private async deleteSubTaskRunFile(runId: string): Promise<void> {
     const filePath = this.getSubTaskRunFilePath(runId);
     await fs.unlink(filePath).catch(() => {});
   }
 
   private getSubTaskRunFilePath(runId: string): string {
-    return path.join(this.tasksPath, `subtask-run-${encodeURIComponent(runId)}.json`);
+    return path.join(this.subTaskRunsPath, this.encodeSubTaskRunFileName(runId));
+  }
+
+  private getLegacySubTaskRunFilePath(runId: string): string {
+    return path.join(this.tasksPath, this.encodeSubTaskRunFileName(runId));
+  }
+
+  private async deleteLegacySubTaskRunFile(runId: string): Promise<void> {
+    const filePath = this.getLegacySubTaskRunFilePath(runId);
+    await fs.unlink(filePath).catch(() => {});
+  }
+
+  private encodeSubTaskRunFileName(runId: string): string {
+    return `subtask-run-${encodeURIComponent(runId)}.json`;
+  }
+
+  private decodeSubTaskRunFileName(fileName: string): string {
+    if (fileName.startsWith('subtask-run-')) {
+      const encodedRunId = fileName.replace('subtask-run-', '').replace('.json', '');
+      return decodeURIComponent(encodedRunId);
+    }
+    return fileName.replace('.json', '');
+  }
+
+  private getTaskListFilePath(sessionId: string): string {
+    return path.join(this.tasksPath, this.encodeTaskListFileName(sessionId));
+  }
+
+  private encodeTaskListFileName(sessionId: string): string {
+    return `task-list-${encodeURIComponent(sessionId)}.json`;
+  }
+
+  private decodeTaskListFileName(fileName: string): string {
+    if (fileName.startsWith('task-list-')) {
+      const encodedSessionId = fileName.replace('task-list-', '').replace('.json', '');
+      return decodeURIComponent(encodedSessionId);
+    }
+    return fileName.replace('.json', '');
+  }
+
+  private normalizeSubTaskRun(raw: SubTaskRunData): SubTaskRunData {
+    const normalizedMessageCount =
+      raw.messageCount ??
+      (Array.isArray(raw.messages) ? raw.messages.length : 0);
+    const { messages: _legacyMessages, ...runWithoutMessages } = raw as SubTaskRunData;
+    return {
+      ...runWithoutMessages,
+      messageCount: normalizedMessageCount,
+    };
   }
 
   private ensureHistoryList(sessionId: string): HistoryMessage[] {

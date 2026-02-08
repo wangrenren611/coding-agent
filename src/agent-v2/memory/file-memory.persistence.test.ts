@@ -128,7 +128,7 @@ describe('FileMemoryManager persistence', () => {
     expect(loaded?.messageCount).toBe(3);
     expect(loaded?.messages).toBeUndefined();
 
-    const runFile = path.join(tempDir, 'tasks', `subtask-run-${encodeURIComponent(runId)}.json`);
+    const runFile = path.join(tempDir, 'subtask-runs', `subtask-run-${encodeURIComponent(runId)}.json`);
     const raw = await fs.readFile(runFile, 'utf-8');
     const stored = JSON.parse(raw);
     expect(stored.runId).toBe(runId);
@@ -191,5 +191,49 @@ describe('FileMemoryManager persistence', () => {
     await memoryManager.deleteSubTaskRun('run-1');
     const deleted = await memoryManager.getSubTaskRun('run-1');
     expect(deleted).toBeNull();
+  });
+
+  it('should migrate legacy sub task run files out of tasks directory', async () => {
+    const runId = 'legacy-run-1';
+    const legacyDir = path.join(tempDir, 'tasks');
+    const newDir = path.join(tempDir, 'subtask-runs');
+    await fs.mkdir(legacyDir, { recursive: true });
+
+    const legacyFile = path.join(legacyDir, `subtask-run-${encodeURIComponent(runId)}.json`);
+    await fs.writeFile(legacyFile, JSON.stringify({
+      id: runId,
+      runId,
+      parentSessionId: 'parent',
+      childSessionId: `parent::subtask::${runId}`,
+      mode: 'foreground',
+      status: 'completed',
+      description: 'legacy',
+      prompt: 'legacy',
+      subagentType: 'explore',
+      startedAt: Date.now(),
+      finishedAt: Date.now(),
+      turns: 1,
+      toolsUsed: [],
+      output: 'ok',
+      messages: [
+        { messageId: 'system', role: 'system', content: 'sys' },
+      ],
+    }, null, 2), 'utf-8');
+
+    await memoryManager.close();
+    memoryManager = createMemoryManager({
+      type: 'file',
+      connectionString: tempDir,
+    });
+    await memoryManager.initialize();
+
+    const migrated = await memoryManager.getSubTaskRun(runId);
+    expect(migrated).toBeTruthy();
+    expect(migrated?.messageCount).toBe(1);
+    expect(migrated?.messages).toBeUndefined();
+
+    const migratedFile = path.join(newDir, `subtask-run-${encodeURIComponent(runId)}.json`);
+    await expect(fs.access(migratedFile)).resolves.toBeUndefined();
+    await expect(fs.access(legacyFile)).rejects.toThrow();
   });
 });

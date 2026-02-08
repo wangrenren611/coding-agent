@@ -35,6 +35,7 @@ import {
   getMessageCount,
   isStatusTransitionAllowed,
   messageContentToText,
+  clearTaskIdCounterState,
   nextTaskId,
   normalizeMessagesForStorage,
   nowIso,
@@ -45,8 +46,9 @@ import {
 import {
   applyMetadataPatch,
   clearManagedTaskState,
+  deleteTaskEntry,
   loadTasks,
-  saveTasks,
+  saveTaskEntry,
 } from './task/managed-task-store';
 import {
   buildSubTaskRunData,
@@ -79,6 +81,7 @@ export class TaskTool extends BaseTool<typeof taskRunSchema> {
   name = 'task';
   description = TASK_TOOL_DESCRIPTION;
   schema = taskRunSchema;
+  executionTimeoutMs = null;
 
   private provider: LLMProvider;
   private defaultWorkingDir: string;
@@ -168,7 +171,7 @@ export class TaskTool extends BaseTool<typeof taskRunSchema> {
         parentSessionId,
         childSessionId,
         mode: 'foreground',
-        status: 'completed',
+        status: result.status,
         createdAt: startedAt,
         startedAt,
         finishedAt,
@@ -182,18 +185,21 @@ export class TaskTool extends BaseTool<typeof taskRunSchema> {
         turns: result.turns,
         toolsUsed: result.toolsUsed,
         output: result.output,
+        error: result.errorMessage,
         messageCount: getMessageCount(result.messages),
       }));
 
       return this.result({
-        success: true,
+        success: result.status === 'completed',
         metadata: {
           task_id: taskId,
           parent_session_id: parentSessionId,
           child_session_id: childSessionId,
           subagent_type,
+          status: result.status,
           turns: result.turns,
           toolsUsed: result.toolsUsed,
+          error: result.errorCode,
           model,
           resume,
           storage,
@@ -205,7 +211,9 @@ export class TaskTool extends BaseTool<typeof taskRunSchema> {
       let storage: 'memory_manager' | 'memory_fallback' = 'memory_fallback';
       if (!run_in_background && subagent) {
         const finishedAt = nowIso();
-        const toolsUsed = extractToolsUsed(subagent.getMessages());
+        const rawMessages = subagent.getMessages();
+        const toolsUsed = extractToolsUsed(rawMessages);
+        const output = `Agent execution failed: ${err.message}`;
         storage = await saveSubTaskRunRecord(memoryManager, buildSubTaskRunData({
           runId: taskId,
           parentSessionId,
@@ -225,8 +233,8 @@ export class TaskTool extends BaseTool<typeof taskRunSchema> {
           turns: subagent.getLoopCount(),
           toolsUsed,
           error: err.message,
-          output: `Agent execution failed: ${err.message}`,
-          messageCount: getMessageCount(subagent.getMessages()),
+          output,
+          messageCount: getMessageCount(rawMessages),
         }));
       }
       return this.result({
@@ -337,8 +345,8 @@ Execution context:
         execution.messages = result.messages;
         execution.lastToolName = result.toolsUsed[result.toolsUsed.length - 1];
         execution.lastActivityAt = nowIso();
-        execution.error = undefined;
-        execution.status = 'completed';
+        execution.status = result.status;
+        execution.error = result.errorMessage;
         execution.output = result.output;
         execution.finishedAt = nowIso();
         await persistExecutionSnapshot(execution);
@@ -370,16 +378,36 @@ Execution context:
   }
 
   private async runSubagent(subagent: Agent, prompt: string): Promise<SubagentResult> {
-    const finalMessage = await subagent.execute(prompt);
+    const execution = await subagent.executeWithResult(prompt);
     const turns = subagent.getLoopCount();
     const rawMessages = subagent.getMessages();
     const toolsUsed = extractToolsUsed(rawMessages);
-    const output = messageContentToText(finalMessage.content) || 'Task completed with no output';
+    const normalizedMessages = normalizeMessagesForStorage(rawMessages);
+    const failure = execution.failure;
+
+    if (execution.status !== 'completed') {
+      const status = execution.status === 'aborted' ? 'cancelled' : 'failed';
+      const output = status === 'cancelled'
+        ? (failure?.userMessage || 'Task cancelled by user.')
+        : `Agent execution failed: ${failure?.internalMessage || failure?.userMessage || 'Unknown error'}`;
+      return {
+        status,
+        turns,
+        toolsUsed,
+        output,
+        errorCode: failure?.code || (status === 'cancelled' ? 'AGENT_ABORTED' : 'AGENT_RUNTIME_ERROR'),
+        errorMessage: failure?.internalMessage || failure?.userMessage,
+        messages: normalizedMessages,
+      };
+    }
+
+    const output = messageContentToText(execution.finalMessage?.content) || 'Task completed with no output';
     return {
+      status: 'completed',
       turns,
       toolsUsed,
       output,
-      messages: normalizeMessagesForStorage(rawMessages),
+      messages: normalizedMessages,
     };
   }
 }
@@ -402,7 +430,7 @@ export class TaskCreateTool extends BaseTool<typeof taskCreateSchema> {
 
     const now = nowIso();
     const newTask = {
-      id: nextTaskId(tasks),
+      id: nextTaskId(tasks, context?.sessionId),
       subject,
       description,
       activeForm,
@@ -415,8 +443,7 @@ export class TaskCreateTool extends BaseTool<typeof taskCreateSchema> {
       updatedAt: now,
     };
 
-    const next = [...tasks, newTask];
-    await saveTasks(next, context?.sessionId, context?.memoryManager);
+    await saveTaskEntry(newTask, context?.sessionId, context?.memoryManager);
 
     return this.result({
       success: true,
@@ -516,15 +543,28 @@ export class TaskUpdateTool extends BaseTool<typeof taskUpdateSchema> {
     }
 
     if (status === 'deleted') {
-      const next = tasks
+      const updatedAt = nowIso();
+      const touchedTasks = tasks
         .filter((task) => task.id !== taskId)
-        .map((task) => ({
-          ...task,
-          blocks: task.blocks.filter((id) => id !== taskId),
-          blockedBy: task.blockedBy.filter((id) => id !== taskId),
-          updatedAt: nowIso(),
-        }));
-      await saveTasks(next, context?.sessionId, context?.memoryManager);
+        .map((task) => {
+          const nextBlocks = task.blocks.filter((id) => id !== taskId);
+          const nextBlockedBy = task.blockedBy.filter((id) => id !== taskId);
+          if (nextBlocks.length === task.blocks.length && nextBlockedBy.length === task.blockedBy.length) {
+            return null;
+          }
+          return {
+            ...task,
+            blocks: nextBlocks,
+            blockedBy: nextBlockedBy,
+            updatedAt,
+          };
+        })
+        .filter((task): task is (typeof tasks)[number] => task !== null);
+
+      for (const touchedTask of touchedTasks) {
+        await saveTaskEntry(touchedTask, context?.sessionId, context?.memoryManager);
+      }
+      await deleteTaskEntry(taskId, context?.sessionId, context?.memoryManager);
       return this.result({
         success: true,
         metadata: { taskId, status: 'deleted' } as any,
@@ -590,7 +630,10 @@ export class TaskUpdateTool extends BaseTool<typeof taskUpdateSchema> {
       }
     }
 
-    await saveTasks(next, context?.sessionId, context?.memoryManager);
+    const touchedTasks = next.filter((task) => touched.has(task.id));
+    for (const touchedTask of touchedTasks) {
+      await saveTaskEntry(touchedTask, context?.sessionId, context?.memoryManager);
+    }
     const updated = next.find((task) => task.id === taskId);
     return this.result({
       success: true,
@@ -771,6 +814,7 @@ export class TaskStopTool extends BaseTool<typeof taskStopSchema> {
 }
 
 export function clearTaskState(sessionId?: string): void {
+  clearTaskIdCounterState(sessionId);
   clearManagedTaskState(sessionId);
   clearSubTaskRunFallbackStore(sessionId);
   clearBackgroundExecutions(sessionId);

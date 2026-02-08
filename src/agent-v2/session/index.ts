@@ -106,7 +106,7 @@ export class Session {
         // 加载已有会话的上下文
         const context = await this.memoryManager.getCurrentContext(this.sessionId);
         if (context) {
-          this.messages = context.messages;
+          this.messages = [...context.messages];
           this.systemPrompt = context.systemPrompt;
         }
       } else {
@@ -268,6 +268,8 @@ export class Session {
    * 仅在启用压缩时生效
    */
   async compactBeforeLLMCall(): Promise<boolean> {
+    this.repairInterruptedToolCalls();
+
     if (!this.enableCompaction || !this.compaction) {
       return false;
     }
@@ -373,6 +375,86 @@ export class Session {
       .catch((error) => {
         console.error(`Failed to persist message (${operation}):`, error);
       });
+  }
+
+  /**
+   * 修复异常中断导致的未闭合 tool call：
+   * assistant(tool_calls) 后若缺少对应 tool 消息，补一条失败结果，确保后续请求消息结构合法。
+   */
+  private repairInterruptedToolCalls(): void {
+    let index = 0;
+    while (index < this.messages.length) {
+      const current = this.messages[index];
+      const expectedToolCallIds = this.extractToolCallIds(current);
+      if (expectedToolCallIds.length === 0) {
+        index++;
+        continue;
+      }
+
+      let cursor = index + 1;
+      const responded = new Set<string>();
+      while (cursor < this.messages.length && this.messages[cursor].role === 'tool') {
+        const toolCallId = this.extractToolCallId(this.messages[cursor]);
+        if (toolCallId) {
+          responded.add(toolCallId);
+        }
+        cursor++;
+      }
+
+      const missingIds = expectedToolCallIds.filter((id) => !responded.has(id));
+      if (missingIds.length === 0) {
+        index = cursor;
+        continue;
+      }
+
+      const recoveredMessages = missingIds.map((toolCallId) => this.buildInterruptedToolResult(toolCallId));
+      this.messages.splice(cursor, 0, ...recoveredMessages);
+
+      if (this.memoryManager) {
+        for (const message of recoveredMessages) {
+          this.queuePersistOperation(message, 'add');
+        }
+      }
+
+      index = cursor + recoveredMessages.length;
+    }
+  }
+
+  private extractToolCallIds(message: Message): string[] {
+    if (message.role !== 'assistant') return [];
+    const rawCalls = (message as { tool_calls?: unknown }).tool_calls;
+    if (!Array.isArray(rawCalls)) return [];
+
+    const uniqueIds = new Set<string>();
+    for (const call of rawCalls) {
+      const callId = (call as { id?: unknown })?.id;
+      if (typeof callId === 'string' && callId.length > 0) {
+        uniqueIds.add(callId);
+      }
+    }
+
+    return Array.from(uniqueIds);
+  }
+
+  private extractToolCallId(message: Message): string | null {
+    if (message.role !== 'tool') return null;
+    const toolCallId = (message as { tool_call_id?: unknown }).tool_call_id;
+    return typeof toolCallId === 'string' && toolCallId.length > 0 ? toolCallId : null;
+  }
+
+  private buildInterruptedToolResult(toolCallId: string): Message {
+    return {
+      messageId: uuid(),
+      role: 'tool',
+      type: 'tool-result',
+      tool_call_id: toolCallId,
+      content: JSON.stringify({
+        success: false,
+        error: 'TOOL_CALL_INTERRUPTED',
+        interrupted: true,
+        message: 'Tool execution was interrupted before a result was produced.',
+      }),
+    };
   }
 
   private getContentLength(content: Message['content']): number {

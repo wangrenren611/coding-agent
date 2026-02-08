@@ -11,3 +11,10 @@ export class AgentError extends Error {
         this.name = 'AgentError';
     }
 }
+
+export class CompensationRetryError extends Error {
+    constructor(message: string = 'Compensation retry requested.') {
+        super(message);
+        this.name = 'CompensationRetryError';
+    }
+}

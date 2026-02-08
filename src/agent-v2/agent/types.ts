@@ -8,6 +8,7 @@ import { AgentMessage } from './stream-types';
 import type { ITimeProvider } from './types-internal';
 import type { IMemoryManager } from '../memory/types';
 import type { CompactionConfig } from '../session';
+import type { Message } from '../session/types';
 
 export enum AgentStatus {
   THINKING = 'thinking',
@@ -20,6 +21,29 @@ export enum AgentStatus {
 }
 
 export type StreamCallback = <T extends AgentMessage>(message: T) => void;
+
+export type AgentFailureCode =
+  | 'AGENT_ABORTED'
+  | 'AGENT_MAX_RETRIES_EXCEEDED'
+  | 'LLM_TIMEOUT'
+  | 'TOOL_EXECUTION_FAILED'
+  | 'LLM_REQUEST_FAILED'
+  | 'AGENT_RUNTIME_ERROR';
+
+export interface AgentFailure {
+  code: AgentFailureCode;
+  userMessage: string;
+  internalMessage?: string;
+}
+
+export interface AgentExecutionResult {
+  status: 'completed' | 'failed' | 'aborted';
+  finalMessage?: Message;
+  failure?: AgentFailure;
+  loopCount: number;
+  retryCount: number;
+  sessionId: string;
+}
 
 /**
  * Agent 配置选项

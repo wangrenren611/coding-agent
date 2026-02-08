@@ -25,7 +25,7 @@ export function SpinnerDot({ state, intervalMs = 90 }: SpinnerDotProps): React.J
     if (state === "success") return <Text color="green">⏺</Text>;
     if (state === "error") return <Text color="red">⏺</Text>;
     if (state === "running") return <Text color="gray">{FRAMES[frameIndex]}</Text>;
-    return <Text color="gray">⏺</Text>;
+    return(<Text color="#f0f0f0">⏺</Text>);
   }, [state, frameIndex]);
 
   return node;

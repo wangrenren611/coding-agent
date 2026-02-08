@@ -2,11 +2,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { LLMProvider } from '../../../providers';
+import { LLMBadRequestError } from '../../../providers/types/errors';
 import type { LLMGenerateOptions, LLMRequestMessage, LLMResponse } from '../../../providers';
 import type { ToolContext } from '../base';
 import { TestEnvironment } from './test-utils';
 import { createMemoryManager } from '../../memory';
 import type { IMemoryManager } from '../../memory';
+import { ToolRegistry } from '../registry';
 import {
   TaskCreateTool,
   TaskGetTool,
@@ -67,6 +69,38 @@ class MockProvider extends LLMProvider {
         finish_reason: 'stop',
       }],
     };
+  }
+
+  getTimeTimeout(): number {
+    return 10_000;
+  }
+
+  getLLMMaxTokens(): number {
+    return 8192;
+  }
+
+  getMaxOutputTokens(): number {
+    return 1024;
+  }
+}
+
+class FailingProvider extends LLMProvider {
+  constructor() {
+    super({
+      apiKey: 'mock',
+      baseURL: 'https://mock.local',
+      model: 'mock-model',
+      max_tokens: 1024,
+      LLMMAX_TOKENS: 8192,
+      temperature: 0,
+    });
+  }
+
+  async generate(
+    _messages: LLMRequestMessage[],
+    _options?: LLMGenerateOptions,
+  ): Promise<LLMResponse | null> {
+    throw new LLMBadRequestError('400 Bad Request - malformed tool call');
   }
 
   getTimeTimeout(): number {
@@ -179,6 +213,40 @@ describe('Task tools', () => {
     expect(missing.success).toBe(false);
   });
 
+  it('should assign unique IDs for concurrent managed task creation', async () => {
+    const create = withContext(new TaskCreateTool());
+
+    const results = await Promise.all([
+      create.execute({
+        subject: 'Task A',
+        description: 'Concurrent create A',
+        activeForm: 'Creating task A',
+      }),
+      create.execute({
+        subject: 'Task B',
+        description: 'Concurrent create B',
+        activeForm: 'Creating task B',
+      }),
+      create.execute({
+        subject: 'Task C',
+        description: 'Concurrent create C',
+        activeForm: 'Creating task C',
+      }),
+    ]);
+
+    const ids = results.map((result) => result.metadata?.id as string);
+    expect(ids).toHaveLength(3);
+    expect(new Set(ids).size).toBe(3);
+    const sortedIds = ids.map((id) => Number.parseInt(id, 10)).sort((a, b) => a - b);
+    expect(sortedIds).toEqual([1, 2, 3]);
+
+    const storedTasks = await memoryManager.queryTasks({
+      sessionId,
+      parentTaskId: MANAGED_TASK_PARENT_ID,
+    });
+    expect(storedTasks).toHaveLength(3);
+  });
+
   it('should reject invalid status transition', async () => {
     const create = withContext(new TaskCreateTool());
     const update = withContext(new TaskUpdateTool());
@@ -194,6 +262,59 @@ describe('Task tools', () => {
     });
     expect(invalid.success).toBe(false);
     expect(invalid.output).toContain('Invalid status transition');
+  });
+
+  it('should keep task 3 in_progress after concurrent updates before marking it completed', async () => {
+    const create = withContext(new TaskCreateTool());
+    const update = withContext(new TaskUpdateTool());
+
+    await create.execute({
+      subject: 'Task 1',
+      description: 'Prepare folder',
+      activeForm: 'Preparing folder',
+    });
+    await create.execute({
+      subject: 'Task 2',
+      description: 'Summarize posts 1-5',
+      activeForm: 'Summarizing posts 1-5',
+    });
+    await create.execute({
+      subject: 'Task 3',
+      description: 'Summarize posts 6-10',
+      activeForm: 'Summarizing posts 6-10',
+    });
+    await create.execute({
+      subject: 'Task 4',
+      description: 'Summarize posts 11-17',
+      activeForm: 'Summarizing posts 11-17',
+    });
+
+    const task2InProgress = await update.execute({ taskId: '2', status: 'in_progress' });
+    expect(task2InProgress.success).toBe(true);
+
+    const originalSaveTask = memoryManager.saveTask.bind(memoryManager);
+    (memoryManager as IMemoryManager & { saveTask: IMemoryManager['saveTask'] }).saveTask = async (task) => {
+      // Force "task 2 completed" update to flush later so it can overwrite task 3 state with a stale snapshot.
+      if (task.taskId.endsWith('-2') && task.status === 'completed') {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      await originalSaveTask(task);
+    };
+
+    try {
+      const [task2Completed, task3InProgress] = await Promise.all([
+        update.execute({ taskId: '2', status: 'completed' }),
+        update.execute({ taskId: '3', status: 'in_progress' }),
+      ]);
+
+      expect(task2Completed.success).toBe(true);
+      expect(task3InProgress.success).toBe(true);
+
+      const task3Completed = await update.execute({ taskId: '3', status: 'completed' });
+      expect(task3Completed.success).toBe(true);
+    } finally {
+      (memoryManager as IMemoryManager & { saveTask: IMemoryManager['saveTask'] }).saveTask = originalSaveTask;
+    }
   });
 
   it('should migrate legacy task-list.json data into memory manager storage', async () => {
@@ -253,7 +374,7 @@ describe('Task tools', () => {
     const subTaskFilePath = path.join(
       env.getTestDir(),
       'agent-memory',
-      'tasks',
+      'subtask-runs',
       `subtask-run-${encodeURIComponent(runId)}.json`,
     );
     const raw = await fs.readFile(subTaskFilePath, 'utf-8');
@@ -360,5 +481,50 @@ describe('Task tools', () => {
     expect(eventually.success).toBe(true);
     expect(eventually.metadata?.status).toBe('completed');
     expect(eventually.metadata?.wait?.timeout_reached).toBe(false);
+  });
+
+  it('should not apply ToolRegistry timeout to task tool execution', async () => {
+    const registry = new ToolRegistry({
+      workingDirectory: process.cwd(),
+      toolTimeout: 20,
+    });
+    registry.register([new TaskTool(new MockProvider('slow success', 80))]);
+
+    const results = await registry.execute([
+      {
+        id: 'call_1',
+        index: 0,
+        type: 'function',
+        function: {
+          name: 'task',
+          arguments: JSON.stringify({
+            description: 'Slow run',
+            prompt: 'Wait and return',
+            subagent_type: 'explore',
+          }),
+        },
+      } as any,
+    ], {
+      sessionId,
+      memoryManager,
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0].result?.success).toBe(true);
+    expect(results[0].result?.output).toContain('slow success');
+  });
+
+  it('should return agent-layer failure code for foreground task failures', async () => {
+    const taskTool = withContext(new TaskTool(new FailingProvider()));
+    const result = await taskTool.execute({
+      description: 'Failure case',
+      prompt: 'Trigger provider failure',
+      subagent_type: 'explore',
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.metadata?.status).toBe('failed');
+    expect(result.metadata?.error).toBe('LLM_REQUEST_FAILED');
+    expect(result.output).toContain('Agent execution failed');
   });
 });

@@ -14,3 +14,4 @@ data/*
 src/cli-tui/.coding-agent
 test-agent
 typescript
+apps/agent-cli-ink/data/*

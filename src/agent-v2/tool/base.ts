@@ -40,6 +40,13 @@ export abstract class BaseTool<T extends z.ZodType> {
     /** 参数 schema */
     abstract schema: T;
 
+    /**
+     * 工具执行超时（毫秒）
+     * - undefined: 使用 ToolRegistry 默认超时
+     * - null/<=0: 不设置 ToolRegistry 级超时，由工具自身控制
+     */
+    executionTimeoutMs?: number | null;
+
     /** 会话 ID */
     sessionId?: string;
 

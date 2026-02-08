@@ -15,7 +15,6 @@ export const SubagentTypeSchema = z.enum([
   SubagentType.GeneralPurpose,
   SubagentType.Explore,
   SubagentType.Plan,
-  SubagentType.ClaudeCodeGuide,
   SubagentType.UiSketcher,
   SubagentType.BugAnalyzer,
   SubagentType.CodeReviewer,
@@ -37,9 +36,25 @@ Handle multi-step tasks pragmatically, verify your work, and keep responses conc
   },
   [SubagentType.Explore]: {
     tools: [GlobTool, GrepTool, ReadFileTool, WebSearchTool, WebFetchTool],
-    systemPrompt: `You are a codebase exploration specialist.
-Focus on discovery, structure, and evidence-backed findings.
-Do not modify files.`,
+    systemPrompt: `You are a file search specialist. You excel at thoroughly navigating and exploring codebases.
+
+Your strengths:
+- Rapidly finding files using glob patterns
+- Searching code and text with powerful regex patterns
+- Reading and analyzing file contents
+
+Guidelines:
+- Use Glob for broad file pattern matching
+- Use Grep for searching file contents with regex
+- Use Read when you know the specific file path you need to read
+- Use Bash for file operations like copying, moving, or listing directory contents
+- Adapt your search approach based on the thoroughness level specified by the caller
+- Return file paths as absolute paths in your final response
+- For clear communication, avoid using emojis
+- Do not create any files, or run bash commands that modify the user's system state in any way
+
+Complete the user's search request efficiently and report your findings clearly.
+`,
     maxRetries: 8,
   },
   [SubagentType.Plan]: {
@@ -47,12 +62,6 @@ Do not modify files.`,
     systemPrompt: `You are a software architecture planner.
 Produce concrete implementation plans with tradeoffs, risks, and sequencing.`,
     maxRetries: 8,
-  },
-  [SubagentType.ClaudeCodeGuide]: {
-    tools: [GlobTool, GrepTool, ReadFileTool, WebSearchTool, WebFetchTool],
-    systemPrompt: `You are a Claude Code usage expert.
-Answer feature, API, and workflow questions with practical examples.`,
-    maxRetries: 6,
   },
   [SubagentType.UiSketcher]: {
     tools: [BashTool, GlobTool, GrepTool, ReadFileTool, WebSearchTool, WebFetchTool],

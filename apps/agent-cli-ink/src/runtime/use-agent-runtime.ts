@@ -1,37 +1,41 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Agent } from "../../../../src/agent-v2/agent/agent";
 import { operatorPrompt } from "../../../../src/agent-v2/prompts/operator";
-import { useAgentChat } from "../../../../src/agent-chat-react";
-import type { UIMessage } from "../../../../src/agent-chat-react/types";
+import { useAgentChat } from "../agent-chat-react";
+import type { UIMessage } from "../agent-chat-react/types";
 import { ProviderRegistry } from "../../../../src/providers/registry";
 import { buildHelpText, parseSlashCommand } from "../commands/router";
 import type { CliOptions, LocalTimelineEntry, RuntimeSnapshot, TimelineEntry } from "../types";
+import { createMemoryManager } from "../../../../src/agent-v2/memory";
+
+const MAX_TOOL_OUTPUT_CHARS = 80_000;
 
 function toTimelineEntries(messages: UIMessage[]): TimelineEntry[] {
   const entries: TimelineEntry[] = [];
 
   for (const message of messages) {
     if (message.kind === "assistant") {
-      if (message.content.trim()) {
+      const assistantContent = toDisplayString(message.content);
+      if (assistantContent.trim()) {
         entries.push({
           id: `${message.id}:assistant`,
           type: "assistant",
-          text: message.content,
+          text: assistantContent,
           loading: message.phase === "streaming",
           createdAt: message.updatedAt,
         });
       }
 
       message.toolCalls.forEach((toolCall, index) => {
-        const output = toolCall.streamLogs.join("\n").trim()
-          || toolCall.result?.output
-          || "";
+        const streamOutput = toolCall.streamLogs.map((item) => toDisplayString(item)).join("\n").trim();
+        const resultOutput = toDisplayString(toolCall.result?.output);
+        const output = truncateText(streamOutput || resultOutput || "", MAX_TOOL_OUTPUT_CHARS);
 
         entries.push({
           id: `${message.id}:tool:${toolCall.callId}`,
           type: "tool",
-          toolName: toolCall.toolName || "Tool",
-          args: toolCall.args || "",
+          toolName: toDisplayString(toolCall.toolName) || "Tool",
+          args: toDisplayString(toolCall.args),
           loading: toolCall.result == null,
           status: toolCall.result?.status ?? "running",
           output,
@@ -75,6 +79,24 @@ function toTimelineEntries(messages: UIMessage[]): TimelineEntry[] {
   return entries;
 }
 
+function toDisplayString(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+    return String(value);
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function truncateText(value: string, limit: number): string {
+  if (value.length <= limit) return value;
+  return `${value.slice(0, limit)}\n...[truncated]`;
+}
+
 export function useAgentRuntime(options: CliOptions): {
   snapshot: RuntimeSnapshot;
   submitInput: (value: string) => Promise<void>;
@@ -103,6 +125,7 @@ export function useAgentRuntime(options: CliOptions): {
     mode: "resume",
   });
   const agentRef = useRef<Agent | null>(null);
+  const isExecutingRef = useRef(false);
 
   const requestPauseOutput = useCallback(() => {
     setOutputControl((prev) => {
@@ -127,7 +150,13 @@ export function useAgentRuntime(options: CliOptions): {
     }));
   }, []);
 
-  const createAgent = useCallback(() => {
+  const createAgent = useCallback(async () => {
+      const memoryManager = createMemoryManager({
+      type: 'file',
+      connectionString: './data/agent-memory',
+    });
+    await memoryManager.initialize();
+
     const agent = new Agent({
       provider: ProviderRegistry.createFromEnv(options.model as never),
       systemPrompt: operatorPrompt({
@@ -135,6 +164,7 @@ export function useAgentRuntime(options: CliOptions): {
         language: options.language,
       }),
       stream: true,
+      memoryManager,
       streamCallback: ingestStreamMessage,
     });
 
@@ -194,18 +224,19 @@ export function useAgentRuntime(options: CliOptions): {
       return;
     }
 
-    if (isExecuting) {
+    if (isExecutingRef.current) {
       addLocalEntry("system", "A task is already running. Press Esc or /abort first.");
       return;
     }
 
-    const agent = agentRef.current ?? createAgent();
-    addLocalEntry("user", value);
+    isExecutingRef.current = true;
     setIsExecuting(true);
 
     try {
+      const agent = agentRef.current ?? (await createAgent());
+      addLocalEntry("user", value);
       await agent.execute(value);
-      const hasSummary = agent.getMessages().some((message) => message.type === "summary");
+      const hasSummary = agent.getMessages().some((message: any) => message.type === "summary");
       if (hasSummary) {
         pruneMessages(options.keepLastMessages);
         setLocalEntries((prev) => prev.slice(-options.keepLastMessages));
@@ -215,7 +246,11 @@ export function useAgentRuntime(options: CliOptions): {
       const message = error instanceof Error ? error.message : String(error);
       addLocalEntry("system", `Execute failed: ${message}`);
     } finally {
-      setSessionId(agent.getSessionId());
+      const agent = agentRef.current;
+      if (agent) {
+        setSessionId(agent.getSessionId());
+      }
+      isExecutingRef.current = false;
       setIsExecuting(false);
     }
   }, [

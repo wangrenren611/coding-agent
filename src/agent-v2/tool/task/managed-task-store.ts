@@ -228,6 +228,76 @@ export async function saveTasks(
   taskListCache.set(key, tasks);
 }
 
+export async function saveTaskEntry(
+  task: ManagedTask,
+  sessionId?: string,
+  memoryManager?: IMemoryManager,
+): Promise<void> {
+  if (sessionId && memoryManager) {
+    await memoryManager.saveTask(mapManagedTaskToTaskData(task, sessionId));
+    return;
+  }
+
+  if (!sessionId) {
+    const index = inMemoryTaskList.findIndex((item) => item.id === task.id);
+    if (index >= 0) {
+      inMemoryTaskList[index] = task;
+    } else {
+      inMemoryTaskList = [...inMemoryTaskList, task];
+    }
+    return;
+  }
+
+  const key = cacheKey(sessionId);
+  const filePath = resolveTaskFilePath(sessionId);
+  const current = taskListCache.has(key)
+    ? (taskListCache.get(key) || [])
+    : await loadTasksFromFile(filePath);
+  const merged = [
+    ...current.filter((item) => item.id !== task.id),
+    task,
+  ].sort((a, b) => compareTaskIds(a.id, b.id));
+
+  try {
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, JSON.stringify(merged, null, 2), 'utf-8');
+  } catch (error) {
+    throw new Error(`Failed to save task list file: ${error}`);
+  }
+  taskListCache.set(key, merged);
+}
+
+export async function deleteTaskEntry(
+  taskId: string,
+  sessionId?: string,
+  memoryManager?: IMemoryManager,
+): Promise<void> {
+  if (sessionId && memoryManager) {
+    await memoryManager.deleteTask(buildManagedTaskStorageId(sessionId, taskId));
+    return;
+  }
+
+  if (!sessionId) {
+    inMemoryTaskList = inMemoryTaskList.filter((item) => item.id !== taskId);
+    return;
+  }
+
+  const key = cacheKey(sessionId);
+  const filePath = resolveTaskFilePath(sessionId);
+  const current = taskListCache.has(key)
+    ? (taskListCache.get(key) || [])
+    : await loadTasksFromFile(filePath);
+  const next = current.filter((item) => item.id !== taskId);
+
+  try {
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, JSON.stringify(next, null, 2), 'utf-8');
+  } catch (error) {
+    throw new Error(`Failed to save task list file: ${error}`);
+  }
+  taskListCache.set(key, next);
+}
+
 export function applyMetadataPatch(
   current: Record<string, unknown> | undefined,
   patch: Record<string, unknown | null>,
