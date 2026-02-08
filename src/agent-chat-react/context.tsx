@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useMemo, useReducer, type ReactNode } from "react";
-import type { AgentMessage } from "../../src/agent-v2/agent/stream-types";
+import type { AgentMessage } from "../agent-v2/agent/stream-types";
 import { agentChatReducer, createInitialAgentChatState } from "./reducer";
 import { selectLatestAssistantMessage } from "./selectors";
 import type { AgentChatContextValue } from "./types";
@@ -15,6 +15,10 @@ export function AgentChatProvider({ children }: AgentChatProviderProps): React.J
 
   const ingestStreamMessage = useCallback((message: AgentMessage) => {
     dispatch({ type: "INGEST_STREAM_MESSAGE", message });
+  }, []);
+
+  const pruneMessages = useCallback((keepLast?: number) => {
+    dispatch({ type: "PRUNE_MESSAGES", keepLast: keepLast ?? 20 });
   }, []);
 
   const reset = useCallback(() => {
@@ -37,6 +41,7 @@ export function AgentChatProvider({ children }: AgentChatProviderProps): React.J
       isStreaming: state.isStreaming,
       error: state.error,
       ingestStreamMessage,
+      pruneMessages,
       reset,
       clearError,
     };
@@ -47,6 +52,7 @@ export function AgentChatProvider({ children }: AgentChatProviderProps): React.J
     state.error,
     latestAssistantMessage,
     ingestStreamMessage,
+    pruneMessages,
     reset,
     clearError,
   ]);

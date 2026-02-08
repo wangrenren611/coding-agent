@@ -13,6 +13,8 @@
     "dev": "cross-env NODE_ENV=development tsx src/demo-1.ts",
     "build": "tsup",
     "build:watch": "tsup --watch",
+    "dev:cli:ink": "pnpm --filter agent-cli-ink dev",
+    "build:cli:ink": "pnpm --filter agent-cli-ink build",
     "test": "vitest",
     "test:ui": "vitest --ui",
     "test:run": "vitest run",

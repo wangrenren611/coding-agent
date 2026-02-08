@@ -71,6 +71,7 @@ export class Agent {
     private loopCount = 0;
     private retryCount = 0;
     private timeProvider: ITimeProvider;
+    private loopMax: number;
 
     // 流式处理
     private streamProcessor: StreamProcessor;
@@ -100,6 +101,7 @@ export class Agent {
         this.status = AgentStatus.IDLE;
         this.timeProvider = config.timeProvider ?? new DefaultTimeProvider();
         this.maxBufferSize = config.maxBufferSize ?? 100000;
+        this.loopMax = 3000;
 
         // 初始化流式处理器
         this.streamProcessor = new StreamProcessor({
@@ -385,7 +387,7 @@ export class Agent {
     private async runLoop(): Promise<void> {
         this.emitStatus(AgentStatus.RUNNING, 'Agent is running...');
 
-        while (true) {
+        while (this.loopCount < this.loopMax) {
             if (this.retryCount > this.maxRetries) {
                 throw new AgentError(`Agent failed after maximum retries (${this.maxRetries}).`);
             }

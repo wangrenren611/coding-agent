@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { AgentMessageType } from "../agent-v2/agent/stream-types";
 import { AgentStatus } from "../agent-v2/agent/types";
-import { agentChatReducer, createInitialAgentChatState } from "../../agent-chat-react/src/reducer";
-import { selectLatestAssistantMessage } from "../../agent-chat-react/src/selectors";
-import type { AgentMessage } from "../../agent-chat-react/src/types";
+import { agentChatReducer, createInitialAgentChatState } from "./reducer";
+import { selectLatestAssistantMessage } from "./selectors";
+import type { AgentMessage } from "./types";
 
 function ingest(state: ReturnType<typeof createInitialAgentChatState>, message: AgentMessage) {
   return agentChatReducer(state, { type: "INGEST_STREAM_MESSAGE", message });
@@ -225,5 +225,49 @@ describe("agent-chat-react reducer", () => {
     });
     expect(state.status).toBe(AgentStatus.COMPLETED);
     expect(state.isStreaming).toBe(false);
+  });
+
+  it("should prune old messages and rebuild tool locators", () => {
+    let state = createInitialAgentChatState();
+
+    state = ingest(state, {
+      type: AgentMessageType.TEXT_START,
+      msgId: "a1",
+      payload: { content: "" },
+      sessionId: "s1",
+      timestamp: 50,
+    });
+    state = ingest(state, {
+      type: AgentMessageType.TEXT_DELTA,
+      msgId: "a1",
+      payload: { content: "one" },
+      sessionId: "s1",
+      timestamp: 51,
+    });
+
+    state = ingest(state, {
+      type: AgentMessageType.TOOL_CALL_CREATED,
+      msgId: "a2",
+      payload: {
+        content: "two",
+        tool_calls: [{ callId: "call_x", toolName: "bash", args: "pwd" }],
+      },
+      sessionId: "s1",
+      timestamp: 52,
+    });
+    state = ingest(state, {
+      type: AgentMessageType.ERROR,
+      payload: { error: "oops" },
+      sessionId: "s1",
+      timestamp: 53,
+    });
+
+    state = agentChatReducer(state, { type: "PRUNE_MESSAGES", keepLast: 2 });
+    expect(state.messages).toHaveLength(2);
+    expect(state.latestAssistantMessageId).toBe("a2");
+    expect(state.toolLocatorByCallId.call_x).toMatchObject({
+      messageId: "a2",
+      toolIndex: 0,
+    });
   });
 });

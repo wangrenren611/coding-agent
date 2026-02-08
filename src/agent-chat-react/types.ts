@@ -1,5 +1,5 @@
-import type { AgentMessage } from "../../src/agent-v2/agent/stream-types";
-import type { AgentStatus } from "../../src/agent-v2/agent/types";
+import type { AgentMessage } from "../agent-v2/agent/stream-types";
+import type { AgentStatus } from "../agent-v2/agent/types";
 
 export type { AgentMessage, AgentStatus };
 
@@ -82,6 +82,7 @@ export interface AgentChatContextValue {
   isStreaming: boolean;
   error: UIErrorMessage | null;
   ingestStreamMessage: (message: AgentMessage) => void;
+  pruneMessages: (keepLast?: number) => void;
   reset: () => void;
   clearError: () => void;
 }
