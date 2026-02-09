@@ -11,240 +11,325 @@ marked.setOptions({
 interface MarkdownProps {
   content: string;
   maxWidth?: number;
-  isStreaming?: boolean; // 是否正在流式输出
+  isStreaming?: boolean;
 }
 
-// 计算字符串的显示宽度（忽略 ANSI 转义码）
-function calculateWidth(str: string): number {
-  return str.replace(/\u001b\[[0-9;]*m/g, "").length;
+// 获取终端宽度
+function getTerminalWidth(): number {
+  return process.stdout.columns || 80;
+}
+
+// 渲染内联文本 - 返回文本数组用于拼接
+function renderInlineText(tokens: marked.Token[]): string {
+  return tokens.map((token) => {
+    switch (token.type) {
+      case "text":
+        return (token as marked.Tokens.Text).text;
+      case "strong":
+        return renderInlineText((token as marked.Tokens.Strong).tokens);
+      case "em":
+        return renderInlineText((token as marked.Tokens.Em).tokens);
+      case "codespan":
+        return (token as marked.Tokens.Codespan).text;
+      case "link":
+        return (token as marked.Tokens.Link).text || (token as marked.Tokens.Link).href;
+      case "del":
+        return renderInlineText((token as marked.Tokens.Del).tokens);
+      case "br":
+        return " ";
+      case "image":
+        return `[${(token as marked.Tokens.Image).text || "image"}]`;
+      default:
+        return (token as any).raw || "";
+    }
+  }).join("");
 }
 
 // 渲染表格
-function renderTable(table: marked.Tokens.Table): React.ReactNode {
+function renderTable(table: marked.Tokens.Table, keyPrefix: string): React.ReactNode {
   const { header, rows } = table;
 
   // 计算每列的最大宽度
   const columnWidths = header.map((_, colIndex) => {
-    let maxWidth = calculateWidth(header[colIndex].text);
+    let maxWidth = 0;
     for (const row of rows) {
-      const cellWidth = calculateWidth(row[colIndex].text);
-      if (cellWidth > maxWidth) {
-        maxWidth = cellWidth;
-      }
+      const len = row[colIndex]?.text?.length || 0;
+      if (len > maxWidth) maxWidth = len;
     }
-    return maxWidth + 2; // 加上 padding
+    const headerLen = header[colIndex]?.text?.length || 0;
+    if (headerLen > maxWidth) maxWidth = headerLen;
+    return Math.min(maxWidth + 2, 30); // 最大30字符
   });
 
-  // 渲染表头
-  const headerRow = (
-    <Box>
-      {header.map((cell, i) => (
-        <Text key={`header-${i}`} bold>
-          {" "}{cell.text}{" ".repeat(columnWidths[i] - calculateWidth(cell.text) - 1)}
+  // 渲染单行
+  const renderRow = (cells: marked.Tokens.TableCell[], isHeader: boolean, rowIdx: number) => (
+    <Box key={`${keyPrefix}-row-${rowIdx}`} flexDirection="row">
+      <Text color="gray">│</Text>
+      {cells.map((cell, i) => (
+        <Text key={`${keyPrefix}-cell-${rowIdx}-${i}`} {...(isHeader && { bold: true })}>
+          {" " + (cell.text || "").padEnd(columnWidths[i] - 1).slice(0, columnWidths[i] - 1)}
         </Text>
       ))}
+      <Text color="gray">│</Text>
     </Box>
   );
 
   // 渲染分隔线
-  const separatorRow = (
-    <Box>
-      {header.map((_, i) => (
-        <Text key={`sep-${i}`} color="cyan">
-          {"-" + "-".repeat(columnWidths[i] - 1)}
+  const renderSeparator = () => (
+    <Box key={`${keyPrefix}-sep`} flexDirection="row">
+      <Text color="gray">├</Text>
+      {columnWidths.map((width, i) => (
+        <Text key={`${keyPrefix}-sep-${i}`} color="gray">
+          {"─".repeat(width)}
         </Text>
       ))}
+      <Text color="gray">┤</Text>
     </Box>
   );
 
-  // 渲染数据行
-  const dataRows = rows.map((row, rowIndex) => (
-    <Box key={`row-${rowIndex}`}>
-      {row.map((cell, colIndex) => (
-        <Text key={`cell-${rowIndex}-${colIndex}`}>
-          {" "}{cell.text}{" ".repeat(columnWidths[colIndex] - calculateWidth(cell.text) - 1)}
+  // 渲染顶部边框
+  const renderTopBorder = () => (
+    <Box key={`${keyPrefix}-top`} flexDirection="row">
+      <Text color="gray">┌</Text>
+      {columnWidths.map((width, i) => (
+        <Text key={`${keyPrefix}-top-${i}`} color="gray">
+          {"─".repeat(width)}
         </Text>
       ))}
+      <Text color="gray">┐</Text>
     </Box>
-  ));
+  );
+
+  // 渲染底部边框
+  const renderBottomBorder = () => (
+    <Box key={`${keyPrefix}-bottom`} flexDirection="row">
+      <Text color="gray">└</Text>
+      {columnWidths.map((width, i) => (
+        <Text key={`${keyPrefix}-bottom-${i}`} color="gray">
+          {"─".repeat(width)}
+        </Text>
+      ))}
+      <Text color="gray">┘</Text>
+    </Box>
+  );
 
   return (
-    <Box flexDirection="column" marginBottom={1}>
-      {headerRow}
-      {separatorRow}
-      {dataRows}
+    <Box key={keyPrefix} flexDirection="column" marginY={1}>
+      {renderTopBorder()}
+      {renderRow(header, true, -1)}
+      {renderSeparator()}
+      {rows.map((row, idx) => renderRow(row, false, idx))}
+      {renderBottomBorder()}
     </Box>
   );
 }
 
-// 解析 markdown tokens
-function renderTokens(tokens: marked.Token[], level: number = 0): React.ReactNode[] {
-  const elements: React.ReactNode[] = [];
+// 渲染列表项（支持嵌套）
+function renderList(
+  list: marked.Tokens.List,
+  keyPrefix: string,
+  depth: number = 0
+): React.ReactNode {
+  const indent = "  ".repeat(depth);
 
-  for (const token of tokens) {
-    switch (token.type) {
-      case "heading": {
-        const heading = token as marked.Tokens.Heading;
-        const color = heading.depth === 1 ? "cyan" : heading.depth === 2 ? "magenta" : "blue";
-        elements.push(
-          <Box key={token.raw} marginBottom={1}>
-            <Text color={color} bold>
-              {renderInlineText(heading.tokens)}
-            </Text>
-          </Box>
-        );
-        break;
-      }
+  return (
+    <Box key={keyPrefix} flexDirection="column" marginY={0}>
+      {list.items.map((item, itemIdx) => {
+        const prefix = list.ordered ? `${itemIdx + 1}. ` : "• ";
+        const itemKey = `${keyPrefix}-item-${itemIdx}`;
 
-      case "paragraph": {
-        const paragraph = token as marked.Tokens.Paragraph;
-        elements.push(
-          <Box key={token.raw} flexDirection="row" marginBottom={1} flexWrap="wrap">
-            {renderInlineText(paragraph.tokens)}
-          </Box>
-        );
-        break;
-      }
+        // 检查列表项内容
+        const content: React.ReactNode[] = [];
+        let hasNestedList = false;
 
-      case "list": {
-        const list = token as marked.Tokens.List;
-        elements.push(
-          <Box key={token.raw} flexDirection="column" marginBottom={1}>
-            {list.items.map((item, i) => {
-              const prefix = list.ordered ? `${i + 1}. ` : "• ";
-              return (
-                <Box key={i}>
-                  <Text>{prefix}</Text>
-                  {renderInlineText(item.tokens)}
-                </Box>
-              );
-            })}
-          </Box>
-        );
-        break;
-      }
+        for (let i = 0; i < item.tokens.length; i++) {
+          const token = item.tokens[i];
 
-      case "code": {
-        const code = token as marked.Tokens.Code;
-        const lines = code.text.split("\n");
-        elements.push(
-          <Box key={token.raw} flexDirection="column" marginBottom={1} marginLeft={2}>
-            {lines.map((line, i) => (
-              <Text key={i} color="gray">
-                {line}
+          if (token.type === "list") {
+            hasNestedList = true;
+            content.push(
+              renderList(token as marked.Tokens.List, `${itemKey}-nested-${i}`, depth + 1)
+            );
+          } else if (token.type === "text" || token.type === "paragraph") {
+            const textToken = token as marked.Tokens.Text | marked.Tokens.Paragraph;
+            content.push(
+              <Text key={`${itemKey}-text-${i}`}>
+                {indent + prefix + renderInlineText(textToken.tokens || [])}
               </Text>
-            ))}
+            );
+          } else {
+            // 其他类型的 token 作为块级元素
+            const block = renderBlockToken(token, `${itemKey}-block-${i}`, depth + 1);
+            if (block) content.push(block);
+          }
+        }
+
+        return (
+          <Box key={itemKey} flexDirection="column">
+            {!hasNestedList && content.length === 0 && (
+              <Text>{indent}{prefix}</Text>
+            )}
+            {content}
           </Box>
         );
-        break;
-      }
+      })}
+    </Box>
+  );
+}
 
-      case "blockquote": {
-        const quote = token as marked.Tokens.Blockquote;
-        elements.push(
-          <Box key={token.raw} flexDirection="column" marginBottom={1} marginLeft={2}>
-            {quote.tokens.map((t, i) => (
-              <Box key={i} flexDirection="row">
-                <Text color="yellow" italic>
-                  {renderInlineText(t.type === "paragraph" ? (t as marked.Tokens.Paragraph).tokens : [t])}
-                </Text>
-              </Box>
-            ))}
-          </Box>
-        );
-        break;
-      }
+// 渲染代码块
+function renderCodeBlock(code: marked.Tokens.Code, keyPrefix: string): React.ReactNode {
+  const lines = code.text.split("\n");
+  const lang = code.lang || "";
+  const maxWidth = getTerminalWidth() - 6;
 
-      case "hr": {
-        elements.push(
-          <Box key={token.raw} marginBottom={1}>
-            <Text color="gray">{"─".repeat(80)}</Text>
-          </Box>
-        );
-        break;
-      }
+  return (
+    <Box key={keyPrefix} flexDirection="column" marginY={1}>
+      {/* 代码块标题栏 */}
+      {lang && (
+        <Box flexDirection="row">
+          <Text color="gray" backgroundColor="gray">     </Text>
+          <Text color="black" backgroundColor="cyan"> {lang} </Text>
+          <Text color="gray" backgroundColor="gray">{" ".repeat(Math.max(0, maxWidth - lang.length - 2))}</Text>
+        </Box>
+      )}
+      {/* 代码内容 */}
+      <Box flexDirection="column">
+        {lines.map((line, idx) => (
+          <Text key={`${keyPrefix}-line-${idx}`} color="gray">
+            {line.slice(0, maxWidth) || " "}
+          </Text>
+        ))}
+      </Box>
+    </Box>
+  );
+}
 
-      case "table": {
-        elements.push(renderTable(token as marked.Tokens.Table));
-        break;
-      }
+// 渲染引用块
+function renderBlockquote(
+  quote: marked.Tokens.Blockquote,
+  keyPrefix: string,
+  depth: number = 0
+): React.ReactNode {
+  const indent = "  ".repeat(depth);
 
-      case "space":
-        break;
-
-      default:
-        // 处理其他类型
-        if ("tokens" in token && Array.isArray((token as any).tokens)) {
-          elements.push(
-            <Box key={token.raw} flexDirection="row" marginBottom={1}>
-              {renderInlineText((token as any).tokens)}
+  return (
+    <Box key={keyPrefix} flexDirection="column" marginY={1}>
+      {quote.tokens.map((token, idx) => {
+        if (token.type === "paragraph") {
+          const para = token as marked.Tokens.Paragraph;
+          return (
+            <Text key={`${keyPrefix}-p-${idx}`} color="yellow" italic>
+              {indent + "▌ " + renderInlineText(para.tokens || [])}
+            </Text>
+          );
+        }
+        // 嵌套块
+        const block = renderBlockToken(token, `${keyPrefix}-nested-${idx}`, depth + 1);
+        if (block) {
+          return (
+            <Box key={`${keyPrefix}-nested-${idx}`} flexDirection="row">
+              <Text color="yellow">{indent}▌ </Text>
+              <Box flexDirection="column">{block}</Box>
             </Box>
           );
         }
-        break;
-    }
-  }
-
-  return elements;
+        return null;
+      })}
+    </Box>
+  );
 }
 
-// 将内联 tokens 渲染为 Text 组件
-function renderInlineText(tokens: marked.Token[]): React.ReactNode[] {
+// 渲染单个块级 token
+function renderBlockToken(
+  token: marked.Token,
+  keyPrefix: string,
+  depth: number = 0
+): React.ReactNode {
+  const maxWidth = getTerminalWidth() - 4;
+
+  switch (token.type) {
+    case "heading": {
+      const heading = token as marked.Tokens.Heading;
+      const colors: Record<number, string> = {
+        1: "cyan",
+        2: "greenBright",
+        3: "blue",
+        4: "magenta",
+        5: "yellow",
+        6: "gray",
+      };
+      const color = colors[heading.depth] || "white";
+      const prefix = "#".repeat(heading.depth) + " ";
+
+      return (
+        <Box key={keyPrefix} flexDirection="column" marginY={1}>
+          <Text color={color} bold>
+            {prefix + renderInlineText(heading.tokens || [])}
+          </Text>
+        </Box>
+      );
+    }
+
+    case "paragraph": {
+      const paragraph = token as marked.Tokens.Paragraph;
+      const tokens = paragraph.tokens || [];
+
+      return (
+        <Box key={keyPrefix} flexDirection="column" marginY={0}>
+          <Text>{renderInlineText(tokens)}</Text>
+        </Box>
+      );
+    }
+
+    case "list":
+      return renderList(token as marked.Tokens.List, keyPrefix, depth);
+
+    case "code":
+      return renderCodeBlock(token as marked.Tokens.Code, keyPrefix);
+
+    case "blockquote":
+      return renderBlockquote(token as marked.Tokens.Blockquote, keyPrefix, depth);
+
+    case "hr":
+      return (
+        <Box key={keyPrefix} flexDirection="column" marginY={1}>
+          <Text color="gray">{"─".repeat(Math.min(60, maxWidth))}</Text>
+        </Box>
+      );
+
+    case "table":
+      return renderTable(token as marked.Tokens.Table, keyPrefix);
+
+    case "space":
+      return null;
+
+    case "html":
+      // 处理 HTML 注释等特殊内容
+      return null;
+
+    default:
+      // 处理其他类型（如 task list）
+      if ("tokens" in token && Array.isArray((token as any).tokens)) {
+        return (
+          <Box key={keyPrefix} flexDirection="column" marginY={0}>
+            <Text>{renderInlineText((token as any).tokens || [])}</Text>
+          </Box>
+        );
+      }
+      return null;
+  }
+}
+
+// 主渲染函数
+function renderTokens(tokens: marked.Token[]): React.ReactNode[] {
   const elements: React.ReactNode[] = [];
 
-  for (const token of tokens) {
-    switch (token.type) {
-      case "text":
-        elements.push(<Text key={token.raw}>{(token as marked.Tokens.Text).text}</Text>);
-        break;
-
-      case "strong":
-        elements.push(
-          <Text key={token.raw} bold>
-            {renderInlineText((token as marked.Tokens.Strong).tokens)}
-          </Text>
-        );
-        break;
-
-      case "em":
-        elements.push(
-          <Text key={token.raw} italic>
-            {renderInlineText((token as marked.Tokens.Em).tokens)}
-          </Text>
-        );
-        break;
-
-      case "codespan":
-        elements.push(
-          <Text key={token.raw} color="cyan">
-            {(token as marked.Tokens.Codespan).text}
-          </Text>
-        );
-        break;
-
-      case "link":
-        elements.push(
-          <Text key={token.raw} color="cyan" underline>
-            {(token as marked.Tokens.Link).text || (token as marked.Tokens.Link).href}
-          </Text>
-        );
-        break;
-
-      case "del":
-        elements.push(
-          <Text key={token.raw} strikethrough>
-            {renderInlineText((token as marked.Tokens.Del).tokens)}
-          </Text>
-        );
-        break;
-
-      case "br":
-        elements.push(<Text key={token.raw}>{" "}</Text>);
-        break;
-
-      default:
-        elements.push(<Text key={token.raw}>{(token as any).raw || ""}</Text>);
-        break;
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    const rendered = renderBlockToken(token, `token-${i}`);
+    if (rendered) {
+      elements.push(rendered);
     }
   }
 
@@ -257,11 +342,14 @@ export function Markdown({ content }: MarkdownProps): React.JSX.Element {
       const tokens = marked.lexer(content);
       return renderTokens(tokens);
     } catch (error) {
-      return [
-        <Text key="error" color="red">
-          Error parsing markdown: {error instanceof Error ? error.message : String(error)}
-        </Text>,
-      ];
+      return (
+        <Box flexDirection="column">
+          <Text color="red">
+            Error parsing markdown: {error instanceof Error ? error.message : String(error)}
+          </Text>
+          <Text color="gray">{content}</Text>
+        </Box>
+      );
     }
   }, [content]);
 

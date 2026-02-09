@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "cli-spinners": "^3.4.0",
     "dotenv": "^17.2.3",
     "ink": "latest",
     "marked": "^4.3.0",

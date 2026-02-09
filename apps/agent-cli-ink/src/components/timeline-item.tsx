@@ -21,7 +21,7 @@ function sanitizeForTerminal(value: string): string {
   return value.replace(/\u0000/g, "");
 }
 
-function shorten(value: unknown, maxLength = 88): string {
+function shorten(value: unknown, maxLength = 30): string {
   const text = sanitizeForTerminal(toDisplayString(value));
   if (text.length <= maxLength) return text;
   return `${text.slice(0, maxLength)}...`;
@@ -45,26 +45,21 @@ function renderDiff(diff: unknown): React.JSX.Element[] {
 
 export function TimelineItem({ entry }: { entry: TimelineEntry }): React.JSX.Element {
   if (entry.type === "user") {
+    const text = sanitizeForTerminal(toDisplayString(entry.text)).trim();
     return (
-      <Box flexDirection="row" marginBottom={1}>
-        <Text color="gray">❯</Text>
-        <Box marginLeft={1}>
-          <Text color="gray">{sanitizeForTerminal(toDisplayString(entry.text)).trim()}</Text>
-        </Box>
+      <Box flexDirection="column" marginBottom={1}>
+        <Text color="gray">{"❯ " + text}</Text>
       </Box>
     );
   }
 
   if (entry.type === "assistant") {
+    const content = sanitizeForTerminal(toDisplayString(entry.text)).trim() || "...";
     return (
-      <Box marginBottom={1} flexDirection="row" flexShrink={0}>
-        <SpinnerDot state={entry.loading ? "running" : "idle"} />
-        <Box>
-           <Markdown
-             content={sanitizeForTerminal(toDisplayString(entry.text)).trim() || "..."}
-             isStreaming={entry.loading}
-           />
-          {/* <Text color="#000">{sanitizeForTerminal(toDisplayString(entry.text)).trim() || "..."}</Text> */}
+      <Box flexDirection="row" marginBottom={1}>
+        <Text><SpinnerDot state={entry.loading ? "running" : "idle"} /></Text>
+        <Box flexDirection="column" marginLeft={1}>
+          <Markdown content={content} isStreaming={entry.loading} />
         </Box>
       </Box>
     );
@@ -76,12 +71,14 @@ export function TimelineItem({ entry }: { entry: TimelineEntry }): React.JSX.Ele
 
     return (
       <Box flexDirection="column" marginBottom={1}>
-        <Box>
-          <SpinnerDot state={spinnerState} />
-          <Text bold> {entry.toolName}({shorten(entry.args)})</Text>
+        <Box flexDirection="row">
+          <Text><SpinnerDot state={spinnerState} /></Text>
+          <Box marginLeft={1}>
+            <Text bold>{entry.toolName}({shorten(entry.args)})</Text>
+          </Box>
         </Box>
         {summarized ? (
-          <Box marginLeft={1}>
+          <Box marginLeft={2}>
             <Text color={entry.status === "error" ? "red" : "gray"}>{summarized.trim().slice(0, 88)}</Text>
           </Box>
         ) : null}
@@ -92,9 +89,11 @@ export function TimelineItem({ entry }: { entry: TimelineEntry }): React.JSX.Ele
   if (entry.type === "code_patch") {
     return (
       <Box flexDirection="column">
-        <Box>
-          <SpinnerDot state="idle" />
-          <Text color="cyan"> Update({sanitizeForTerminal(toDisplayString(entry.path))})</Text>
+        <Box flexDirection="row">
+          <Text><SpinnerDot state="idle" /></Text>
+          <Box marginLeft={1}>
+            <Text color="cyan">Update({sanitizeForTerminal(toDisplayString(entry.path))})</Text>
+          </Box>
         </Box>
         <Box marginLeft={2} flexDirection="column">
           {renderDiff(entry.diff)}
@@ -106,9 +105,11 @@ export function TimelineItem({ entry }: { entry: TimelineEntry }): React.JSX.Ele
   if (entry.type === "error") {
     return (
       <Box flexDirection="column">
-        <Box>
-          <SpinnerDot state="error" />
-          <Text color="red">{sanitizeForTerminal(toDisplayString(entry.error))}</Text>
+        <Box flexDirection="row">
+          <Text><SpinnerDot state="error" /></Text>
+          <Box marginLeft={1}>
+            <Text color="red">{sanitizeForTerminal(toDisplayString(entry.error))}</Text>
+          </Box>
         </Box>
         {entry.phase ? (
           <Box marginLeft={2}>
@@ -120,9 +121,11 @@ export function TimelineItem({ entry }: { entry: TimelineEntry }): React.JSX.Ele
   }
 
   return (
-    <Box>
-      <SpinnerDot state="idle" />
-      <Text color="gray">{sanitizeForTerminal(toDisplayString(entry.text))}</Text>
+    <Box flexDirection="row">
+      <Text><SpinnerDot state="idle" /></Text>
+      <Box marginLeft={1}>
+        <Text color="gray">{sanitizeForTerminal(toDisplayString(entry.text))}</Text>
+      </Box>
     </Box>
   );
 }

@@ -92,12 +92,18 @@ function ingestStreamMessage(state: AgentChatState, message: AgentMessage): Agen
 }
 
 function ingestTextEvent(state: AgentChatState, message: Extract<AgentMessage, { type: AgentMessageType.TEXT_START | AgentMessageType.TEXT_DELTA | AgentMessageType.TEXT_COMPLETE }>): AgentChatState {
-  const prefix = message.type === AgentMessageType.TEXT_START
-    ? "text-start"
-    : message.type === AgentMessageType.TEXT_DELTA
-      ? "text-delta"
-      : "text-complete";
-  const msgId = resolveMessageId(state, message.msgId, prefix, message.timestamp);
+  // 统一使用 "text" 作为 prefix，避免同一组消息被拆分成多个
+  // 对于 TEXT_DELTA 和 TEXT_COMPLETE，如果没有 msgId，使用最新创建的 text 消息 ID
+  let msgId: string;
+  if (message.msgId) {
+    msgId = message.msgId;
+  } else if (message.type === AgentMessageType.TEXT_START) {
+    msgId = resolveMessageId(state, undefined, "text", message.timestamp);
+  } else {
+    // TEXT_DELTA 或 TEXT_COMPLETE 没有 msgId，使用状态中最新创建的 text 消息 ID
+    msgId = state.latestAssistantMessageId || `text-${message.timestamp}`;
+  }
+  
   const ensured = ensureAssistantMessage(state, msgId, message.timestamp);
   const assistant = ensured.state.messages[ensured.index];
   if (assistant.kind !== "assistant") return ensured.state;

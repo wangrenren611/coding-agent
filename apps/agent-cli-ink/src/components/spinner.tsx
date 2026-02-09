@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Text } from "ink";
+import Loading from "./loading";
 
 const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -24,8 +25,8 @@ export function SpinnerDot({ state, intervalMs = 90 }: SpinnerDotProps): React.J
   const node = useMemo(() => {
     if (state === "success") return <Text color="green">⏺</Text>;
     if (state === "error") return <Text color="red">⏺</Text>;
-    if (state === "running") return <Text color="gray">{FRAMES[frameIndex]}</Text>;
-    return(<Text color="#f0f0f0">⏺</Text>);
+    if (state === "running") return <Text color="#999">{FRAMES[frameIndex]}</Text>;
+    return <Text color="#f0f0f0">⏺</Text>;
   }, [state, frameIndex]);
 
   return node;

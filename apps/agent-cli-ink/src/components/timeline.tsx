@@ -1,5 +1,5 @@
 import React, { useMemo, memo } from "react";
-import { Box } from "ink";
+import { Box ,Static} from "ink";
 import type { TimelineEntry } from "../types";
 import { TimelineItem } from "./timeline-item";
 
@@ -60,10 +60,10 @@ const MemoizedTimelineItem = memo(TimelineItem, (prevProps, nextProps) => {
 
 export function Timeline({ entries }: { entries: TimelineEntry[] }): React.JSX.Element {
   return (
-    <Box flexDirection="column" marginBottom={1}>
-      {entries.map((entry) => (
+    <Static  items={entries}>
+      {(entry) => (
         <MemoizedTimelineItem key={entry.id} entry={entry} />
-      ))}
-    </Box>
+      )}
+    </Static>
   );
 }

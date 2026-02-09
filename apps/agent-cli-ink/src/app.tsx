@@ -1,12 +1,11 @@
-import React, { useEffect, useMemo, useState, memo, useRef } from "react";
+import React, { useEffect, useMemo, useState, memo } from "react";
 import { Box, Text, useApp, useInput } from "ink";
 import { Composer } from "./components/composer";
-import { StatusBar } from "./components/status-bar";
 import { Timeline } from "./components/timeline";
 import { useAgentRuntime } from "./runtime/use-agent-runtime";
 import { TimelineItem } from "./components/timeline-item";
-import type { CliOptions, TimelineEntry, RuntimeSnapshot } from "./types";
-import { SpinnerDot } from "./components/spinner";
+import type { CliOptions, TimelineEntry } from "./types";
+import Loading from "./components/loading";
 
 // 只渲染历史消息的 Timeline
 const HistoryTimeline = memo(function HistoryTimeline({ entries }: { entries: TimelineEntry[] }) {
@@ -19,8 +18,8 @@ const HistoryTimeline = memo(function HistoryTimeline({ entries }: { entries: Ti
 const ThinkingIndicator = memo(function ThinkingIndicator({ isExecuting }: { isExecuting: boolean }) {
   if (!isExecuting) return null;
   return (
-    <Box marginBottom={1} flexDirection="row">
-      <SpinnerDot state={"running"} />
+    <Box marginBottom={1} flexDirection="row" gap={1}>
+      <Loading  type="star"/>
       <Text color="green">Think...</Text>
     </Box>
   );
@@ -31,7 +30,6 @@ export function App({ options }: { options: CliOptions }): React.JSX.Element {
   const runtime = useAgentRuntime(options);
   const [isOutputPaused, setIsOutputPaused] = useState(false);
   const [displaySnapshot, setDisplaySnapshot] = useState(runtime.snapshot);
-  const updateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (runtime.shouldExit) exit();
@@ -42,28 +40,10 @@ export function App({ options }: { options: CliOptions }): React.JSX.Element {
     if (runtime.outputControl.mode === "resume") setIsOutputPaused(false);
   }, [runtime.outputControl.mode, runtime.outputControl.seq]);
 
-  // 节流更新：延迟 50ms 再更新，减少重绘频率
   useEffect(() => {
-    if (isOutputPaused) {
-      return;
-    }
-
-    // 清除之前的定时器
-    if (updateTimeoutRef.current) {
-      clearTimeout(updateTimeoutRef.current);
-    }
-
-    // 延迟更新
-    updateTimeoutRef.current = setTimeout(() => {
+    if (!isOutputPaused) {
       setDisplaySnapshot(runtime.snapshot);
-      updateTimeoutRef.current = null;
-    }, 300);
-
-    return () => {
-      if (updateTimeoutRef.current) {
-        clearTimeout(updateTimeoutRef.current);
-      }
-    };
+    }
   }, [isOutputPaused, runtime.snapshot]);
 
   useInput((_input: string, key: { ctrl?: boolean; s?: boolean; q?: boolean }) => {
@@ -88,9 +68,9 @@ export function App({ options }: { options: CliOptions }): React.JSX.Element {
   }, [isOutputPaused]);
 
   // 分离历史消息和当前正在流式输出的消息
-  const { historyEntries, activeEntry } = useMemo(() => {
+  const { historyEntries, activeEntry, hasActiveAssistant } = useMemo(() => {
     if (displaySnapshot.timelineEntries.length === 0) {
-      return { historyEntries: [], activeEntry: null };
+      return { historyEntries: [], activeEntry: null, hasActiveAssistant: false };
     }
 
     const lastEntry = displaySnapshot.timelineEntries[displaySnapshot.timelineEntries.length - 1];
@@ -100,12 +80,14 @@ export function App({ options }: { options: CliOptions }): React.JSX.Element {
       return {
         historyEntries: displaySnapshot.timelineEntries.slice(0, -1),
         activeEntry: lastEntry,
+        hasActiveAssistant: lastEntry.type === "assistant",
       };
     }
 
     return {
       historyEntries: displaySnapshot.timelineEntries,
       activeEntry: null,
+      hasActiveAssistant: false,
     };
   }, [displaySnapshot.timelineEntries]);
 
@@ -117,9 +99,10 @@ export function App({ options }: { options: CliOptions }): React.JSX.Element {
         outputPaused={isOutputPaused}
       /> */}
       {pausedNotice}
+    
       <HistoryTimeline entries={historyEntries} />
       {activeEntry && <TimelineItem entry={activeEntry} />}
-      <ThinkingIndicator isExecuting={displaySnapshot.isExecuting} />
+      <ThinkingIndicator isExecuting={displaySnapshot.isExecuting && !hasActiveAssistant} />
       <Composer
         disabled={runtime.snapshot.isExecuting}
         onAbort={runtime.abortRunning}

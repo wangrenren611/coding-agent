@@ -126,6 +126,11 @@ export function useAgentRuntime(options: CliOptions): {
   });
   const agentRef = useRef<Agent | null>(null);
   const isExecutingRef = useRef(false);
+  const isCreatingAgentRef = useRef(false);
+
+  // 使用 ref 保存 ingestStreamMessage 的最新引用，避免 createAgent 依赖它
+  const ingestStreamMessageRef = useRef<(message: any) => void>(ingestStreamMessage);
+  ingestStreamMessageRef.current = ingestStreamMessage;
 
   const requestPauseOutput = useCallback(() => {
     setOutputControl((prev) => {
@@ -151,34 +156,67 @@ export function useAgentRuntime(options: CliOptions): {
   }, []);
 
   const createAgent = useCallback(async () => {
+    // 如果 agent 正在创建中，等待创建完成
+    while (isCreatingAgentRef.current) {
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+
+    // 如果 agent 已经存在，直接返回
+    if (agentRef.current) {
+      return agentRef.current;
+    }
+
+    isCreatingAgentRef.current = true;
+
+    try {
       const memoryManager = createMemoryManager({
-      type: 'file',
-      connectionString: './data/agent-memory',
-    });
-    await memoryManager.initialize();
+        type: 'file',
+        connectionString: './data/agent-memory',
+      });
+      await memoryManager.initialize();
 
-    const agent = new Agent({
-      provider: ProviderRegistry.createFromEnv(options.model as never),
-      systemPrompt: operatorPrompt({
-        directory: options.cwd,
-        language: options.language,
-      }),
-      stream: true,
-      memoryManager,
-      streamCallback: ingestStreamMessage,
-    });
+      const agent = new Agent({
+        provider: ProviderRegistry.createFromEnv(options.model as never),
+        systemPrompt: operatorPrompt({
+          directory: options.cwd,
+          language: options.language,
+        }),
+        stream: true,
+        memoryManager,
+        streamCallback: (message: any) => {
+          // 只在 agent 仍然有效时才处理消息
+          if (agentRef.current === agent) {
+            ingestStreamMessageRef.current(message);
+          }
+        },
+      });
 
-    agentRef.current = agent;
-    setSessionId(agent.getSessionId());
-    return agent;
-  }, [ingestStreamMessage, options.cwd, options.language, options.model]);
+      agentRef.current = agent;
+      setSessionId(agent.getSessionId());
+      return agent;
+    } finally {
+      isCreatingAgentRef.current = false;
+    }
+  }, [options.cwd, options.language, options.model]); // 移除对 ingestStreamMessage 的依赖
 
   useEffect(() => {
-    createAgent();
+    let isMounted = true;
+
+    createAgent().then((agent) => {
+      if (!isMounted) {
+        agent.abort();
+        agentRef.current = null;
+      }
+    });
+
     return () => {
-      agentRef.current?.abort();
+      isMounted = false;
+      if (agentRef.current) {
+        agentRef.current.abort();
+        agentRef.current = null;
+      }
     };
-  }, [createAgent]);
+  }, []); // 只在组件挂载时执行一次
 
   const abortRunning = useCallback(() => {
     if (!agentRef.current) return;
@@ -213,7 +251,12 @@ export function useAgentRuntime(options: CliOptions): {
         reset();
         setDisplayCutoff(0);
         setLocalEntries([]);
-        createAgent();
+        // 重置时需要重新创建 agent
+        if (agentRef.current) {
+          agentRef.current.abort();
+          agentRef.current = null;
+        }
+        await createAgent();
         addLocalEntry("system", "Created a new session.");
       }
 
@@ -233,7 +276,7 @@ export function useAgentRuntime(options: CliOptions): {
     setIsExecuting(true);
 
     try {
-      const agent = agentRef.current ?? (await createAgent());
+      const agent = await createAgent();
       addLocalEntry("user", value);
       await agent.execute(value);
       const hasSummary = agent.getMessages().some((message: any) => message.type === "summary");
@@ -267,6 +310,14 @@ export function useAgentRuntime(options: CliOptions): {
 
   const timelineEntries = useMemo(() => {
     const agentEntries = toTimelineEntries(messages);
+    
+    // 去重：保留每个 ID 的最新条目
+    const latestEntries = new Map<string, TimelineEntry>();
+    for (const entry of agentEntries) {
+      latestEntries.set(entry.id, entry);
+    }
+    const deduplicatedAgentEntries = Array.from(latestEntries.values());
+    
     const localTimelineEntries: TimelineEntry[] = localEntries.map((entry) => ({
       id: entry.id,
       type: entry.type,
@@ -274,8 +325,9 @@ export function useAgentRuntime(options: CliOptions): {
       createdAt: entry.createdAt,
     }));
 
-    return localTimelineEntries
-      .concat(agentEntries)
+    const allEntries = localTimelineEntries.concat(deduplicatedAgentEntries);
+
+    return allEntries
       .filter((entry) => entry.createdAt >= displayCutoff)
       .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
   }, [displayCutoff, localEntries, messages]);
