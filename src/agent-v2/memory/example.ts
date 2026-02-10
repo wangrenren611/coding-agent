@@ -23,9 +23,9 @@ async function example1() {
   // 初始化
   await memoryManager.initialize();
 
-  // 检查健康状态
-  const healthy = await memoryManager.isHealthy();
-  console.log('Storage healthy:', healthy);
+  // 查询现有会话，确认存储可读
+  const sessions = await memoryManager.querySessions({}, { limit: 1 });
+  console.log('Storage ready, existing sessions:', sessions.length);
 
   // 关闭
   await memoryManager.close();

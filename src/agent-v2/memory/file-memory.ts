@@ -1,71 +1,64 @@
 /**
  * 基于文件的 MemoryManager 实现
- * 支持当前上下文和历史消息的分离存储
+ *
+ * 设计目标：
+ * 1. 所有写操作立即落盘，避免隐式后台状态
+ * 2. 上下文与历史保持一致（尤其是流式 message upsert 与压缩）
+ * 3. 去除兼容迁移和元数据噪音，降低维护复杂度
  */
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import {
-  IMemoryManager,
-  SessionData,
-  CurrentContext,
-  HistoryMessage,
-  TaskData,
-  SubTaskRunData,
-  CompactionRecord,
-  QueryOptions,
-  HistoryQueryOptions,
-  SessionFilter,
-  TaskFilter,
-  SubTaskRunFilter,
-  HistoryFilter,
-  CompactContextOptions,
-  MemoryManagerOptions,
-} from './types';
 import { v4 as uuid } from 'uuid';
-import { Message } from '../session/types';
+import type { Message } from '../session/types';
+import {
+  CompactContextOptions,
+  CompactionRecord,
+  CurrentContext,
+  HistoryFilter,
+  HistoryMessage,
+  HistoryQueryOptions,
+  IMemoryManager,
+  MemoryManagerOptions,
+  QueryOptions,
+  SessionData,
+  SessionFilter,
+  SubTaskRunData,
+  SubTaskRunFilter,
+  TaskData,
+  TaskFilter,
+} from './types';
 
-/**
- * 文件存储配置
- */
 interface FileStorageConfig {
-  /** 存储目录路径 */
   basePath: string;
-  /** 是否自动保存 */
-  autoSave: boolean;
-  /** 保存间隔（毫秒） */
-  saveInterval?: number;
 }
 
-/**
- * 内存缓存结构
- */
 interface MemoryCache {
   sessions: Map<string, SessionData>;
   contexts: Map<string, CurrentContext>;
-  histories: Map<string, HistoryMessage[]>; // sessionId -> messages
-  compactionRecords: Map<string, CompactionRecord[]>; // sessionId -> records
+  histories: Map<string, HistoryMessage[]>;
+  compactionRecords: Map<string, CompactionRecord[]>;
   tasks: Map<string, TaskData>;
   subTaskRuns: Map<string, SubTaskRunData>;
 }
 
-/**
- * 文件存储 MemoryManager 实现
- */
+interface Timestamped {
+  createdAt: number;
+  updatedAt: number;
+}
+
 export class FileMemoryManager implements IMemoryManager {
-  private config: FileStorageConfig;
-  private basePath: string;
-  private sessionsPath: string;
-  private contextsPath: string;
-  private historiesPath: string;
-  private compactionsPath: string;
-  private tasksPath: string;
-  private subTaskRunsPath: string;
-  private saveTimer?: NodeJS.Timeout;
+  private readonly basePath: string;
+  private readonly sessionsPath: string;
+  private readonly contextsPath: string;
+  private readonly historiesPath: string;
+  private readonly compactionsPath: string;
+  private readonly tasksPath: string;
+  private readonly subTaskRunsPath: string;
+
   private initialized = false;
 
-  // 内存缓存
-  private cache: MemoryCache = {
+  private readonly cache: MemoryCache = {
     sessions: new Map(),
     contexts: new Map(),
     histories: new Map(),
@@ -75,13 +68,8 @@ export class FileMemoryManager implements IMemoryManager {
   };
 
   constructor(options: MemoryManagerOptions) {
-    const config = options.config as unknown as FileStorageConfig | undefined;
-    this.basePath = config?.basePath || options.connectionString || '.memory';
-    this.config = {
-      basePath: this.basePath,
-      autoSave: config?.autoSave ?? true,
-      saveInterval: config?.saveInterval,
-    };
+    const config = this.resolveConfig(options);
+    this.basePath = config.basePath;
 
     this.sessionsPath = path.join(this.basePath, 'sessions');
     this.contextsPath = path.join(this.basePath, 'contexts');
@@ -91,52 +79,26 @@ export class FileMemoryManager implements IMemoryManager {
     this.subTaskRunsPath = path.join(this.basePath, 'subtask-runs');
   }
 
-  // ==================== 初始化与生命周期 ====================
+  // ==================== 生命周期 ====================
 
   async initialize(): Promise<void> {
     if (this.initialized) return;
 
-    try {
-      // 创建存储目录
-      await fs.mkdir(this.sessionsPath, { recursive: true });
-      await fs.mkdir(this.contextsPath, { recursive: true });
-      await fs.mkdir(this.historiesPath, { recursive: true });
-      await fs.mkdir(this.compactionsPath, { recursive: true });
-      await fs.mkdir(this.tasksPath, { recursive: true });
-      await fs.mkdir(this.subTaskRunsPath, { recursive: true });
+    await Promise.all([
+      fs.mkdir(this.sessionsPath, { recursive: true }),
+      fs.mkdir(this.contextsPath, { recursive: true }),
+      fs.mkdir(this.historiesPath, { recursive: true }),
+      fs.mkdir(this.compactionsPath, { recursive: true }),
+      fs.mkdir(this.tasksPath, { recursive: true }),
+      fs.mkdir(this.subTaskRunsPath, { recursive: true }),
+    ]);
 
-      // 加载已有数据
-      await this.loadAllData();
-
-      // 设置自动保存
-      if (this.config.autoSave && this.config.saveInterval) {
-        this.saveTimer = setInterval(() => {
-          this.persistAll().catch(console.error);
-        }, this.config.saveInterval);
-      }
-
-      this.initialized = true;
-    } catch (error) {
-      throw new Error(`Failed to initialize FileMemoryManager: ${error}`);
-    }
+    await this.loadAllData();
+    this.initialized = true;
   }
 
   async close(): Promise<void> {
-    if (this.saveTimer) {
-      clearInterval(this.saveTimer);
-      this.saveTimer = undefined;
-    }
-    await this.persistAll();
     this.initialized = false;
-  }
-
-  async isHealthy(): Promise<boolean> {
-    try {
-      await fs.access(this.basePath, fs.constants.W_OK);
-      return this.initialized;
-    } catch {
-      return false;
-    }
   }
 
   // ==================== 会话管理 ====================
@@ -145,33 +107,37 @@ export class FileMemoryManager implements IMemoryManager {
     this.ensureInitialized();
 
     const sid = sessionId || uuid();
+    if (this.cache.sessions.has(sid)) {
+      throw new Error(`Session already exists: ${sid}`);
+    }
+
     const now = Date.now();
     const contextId = uuid();
 
-    // 创建会话数据
     const session: SessionData = {
       id: sid,
       sessionId: sid,
       systemPrompt,
       currentContextId: contextId,
-      totalMessages: 1, // 系统消息
+      totalMessages: 1,
       compactionCount: 0,
       status: 'active',
       createdAt: now,
       updatedAt: now,
     };
 
-    // 创建初始上下文
+    const systemMessage: Message = {
+      messageId: 'system',
+      role: 'system',
+      content: systemPrompt,
+    };
+
     const context: CurrentContext = {
       id: contextId,
       contextId,
       sessionId: sid,
       systemPrompt,
-      messages: [{
-        messageId: 'system',
-        role: 'system',
-        content: systemPrompt,
-      }],
+      messages: [systemMessage],
       version: 1,
       createdAt: now,
       updatedAt: now,
@@ -181,32 +147,31 @@ export class FileMemoryManager implements IMemoryManager {
       },
     };
 
-    // 创建初始历史
-    const historyMessage: HistoryMessage = {
-      messageId: 'system',
-      role: 'system',
-      content: systemPrompt,
+    const history: HistoryMessage[] = [{
+      ...systemMessage,
       sequence: 1,
       turn: 0,
-    };
+    }];
 
-    // 更新缓存
     this.cache.sessions.set(sid, session);
     this.cache.contexts.set(sid, context);
-    this.cache.histories.set(sid, [historyMessage]);
+    this.cache.histories.set(sid, history);
     this.cache.compactionRecords.set(sid, []);
 
-    // 持久化
-    await this.saveSessionFile(sid);
-    await this.saveContextFile(sid);
-    await this.saveHistoryFile(sid);
+    await Promise.all([
+      this.saveSessionFile(sid),
+      this.saveContextFile(sid),
+      this.saveHistoryFile(sid),
+      this.saveCompactionFile(sid),
+    ]);
 
     return sid;
   }
 
   async getSession(sessionId: string): Promise<SessionData | null> {
     this.ensureInitialized();
-    return this.cache.sessions.get(sessionId) || null;
+    const session = this.cache.sessions.get(sessionId);
+    return session ? this.clone(session) : null;
   }
 
   async querySessions(filter?: SessionFilter, options?: QueryOptions): Promise<SessionData[]> {
@@ -214,116 +179,56 @@ export class FileMemoryManager implements IMemoryManager {
 
     let sessions = Array.from(this.cache.sessions.values());
 
-    // 应用过滤
     if (filter) {
       if (filter.sessionId) {
-        sessions = sessions.filter((s) => s.sessionId === filter.sessionId);
+        sessions = sessions.filter((item) => item.sessionId === filter.sessionId);
       }
       if (filter.status) {
-        sessions = sessions.filter((s) => s.status === filter.status);
+        sessions = sessions.filter((item) => item.status === filter.status);
       }
-      if (filter.startTime) {
-        sessions = sessions.filter((s) => s.createdAt >= filter.startTime!);
+      const startTime = filter.startTime;
+      if (startTime !== undefined) {
+        sessions = sessions.filter((item) => item.createdAt >= startTime);
       }
-      if (filter.endTime) {
-        sessions = sessions.filter((s) => s.createdAt <= filter.endTime!);
-      }
-    }
-
-    // 应用排序
-    const orderBy = options?.orderBy ?? 'updatedAt';
-    const direction = options?.orderDirection ?? 'desc';
-    sessions.sort((a, b) => {
-      const comparison = a[orderBy as keyof SessionData] as number - (b[orderBy as keyof SessionData] as number);
-      return direction === 'asc' ? comparison : -comparison;
-    });
-
-    // 应用分页
-    const offset = options?.offset ?? 0;
-    const limit = options?.limit ?? sessions.length;
-    return sessions.slice(offset, offset + limit);
-  }
-
-  async updateSession(
-    sessionId: string,
-    updates: Partial<Omit<SessionData, 'id' | 'createdAt' | 'updatedAt'>>
-  ): Promise<void> {
-    this.ensureInitialized();
-
-    const session = this.cache.sessions.get(sessionId);
-    if (!session) {
-      throw new Error(`Session not found: ${sessionId}`);
-    }
-
-    Object.assign(session, updates, { updatedAt: Date.now() });
-    await this.saveSessionFile(sessionId);
-  }
-
-  async deleteSession(sessionId: string): Promise<void> {
-    this.ensureInitialized();
-
-    // 从缓存中删除
-    this.cache.sessions.delete(sessionId);
-    this.cache.contexts.delete(sessionId);
-    this.cache.histories.delete(sessionId);
-    this.cache.compactionRecords.delete(sessionId);
-
-    // 删除关联的任务
-    for (const [taskId, task] of this.cache.tasks.entries()) {
-      if (task.sessionId === sessionId) {
-        this.cache.tasks.delete(taskId);
-      }
-    }
-    await this.deleteTaskListFile(sessionId);
-
-    // 删除关联的子任务运行记录
-    for (const [runId, run] of this.cache.subTaskRuns.entries()) {
-      if (run.parentSessionId === sessionId || run.childSessionId === sessionId) {
-        this.cache.subTaskRuns.delete(runId);
-        await this.deleteSubTaskRunFile(runId);
+      const endTime = filter.endTime;
+      if (endTime !== undefined) {
+        sessions = sessions.filter((item) => item.createdAt <= endTime);
       }
     }
 
-    // 删除文件
-    await this.deleteSessionFile(sessionId);
-    await this.deleteContextFile(sessionId);
-    await this.deleteHistoryFile(sessionId);
-    await this.deleteCompactionFile(sessionId);
-
-    await this.persistMetadata();
-  }
-
-  async archiveSession(sessionId: string): Promise<void> {
-    this.ensureInitialized();
-    await this.updateSession(sessionId, { status: 'archived' });
+    const sorted = this.sortByTimestamp(sessions, options);
+    return this.paginate(sorted, options).map((item) => this.clone(item));
   }
 
   // ==================== 当前上下文管理 ====================
 
   async getCurrentContext(sessionId: string): Promise<CurrentContext | null> {
     this.ensureInitialized();
-    return this.cache.contexts.get(sessionId) || null;
+    const context = this.cache.contexts.get(sessionId);
+    return context ? this.clone(context) : null;
   }
 
   async saveCurrentContext(context: Omit<CurrentContext, 'createdAt' | 'updatedAt'>): Promise<void> {
     this.ensureInitialized();
 
+    const session = this.requireSession(context.sessionId);
     const now = Date.now();
-    const fullContext: CurrentContext = {
-      ...context,
-      createdAt: this.cache.contexts.get(context.sessionId)?.createdAt ?? now,
+    const existing = this.cache.contexts.get(context.sessionId);
+
+    const nextContext: CurrentContext = {
+      ...this.clone(context),
+      createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     };
 
-    this.cache.contexts.set(context.sessionId, fullContext);
-    await this.saveContextFile(context.sessionId);
+    this.cache.contexts.set(context.sessionId, nextContext);
 
-    // 更新会话的 updatedAt
-    const session = this.cache.sessions.get(context.sessionId);
-    if (session) {
-      session.updatedAt = now;
-      await this.saveSessionFile(context.sessionId);
-    }
+    session.updatedAt = now;
+
+    await Promise.all([
+      this.saveContextFile(context.sessionId),
+      this.saveSessionFile(context.sessionId),
+    ]);
   }
 
   async addMessageToContext(
@@ -333,77 +238,44 @@ export class FileMemoryManager implements IMemoryManager {
   ): Promise<void> {
     this.ensureInitialized();
 
-    const context = this.cache.contexts.get(sessionId);
-    if (!context) {
-      throw new Error(`Context not found for session: ${sessionId}`);
-    }
+    const session = this.requireSession(sessionId);
+    const context = this.requireContext(sessionId);
 
     const isNewContextMessage = this.upsertContextMessage(context, message);
+    const shouldAddToHistory = options.addToHistory !== false;
 
-    context.updatedAt = Date.now();
+    let historyChanged = false;
+    let historyLength = this.cache.histories.get(sessionId)?.length ?? 0;
 
-    // 同时添加到历史（默认启用）
-    if (options.addToHistory !== false) {
+    if (shouldAddToHistory) {
       const history = this.ensureHistoryList(sessionId);
       this.upsertHistoryMessage(history, message);
-      await this.saveHistoryFile(sessionId);
-
-      // 更新会话统计
-      const session = this.cache.sessions.get(sessionId);
-      if (session) {
-        session.totalMessages = history.length;
-        session.updatedAt = context.updatedAt;
-        await this.saveSessionFile(sessionId);
-      }
+      historyLength = history.length;
+      historyChanged = true;
+      session.totalMessages = historyLength;
     }
 
+    const now = Date.now();
+    context.updatedAt = now;
     if (isNewContextMessage) {
-      context.version++;
+      context.version += 1;
     }
 
-    await this.saveContextFile(sessionId);
-  }
-
-  async addMessagesToContext(
-    sessionId: string,
-    messages: Message[],
-    options: { addToHistory?: boolean } = {}
-  ): Promise<void> {
-    this.ensureInitialized();
-
-    const context = this.cache.contexts.get(sessionId);
-    if (!context) {
-      throw new Error(`Context not found for session: ${sessionId}`);
+    if (context.stats) {
+      context.stats.totalMessagesInHistory = historyLength;
     }
 
-    let newContextMessages = 0;
-    for (const message of messages) {
-      if (this.upsertContextMessage(context, message)) {
-        newContextMessages++;
-      }
-    }
-    context.version += newContextMessages;
-    context.updatedAt = Date.now();
+    session.updatedAt = now;
 
-    // 同时添加到历史
-    if (options.addToHistory !== false) {
-      const history = this.ensureHistoryList(sessionId);
-      for (const message of messages) {
-        this.upsertHistoryMessage(history, message);
-      }
-
-      await this.saveHistoryFile(sessionId);
-
-      // 更新会话统计
-      const session = this.cache.sessions.get(sessionId);
-      if (session) {
-        session.totalMessages = history.length;
-        session.updatedAt = context.updatedAt;
-        await this.saveSessionFile(sessionId);
-      }
+    const writes: Promise<void>[] = [
+      this.saveContextFile(sessionId),
+      this.saveSessionFile(sessionId),
+    ];
+    if (historyChanged) {
+      writes.push(this.saveHistoryFile(sessionId));
     }
 
-    await this.saveContextFile(sessionId);
+    await Promise.all(writes);
   }
 
   async updateMessageInContext(
@@ -413,140 +285,154 @@ export class FileMemoryManager implements IMemoryManager {
   ): Promise<void> {
     this.ensureInitialized();
 
-    const context = this.cache.contexts.get(sessionId);
-    if (!context) {
-      throw new Error(`Context not found for session: ${sessionId}`);
-    }
+    const session = this.requireSession(sessionId);
+    const context = this.requireContext(sessionId);
 
-    const index = this.findLastContextIndex(context.messages, messageId);
-    if (index === -1) {
+    const contextIndex = this.findLastContextIndex(context.messages, messageId);
+    if (contextIndex === -1) {
       throw new Error(`Message not found in context: ${messageId}`);
     }
 
-    context.messages[index] = { ...context.messages[index], ...updates };
-    context.updatedAt = Date.now();
+    context.messages[contextIndex] = {
+      ...context.messages[contextIndex],
+      ...this.clone(updates),
+    };
 
     const history = this.cache.histories.get(sessionId);
+    let historyChanged = false;
     if (history) {
       const historyIndex = this.findLastHistoryIndex(history, messageId);
       if (historyIndex !== -1) {
         history[historyIndex] = {
           ...history[historyIndex],
-          ...updates,
+          ...this.clone(updates),
           sequence: history[historyIndex].sequence,
         };
+        historyChanged = true;
       }
-      await this.saveHistoryFile(sessionId);
     }
 
-    const session = this.cache.sessions.get(sessionId);
-    if (session) {
-      session.updatedAt = context.updatedAt;
-      await this.saveSessionFile(sessionId);
+    const now = Date.now();
+    context.updatedAt = now;
+    session.updatedAt = now;
+
+    const writes: Promise<void>[] = [
+      this.saveContextFile(sessionId),
+      this.saveSessionFile(sessionId),
+    ];
+    if (historyChanged) {
+      writes.push(this.saveHistoryFile(sessionId));
     }
 
-    await this.saveContextFile(sessionId);
+    await Promise.all(writes);
   }
 
   async clearContext(sessionId: string): Promise<void> {
     this.ensureInitialized();
 
-    const context = this.cache.contexts.get(sessionId);
-    if (!context) {
-      throw new Error(`Context not found for session: ${sessionId}`);
-    }
+    const session = this.requireSession(sessionId);
+    const context = this.requireContext(sessionId);
 
-    // 保留系统消息
-    const systemMessage = context.messages.find((m) => m.role === 'system');
+    const systemMessage = context.messages.find((item) => item.role === 'system');
     context.messages = systemMessage ? [systemMessage] : [];
-    context.version++;
-    context.updatedAt = Date.now();
+    context.version += 1;
 
-    await this.saveContextFile(sessionId);
+    const now = Date.now();
+    context.updatedAt = now;
+    session.updatedAt = now;
+
+    await Promise.all([
+      this.saveContextFile(sessionId),
+      this.saveSessionFile(sessionId),
+    ]);
   }
 
   async compactContext(sessionId: string, options: CompactContextOptions): Promise<CompactionRecord> {
     this.ensureInitialized();
 
-    const context = this.cache.contexts.get(sessionId);
-    const session = this.cache.sessions.get(sessionId);
-    const history = this.cache.histories.get(sessionId);
+    const session = this.requireSession(sessionId);
+    const context = this.requireContext(sessionId);
+    const history = this.ensureHistoryList(sessionId);
 
-    if (!context || !session || !history) {
-      throw new Error(`Session data not found: ${sessionId}`);
+    const keepLastN = Math.max(0, options.keepLastN);
+    const now = Date.now();
+
+    const systemMessage = context.messages.find((item) => item.role === 'system');
+    const nonSystemMessages = context.messages.filter((item) => item.role !== 'system');
+
+    const archiveCount = Math.max(0, nonSystemMessages.length - keepLastN);
+    const messagesToArchive = nonSystemMessages.slice(0, archiveCount);
+    const keptMessages = nonSystemMessages.slice(archiveCount);
+
+    const archivedMessageIds = messagesToArchive.map((item) => item.messageId);
+    const archivedIdSet = new Set(archivedMessageIds);
+
+    const summaryMessage: Message = {
+      ...this.clone(options.summaryMessage),
+      type: options.summaryMessage.type ?? 'summary',
+    };
+
+    const recordId = uuid();
+    for (const message of history) {
+      if (archivedIdSet.has(message.messageId)) {
+        message.archivedBy = recordId;
+      }
     }
 
-    const { keepLastN, summaryMessage, reason = 'manual', triggerMessageId, tokenCountBefore, tokenCountAfter } = options;
+    this.upsertHistoryMessage(history, summaryMessage, {
+      isSummary: true,
+      archivedBy: undefined,
+    });
 
-    // 计算要归档的消息
-    const messagesToArchive = context.messages.slice(0, -keepLastN);
-    const archivedMessageIds = messagesToArchive.map((m) => m.messageId);
+    const previousMessageCount = context.messages.length;
+    context.messages = systemMessage
+      ? [systemMessage, summaryMessage, ...keptMessages]
+      : [summaryMessage, ...keptMessages];
+    context.version += 1;
+    context.lastCompactionId = recordId;
+    context.updatedAt = now;
 
-    // 创建压缩记录
-    const recordId = uuid();
-    const now = Date.now();
+    session.compactionCount += 1;
+    session.totalMessages = history.length;
+    session.updatedAt = now;
+
+    context.stats = {
+      totalMessagesInHistory: history.length,
+      compactionCount: session.compactionCount,
+      lastCompactionAt: now,
+    };
+
     const record: CompactionRecord = {
       id: recordId,
       recordId,
       sessionId,
       compactedAt: now,
-      messageCountBefore: context.messages.length,
-      messageCountAfter: keepLastN + 1, // 保留的消息 + 摘要
+      messageCountBefore: previousMessageCount,
+      messageCountAfter: context.messages.length,
       archivedMessageIds,
       summaryMessageId: summaryMessage.messageId,
-      reason,
+      reason: options.reason ?? 'manual',
       metadata: {
-        tokenCountBefore,
-        tokenCountAfter,
-        triggerMessageId,
+        tokenCountBefore: options.tokenCountBefore,
+        tokenCountAfter: options.tokenCountAfter,
+        triggerMessageId: options.triggerMessageId,
       },
       createdAt: now,
       updatedAt: now,
     };
 
-    // 更新历史中的消息标记
-    for (const msg of history) {
-      if (archivedMessageIds.includes(msg.messageId)) {
-        msg.archivedBy = recordId;
-      }
-    }
-
-    // 将摘要消息添加到历史
-    const summaryHistoryMessage: HistoryMessage = {
-      ...summaryMessage,
-      sequence: history.length + 1,
-      isSummary: true,
-    };
-    history.push(summaryHistoryMessage);
-
-    // 更新上下文：保留最近消息 + 摘要消息
-    const keptMessages = context.messages.slice(-keepLastN);
-    context.messages = [summaryMessage, ...keptMessages];
-    context.version++;
-    context.lastCompactionId = recordId;
-    context.updatedAt = now;
-    context.stats = {
-      totalMessagesInHistory: history.length,
-      compactionCount: (context.stats?.compactionCount || 0) + 1,
-      lastCompactionAt: now,
-    };
-
-    // 更新会话
-    session.compactionCount++;
-    session.updatedAt = now;
-
-    // 保存压缩记录
     const records = this.cache.compactionRecords.get(sessionId) || [];
     records.push(record);
     this.cache.compactionRecords.set(sessionId, records);
 
-    // 持久化所有变更
-    await this.saveContextFile(sessionId);
-    await this.saveHistoryFile(sessionId);
-    await this.saveSessionFile(sessionId);
-    await this.saveCompactionFile(sessionId);
+    await Promise.all([
+      this.saveContextFile(sessionId),
+      this.saveHistoryFile(sessionId),
+      this.saveSessionFile(sessionId),
+      this.saveCompactionFile(sessionId),
+    ]);
 
-    return record;
+    return this.clone(record);
   }
 
   // ==================== 完整历史管理 ====================
@@ -554,99 +440,40 @@ export class FileMemoryManager implements IMemoryManager {
   async getFullHistory(filter: HistoryFilter, options?: HistoryQueryOptions): Promise<HistoryMessage[]> {
     this.ensureInitialized();
 
-    const history = this.cache.histories.get(filter.sessionId) || [];
-    let result = [...history];
+    let result = [...(this.cache.histories.get(filter.sessionId) || [])];
 
-    // 应用过滤
-    if (filter.messageIds) {
-      result = result.filter((m) => filter.messageIds!.includes(m.messageId));
+    if (filter.messageIds && filter.messageIds.length > 0) {
+      const messageIdSet = new Set(filter.messageIds);
+      result = result.filter((item) => messageIdSet.has(item.messageId));
     }
-    if (filter.sequenceStart !== undefined) {
-      result = result.filter((m) => m.sequence >= filter.sequenceStart!);
+    const sequenceStart = filter.sequenceStart;
+    if (sequenceStart !== undefined) {
+      result = result.filter((item) => item.sequence >= sequenceStart);
     }
-    if (filter.sequenceEnd !== undefined) {
-      result = result.filter((m) => m.sequence <= filter.sequenceEnd!);
+    const sequenceEnd = filter.sequenceEnd;
+    if (sequenceEnd !== undefined) {
+      result = result.filter((item) => item.sequence <= sequenceEnd);
     }
     if (filter.includeSummary === false) {
-      result = result.filter((m) => !m.isSummary);
+      result = result.filter((item) => !item.isSummary);
     }
     if (filter.archivedBy) {
-      result = result.filter((m) => m.archivedBy === filter.archivedBy);
+      result = result.filter((item) => item.archivedBy === filter.archivedBy);
     }
 
-    // 排序（历史消息默认按 sequence 排序）
-    result.sort((a, b) => a.sequence - b.sequence);
+    const direction = options?.orderDirection ?? 'asc';
+    result.sort((a, b) => {
+      const comparison = a.sequence - b.sequence;
+      return direction === 'asc' ? comparison : -comparison;
+    });
 
-    // 应用分页
-    const offset = options?.offset ?? 0;
-    const limit = options?.limit ?? result.length;
-    return result.slice(offset, offset + limit);
-  }
-
-  async addMessageToHistory(sessionId: string, message: HistoryMessage): Promise<void> {
-    this.ensureInitialized();
-
-    const history = this.cache.histories.get(sessionId) || [];
-    history.push(message);
-    this.cache.histories.set(sessionId, history);
-
-    // 更新会话统计
-    const session = this.cache.sessions.get(sessionId);
-    if (session) {
-      session.totalMessages = history.length;
-      session.updatedAt = Date.now();
-      await this.saveSessionFile(sessionId);
-    }
-
-    await this.saveHistoryFile(sessionId);
-  }
-
-  async addMessagesToHistory(sessionId: string, messages: HistoryMessage[]): Promise<void> {
-    this.ensureInitialized();
-
-    const history = this.cache.histories.get(sessionId) || [];
-    history.push(...messages);
-    this.cache.histories.set(sessionId, history);
-
-    // 更新会话统计
-    const session = this.cache.sessions.get(sessionId);
-    if (session) {
-      session.totalMessages = history.length;
-      session.updatedAt = Date.now();
-      await this.saveSessionFile(sessionId);
-    }
-
-    await this.saveHistoryFile(sessionId);
-  }
-
-  async getArchivedMessages(recordId: string): Promise<HistoryMessage[]> {
-    this.ensureInitialized();
-
-    // 查找所有被该记录归档的消息
-    for (const [, history] of this.cache.histories.entries()) {
-      const archived = history.filter((m) => m.archivedBy === recordId);
-      if (archived.length > 0) {
-        return archived.sort((a, b) => a.sequence - b.sequence);
-      }
-    }
-
-    return [];
+    return this.paginate(result, options).map((item) => this.clone(item));
   }
 
   async getCompactionRecords(sessionId: string): Promise<CompactionRecord[]> {
     this.ensureInitialized();
-    return this.cache.compactionRecords.get(sessionId) || [];
-  }
-
-  async getCompactionRecord(recordId: string): Promise<CompactionRecord | null> {
-    this.ensureInitialized();
-
-    for (const records of this.cache.compactionRecords.values()) {
-      const record = records.find((r) => r.recordId === recordId);
-      if (record) return record;
-    }
-
-    return null;
+    const records = this.cache.compactionRecords.get(sessionId) || [];
+    return records.map((item) => this.clone(item));
   }
 
   // ==================== 任务管理 ====================
@@ -658,18 +485,19 @@ export class FileMemoryManager implements IMemoryManager {
     const existing = this.cache.tasks.get(task.taskId);
 
     const taskData: TaskData = {
-      ...task,
+      ...this.clone(task),
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     };
 
     this.cache.tasks.set(task.taskId, taskData);
-    await this.saveTaskListFile(taskData.sessionId);
+    await this.persistTaskListFile(taskData.sessionId);
   }
 
   async getTask(taskId: string): Promise<TaskData | null> {
     this.ensureInitialized();
-    return this.cache.tasks.get(taskId) || null;
+    const task = this.cache.tasks.get(taskId);
+    return task ? this.clone(task) : null;
   }
 
   async queryTasks(filter?: TaskFilter, options?: QueryOptions): Promise<TaskData[]> {
@@ -677,50 +505,40 @@ export class FileMemoryManager implements IMemoryManager {
 
     let tasks = Array.from(this.cache.tasks.values());
 
-    // 应用过滤
     if (filter) {
       if (filter.sessionId) {
-        tasks = tasks.filter((t) => t.sessionId === filter.sessionId);
+        tasks = tasks.filter((item) => item.sessionId === filter.sessionId);
       }
       if (filter.taskId) {
-        tasks = tasks.filter((t) => t.taskId === filter.taskId);
+        tasks = tasks.filter((item) => item.taskId === filter.taskId);
       }
       if (filter.parentTaskId !== undefined) {
         if (filter.parentTaskId === null) {
-          tasks = tasks.filter((t) => !t.parentTaskId);
+          tasks = tasks.filter((item) => !item.parentTaskId);
         } else {
-          tasks = tasks.filter((t) => t.parentTaskId === filter.parentTaskId);
+          tasks = tasks.filter((item) => item.parentTaskId === filter.parentTaskId);
         }
       }
       if (filter.status) {
-        tasks = tasks.filter((t) => t.status === filter.status);
+        tasks = tasks.filter((item) => item.status === filter.status);
       }
     }
 
-    // 应用排序
-    const orderBy = options?.orderBy ?? 'updatedAt';
-    const direction = options?.orderDirection ?? 'desc';
-    tasks.sort((a, b) => {
-      const aValue = a[orderBy as keyof TaskData] as number;
-      const bValue = b[orderBy as keyof TaskData] as number;
-      const comparison = aValue - bValue;
-      return direction === 'asc' ? comparison : -comparison;
-    });
-
-    // 应用分页
-    const offset = options?.offset ?? 0;
-    const limit = options?.limit ?? tasks.length;
-    return tasks.slice(offset, offset + limit);
+    const sorted = this.sortByTimestamp(tasks, options);
+    return this.paginate(sorted, options).map((item) => this.clone(item));
   }
 
   async deleteTask(taskId: string): Promise<void> {
     this.ensureInitialized();
+
     const existing = this.cache.tasks.get(taskId);
+    if (!existing) return;
+
     this.cache.tasks.delete(taskId);
-    if (existing?.sessionId) {
-      await this.saveTaskListFile(existing.sessionId);
-    }
+    await this.persistTaskListFile(existing.sessionId);
   }
+
+  // ==================== 子任务运行管理 ====================
 
   async saveSubTaskRun(run: Omit<SubTaskRunData, 'createdAt' | 'updatedAt'>): Promise<void> {
     this.ensureInitialized();
@@ -741,7 +559,8 @@ export class FileMemoryManager implements IMemoryManager {
 
   async getSubTaskRun(runId: string): Promise<SubTaskRunData | null> {
     this.ensureInitialized();
-    return this.cache.subTaskRuns.get(runId) || null;
+    const run = this.cache.subTaskRuns.get(runId);
+    return run ? this.clone(run) : null;
   }
 
   async querySubTaskRuns(filter?: SubTaskRunFilter, options?: QueryOptions): Promise<SubTaskRunData[]> {
@@ -751,424 +570,227 @@ export class FileMemoryManager implements IMemoryManager {
 
     if (filter) {
       if (filter.runId) {
-        runs = runs.filter((r) => r.runId === filter.runId);
+        runs = runs.filter((item) => item.runId === filter.runId);
       }
       if (filter.parentSessionId) {
-        runs = runs.filter((r) => r.parentSessionId === filter.parentSessionId);
+        runs = runs.filter((item) => item.parentSessionId === filter.parentSessionId);
       }
       if (filter.childSessionId) {
-        runs = runs.filter((r) => r.childSessionId === filter.childSessionId);
+        runs = runs.filter((item) => item.childSessionId === filter.childSessionId);
       }
       if (filter.status) {
-        runs = runs.filter((r) => r.status === filter.status);
+        runs = runs.filter((item) => item.status === filter.status);
       }
       if (filter.mode) {
-        runs = runs.filter((r) => r.mode === filter.mode);
+        runs = runs.filter((item) => item.mode === filter.mode);
       }
     }
 
-    const orderBy = options?.orderBy ?? 'updatedAt';
-    const direction = options?.orderDirection ?? 'desc';
-    runs.sort((a, b) => {
-      const aValue = a[orderBy as keyof SubTaskRunData] as number;
-      const bValue = b[orderBy as keyof SubTaskRunData] as number;
-      const comparison = aValue - bValue;
-      return direction === 'asc' ? comparison : -comparison;
-    });
-
-    const offset = options?.offset ?? 0;
-    const limit = options?.limit ?? runs.length;
-    return runs.slice(offset, offset + limit);
+    const sorted = this.sortByTimestamp(runs, options);
+    return this.paginate(sorted, options).map((item) => this.clone(item));
   }
 
   async deleteSubTaskRun(runId: string): Promise<void> {
     this.ensureInitialized();
+
     this.cache.subTaskRuns.delete(runId);
     await this.deleteSubTaskRunFile(runId);
   }
 
-  // ==================== 私有方法 - 数据加载 ====================
+  // ==================== 私有方法 - 加载 ====================
 
   private async loadAllData(): Promise<void> {
-    // 加载会话
-    const sessionFiles = await fs.readdir(this.sessionsPath).catch(() => []);
-    for (const file of sessionFiles) {
-      if (file.endsWith('.json')) {
-        const sessionId = file.replace('.json', '');
-        await this.loadSessionFile(sessionId);
+    this.cache.sessions.clear();
+    this.cache.contexts.clear();
+    this.cache.histories.clear();
+    this.cache.compactionRecords.clear();
+    this.cache.tasks.clear();
+    this.cache.subTaskRuns.clear();
+
+    await this.loadSessions();
+    await this.loadContexts();
+    await this.loadHistories();
+    await this.loadCompactions();
+    await this.loadTaskLists();
+    await this.loadSubTaskRuns();
+  }
+
+  private async loadSessions(): Promise<void> {
+    const files = await this.listJsonFiles(this.sessionsPath);
+    for (const fileName of files) {
+      const sessionId = this.decodeEntityFileName(fileName);
+      const filePath = this.getSessionFilePath(sessionId);
+      try {
+        const session = await this.readJsonFile<SessionData>(filePath);
+        if (!session) continue;
+        this.cache.sessions.set(sessionId, {
+          ...session,
+          sessionId,
+        });
+      } catch (error) {
+        console.error(`Error loading session ${sessionId}:`, error);
       }
     }
+  }
 
-    // 加载上下文
-    const contextFiles = await fs.readdir(this.contextsPath).catch(() => []);
-    for (const file of contextFiles) {
-      if (file.endsWith('.json')) {
-        const sessionId = file.replace('.json', '');
-        await this.loadContextFile(sessionId);
+  private async loadContexts(): Promise<void> {
+    const files = await this.listJsonFiles(this.contextsPath);
+    for (const fileName of files) {
+      const sessionId = this.decodeEntityFileName(fileName);
+      const filePath = this.getContextFilePath(sessionId);
+      try {
+        const context = await this.readJsonFile<CurrentContext>(filePath);
+        if (!context) continue;
+        this.cache.contexts.set(sessionId, {
+          ...context,
+          sessionId,
+        });
+      } catch (error) {
+        console.error(`Error loading context ${sessionId}:`, error);
       }
     }
+  }
 
-    // 加载历史
-    const historyFiles = await fs.readdir(this.historiesPath).catch(() => []);
-    for (const file of historyFiles) {
-      if (file.endsWith('.json')) {
-        const sessionId = file.replace('.json', '');
-        await this.loadHistoryFile(sessionId);
+  private async loadHistories(): Promise<void> {
+    const files = await this.listJsonFiles(this.historiesPath);
+    for (const fileName of files) {
+      const sessionId = this.decodeEntityFileName(fileName);
+      const filePath = this.getHistoryFilePath(sessionId);
+      try {
+        const history = await this.readJsonFile<HistoryMessage[]>(filePath);
+        if (!history) continue;
+        this.cache.histories.set(sessionId, history);
+      } catch (error) {
+        console.error(`Error loading history ${sessionId}:`, error);
       }
     }
+  }
 
-    // 加载压缩记录
-    const compactionFiles = await fs.readdir(this.compactionsPath).catch(() => []);
-    for (const file of compactionFiles) {
-      if (file.endsWith('.json')) {
-        const sessionId = file.replace('.json', '');
-        await this.loadCompactionFile(sessionId);
+  private async loadCompactions(): Promise<void> {
+    const files = await this.listJsonFiles(this.compactionsPath);
+    for (const fileName of files) {
+      const sessionId = this.decodeEntityFileName(fileName);
+      const filePath = this.getCompactionFilePath(sessionId);
+      try {
+        const records = await this.readJsonFile<CompactionRecord[]>(filePath);
+        if (!records) continue;
+        this.cache.compactionRecords.set(sessionId, records);
+      } catch (error) {
+        console.error(`Error loading compactions ${sessionId}:`, error);
       }
     }
+  }
 
-    // 加载任务（仅 task_*，不包含 sub task run）
-    const taskFiles = await fs.readdir(this.tasksPath).catch(() => []);
-    const migratedLegacyTaskSessions = new Set<string>();
-    const migratedLegacyTaskIds: string[] = [];
-    for (const file of taskFiles) {
-      if (file.endsWith('.json')) {
-        if (file.startsWith('subtask-run-')) continue;
-        if (file.startsWith('task-list-')) {
-          const sessionId = this.decodeTaskListFileName(file);
-          await this.loadTaskListFile(sessionId);
-          continue;
+  private async loadTaskLists(): Promise<void> {
+    const files = await this.listJsonFiles(this.tasksPath);
+    for (const fileName of files) {
+      if (!fileName.startsWith('task-list-')) continue;
+
+      const sessionId = this.decodeTaskListFileName(fileName);
+      const filePath = this.getTaskListFilePath(sessionId);
+
+      try {
+        const tasks = await this.readJsonFile<TaskData[]>(filePath);
+        if (!tasks) continue;
+
+        for (const task of tasks) {
+          this.cache.tasks.set(task.taskId, {
+            ...task,
+            sessionId,
+          });
         }
-
-        const taskId = file.replace('.json', '');
-        const loaded = await this.loadTaskFile(taskId);
-        if (loaded?.sessionId) {
-          migratedLegacyTaskSessions.add(loaded.sessionId);
-          migratedLegacyTaskIds.push(taskId);
-        }
+      } catch (error) {
+        console.error(`Error loading task list ${sessionId}:`, error);
       }
     }
+  }
 
-    // 迁移旧格式任务文件（tasks/<taskId>.json -> tasks/task-list-<sessionId>.json）
-    for (const sessionId of migratedLegacyTaskSessions) {
-      await this.saveTaskListFile(sessionId);
-    }
-    for (const taskId of migratedLegacyTaskIds) {
-      await this.deleteTaskFile(taskId);
-    }
+  private async loadSubTaskRuns(): Promise<void> {
+    const files = await this.listJsonFiles(this.subTaskRunsPath);
+    for (const fileName of files) {
+      if (!fileName.startsWith('subtask-run-')) continue;
 
-    // 加载 sub task run（新目录）
-    const runFiles = await fs.readdir(this.subTaskRunsPath).catch(() => []);
-    for (const file of runFiles) {
-      if (file.endsWith('.json')) {
-        const runId = this.decodeSubTaskRunFileName(file);
-        await this.loadSubTaskRunFile(runId);
+      const runId = this.decodeSubTaskRunFileName(fileName);
+      const filePath = this.getSubTaskRunFilePath(runId);
+
+      try {
+        const rawRun = await this.readJsonFile<SubTaskRunData>(filePath);
+        if (!rawRun) continue;
+
+        this.cache.subTaskRuns.set(runId, this.normalizeSubTaskRun(rawRun));
+      } catch (error) {
+        console.error(`Error loading sub task run ${runId}:`, error);
       }
     }
-
-    // 迁移旧目录中的 sub task run（tasks/subtask-run-*.json -> subtask-runs/）
-    for (const file of taskFiles) {
-      if (file.endsWith('.json') && file.startsWith('subtask-run-')) {
-        const runId = this.decodeSubTaskRunFileName(file);
-        if (this.cache.subTaskRuns.has(runId)) {
-          await this.deleteLegacySubTaskRunFile(runId);
-          continue;
-        }
-        await this.loadLegacySubTaskRunFile(runId);
-        if (this.cache.subTaskRuns.has(runId)) {
-          await this.saveSubTaskRunFile(runId);
-        }
-        await this.deleteLegacySubTaskRunFile(runId);
-      }
-    }
-
-    // 加载元数据
-    await this.loadMetadata();
   }
 
-  private async loadMetadata(): Promise<void> {
-    const metadataPath = path.join(this.basePath, 'metadata.json');
-    try {
-      const data = await fs.readFile(metadataPath, 'utf-8');
-      const parsed = JSON.parse(data);
-      // 元数据仅用于信息展示，不影响核心功能
-      // console.log('Loaded metadata:', parsed.metadata);
-    } catch {
-      // 元数据文件不存在或损坏，忽略
-    }
-  }
-
-  private async loadSessionFile(sessionId: string): Promise<void> {
-    const filePath = path.join(this.sessionsPath, `${sessionId}.json`);
-    try {
-      const data = await fs.readFile(filePath, 'utf-8');
-      const session: SessionData = JSON.parse(data);
-      this.cache.sessions.set(sessionId, session);
-    } catch (error) {
-      console.error(`Error loading session ${sessionId}:`, error);
-    }
-  }
-
-  private async loadContextFile(sessionId: string): Promise<void> {
-    const filePath = path.join(this.contextsPath, `${sessionId}.json`);
-    try {
-      const data = await fs.readFile(filePath, 'utf-8');
-      const context: CurrentContext = JSON.parse(data);
-      this.cache.contexts.set(sessionId, context);
-    } catch (error) {
-      console.error(`Error loading context ${sessionId}:`, error);
-    }
-  }
-
-  private async loadHistoryFile(sessionId: string): Promise<void> {
-    const filePath = path.join(this.historiesPath, `${sessionId}.json`);
-    try {
-      const data = await fs.readFile(filePath, 'utf-8');
-      const history: HistoryMessage[] = JSON.parse(data);
-      this.cache.histories.set(sessionId, history);
-    } catch (error) {
-      console.error(`Error loading history ${sessionId}:`, error);
-    }
-  }
-
-  private async loadCompactionFile(sessionId: string): Promise<void> {
-    const filePath = path.join(this.compactionsPath, `${sessionId}.json`);
-    try {
-      const data = await fs.readFile(filePath, 'utf-8');
-      const records: CompactionRecord[] = JSON.parse(data);
-      this.cache.compactionRecords.set(sessionId, records);
-    } catch (error) {
-      console.error(`Error loading compaction records ${sessionId}:`, error);
-    }
-  }
-
-  private async loadTaskFile(taskId: string): Promise<TaskData | null> {
-    const filePath = path.join(this.tasksPath, `${taskId}.json`);
-    try {
-      const data = await fs.readFile(filePath, 'utf-8');
-      const task: TaskData = JSON.parse(data);
-      this.cache.tasks.set(taskId, task);
-      return task;
-    } catch (error) {
-      console.error(`Error loading task ${taskId}:`, error);
-      return null;
-    }
-  }
-
-  private async loadTaskListFile(sessionId: string): Promise<void> {
-    const filePath = this.getTaskListFilePath(sessionId);
-    try {
-      const data = await fs.readFile(filePath, 'utf-8');
-      const tasks = JSON.parse(data) as TaskData[];
-      for (const task of tasks) {
-        this.cache.tasks.set(task.taskId, task);
-      }
-    } catch (error) {
-      console.error(`Error loading task list ${sessionId}:`, error);
-    }
-  }
-
-  private async loadSubTaskRunFile(runId: string): Promise<void> {
-    const filePath = this.getSubTaskRunFilePath(runId);
-    try {
-      const data = await fs.readFile(filePath, 'utf-8');
-      const parsed = JSON.parse(data) as SubTaskRunData;
-      const run = this.normalizeSubTaskRun(parsed);
-      this.cache.subTaskRuns.set(runId, run);
-      if (parsed.messages !== undefined || parsed.messageCount !== run.messageCount) {
-        await this.saveSubTaskRunFile(runId);
-      }
-    } catch (error) {
-      console.error(`Error loading sub task run ${runId}:`, error);
-    }
-  }
-
-  private async loadLegacySubTaskRunFile(runId: string): Promise<void> {
-    const filePath = this.getLegacySubTaskRunFilePath(runId);
-    try {
-      const data = await fs.readFile(filePath, 'utf-8');
-      const run = this.normalizeSubTaskRun(JSON.parse(data) as SubTaskRunData);
-      this.cache.subTaskRuns.set(runId, run);
-    } catch (error) {
-      console.error(`Error loading legacy sub task run ${runId}:`, error);
-    }
-  }
-
-  // ==================== 私有方法 - 数据持久化 ====================
-
-  private async persistAll(): Promise<void> {
-    // 保存所有变更的数据
-    for (const sessionId of this.cache.sessions.keys()) {
-      await this.saveSessionFile(sessionId);
-    }
-    for (const sessionId of this.cache.contexts.keys()) {
-      await this.saveContextFile(sessionId);
-    }
-    for (const sessionId of this.cache.histories.keys()) {
-      await this.saveHistoryFile(sessionId);
-    }
-    for (const sessionId of this.cache.compactionRecords.keys()) {
-      await this.saveCompactionFile(sessionId);
-    }
-    const taskSessions = new Set(
-      Array.from(this.cache.tasks.values()).map((task) => task.sessionId),
-    );
-    for (const sessionId of taskSessions) {
-      await this.saveTaskListFile(sessionId);
-    }
-    for (const runId of this.cache.subTaskRuns.keys()) {
-      await this.saveSubTaskRunFile(runId);
-    }
-    await this.persistMetadata();
-  }
-
-  private async persistMetadata(): Promise<void> {
-    const metadataPath = path.join(this.basePath, 'metadata.json');
-    const metadata = {
-      version: '1.0.0',
-      metadata: {
-        lastCleanup: Date.now(),
-        totalSessions: this.cache.sessions.size,
-        totalTasks: this.cache.tasks.size,
-        totalSubTaskRuns: this.cache.subTaskRuns.size,
-      },
-    };
-    await fs.writeFile(metadataPath, JSON.stringify(metadata, null, 2));
-  }
+  // ==================== 私有方法 - 持久化 ====================
 
   private async saveSessionFile(sessionId: string): Promise<void> {
     const session = this.cache.sessions.get(sessionId);
     if (!session) return;
-
-    const filePath = path.join(this.sessionsPath, `${sessionId}.json`);
-    await fs.writeFile(filePath, JSON.stringify(session, null, 2));
+    await this.writeJsonFile(this.getSessionFilePath(sessionId), session);
   }
 
   private async saveContextFile(sessionId: string): Promise<void> {
     const context = this.cache.contexts.get(sessionId);
     if (!context) return;
-
-    const filePath = path.join(this.contextsPath, `${sessionId}.json`);
-    await fs.writeFile(filePath, JSON.stringify(context, null, 2));
+    await this.writeJsonFile(this.getContextFilePath(sessionId), context);
   }
 
   private async saveHistoryFile(sessionId: string): Promise<void> {
     const history = this.cache.histories.get(sessionId);
     if (!history) return;
-
-    const filePath = path.join(this.historiesPath, `${sessionId}.json`);
-    await fs.writeFile(filePath, JSON.stringify(history, null, 2));
+    await this.writeJsonFile(this.getHistoryFilePath(sessionId), history);
   }
 
   private async saveCompactionFile(sessionId: string): Promise<void> {
     const records = this.cache.compactionRecords.get(sessionId);
     if (!records) return;
-
-    const filePath = path.join(this.compactionsPath, `${sessionId}.json`);
-    await fs.writeFile(filePath, JSON.stringify(records, null, 2));
+    await this.writeJsonFile(this.getCompactionFilePath(sessionId), records);
   }
 
-  private async saveTaskListFile(sessionId: string): Promise<void> {
+  private async persistTaskListFile(sessionId: string): Promise<void> {
     const tasks = Array.from(this.cache.tasks.values())
-      .filter((task) => task.sessionId === sessionId)
+      .filter((item) => item.sessionId === sessionId)
       .sort((a, b) => a.createdAt - b.createdAt);
 
     const filePath = this.getTaskListFilePath(sessionId);
-    await fs.writeFile(filePath, JSON.stringify(tasks, null, 2));
+    if (tasks.length === 0) {
+      await this.deleteFileIfExists(filePath);
+      return;
+    }
+
+    await this.writeJsonFile(filePath, tasks);
   }
 
   private async saveSubTaskRunFile(runId: string): Promise<void> {
     const run = this.cache.subTaskRuns.get(runId);
     if (!run) return;
 
-    const filePath = this.getSubTaskRunFilePath(runId);
-    await fs.writeFile(filePath, JSON.stringify(run, null, 2));
-  }
-
-  private async deleteSessionFile(sessionId: string): Promise<void> {
-    const filePath = path.join(this.sessionsPath, `${sessionId}.json`);
-    await fs.unlink(filePath).catch(() => {});
-  }
-
-  private async deleteContextFile(sessionId: string): Promise<void> {
-    const filePath = path.join(this.contextsPath, `${sessionId}.json`);
-    await fs.unlink(filePath).catch(() => {});
-  }
-
-  private async deleteHistoryFile(sessionId: string): Promise<void> {
-    const filePath = path.join(this.historiesPath, `${sessionId}.json`);
-    await fs.unlink(filePath).catch(() => {});
-  }
-
-  private async deleteCompactionFile(sessionId: string): Promise<void> {
-    const filePath = path.join(this.compactionsPath, `${sessionId}.json`);
-    await fs.unlink(filePath).catch(() => {});
-  }
-
-  private async deleteTaskFile(taskId: string): Promise<void> {
-    const filePath = path.join(this.tasksPath, `${taskId}.json`);
-    await fs.unlink(filePath).catch(() => {});
-  }
-
-  private async deleteTaskListFile(sessionId: string): Promise<void> {
-    const filePath = this.getTaskListFilePath(sessionId);
-    await fs.unlink(filePath).catch(() => {});
+    await this.writeJsonFile(this.getSubTaskRunFilePath(runId), run);
   }
 
   private async deleteSubTaskRunFile(runId: string): Promise<void> {
-    const filePath = this.getSubTaskRunFilePath(runId);
-    await fs.unlink(filePath).catch(() => {});
+    await this.deleteFileIfExists(this.getSubTaskRunFilePath(runId));
   }
 
-  private getSubTaskRunFilePath(runId: string): string {
-    return path.join(this.subTaskRunsPath, this.encodeSubTaskRunFileName(runId));
-  }
+  // ==================== 私有方法 - 模型操作 ====================
 
-  private getLegacySubTaskRunFilePath(runId: string): string {
-    return path.join(this.tasksPath, this.encodeSubTaskRunFileName(runId));
-  }
-
-  private async deleteLegacySubTaskRunFile(runId: string): Promise<void> {
-    const filePath = this.getLegacySubTaskRunFilePath(runId);
-    await fs.unlink(filePath).catch(() => {});
-  }
-
-  private encodeSubTaskRunFileName(runId: string): string {
-    return `subtask-run-${encodeURIComponent(runId)}.json`;
-  }
-
-  private decodeSubTaskRunFileName(fileName: string): string {
-    if (fileName.startsWith('subtask-run-')) {
-      const encodedRunId = fileName.replace('subtask-run-', '').replace('.json', '');
-      return decodeURIComponent(encodedRunId);
+  private requireSession(sessionId: string): SessionData {
+    const session = this.cache.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
     }
-    return fileName.replace('.json', '');
+    return session;
   }
 
-  private getTaskListFilePath(sessionId: string): string {
-    return path.join(this.tasksPath, this.encodeTaskListFileName(sessionId));
-  }
-
-  private encodeTaskListFileName(sessionId: string): string {
-    return `task-list-${encodeURIComponent(sessionId)}.json`;
-  }
-
-  private decodeTaskListFileName(fileName: string): string {
-    if (fileName.startsWith('task-list-')) {
-      const encodedSessionId = fileName.replace('task-list-', '').replace('.json', '');
-      return decodeURIComponent(encodedSessionId);
+  private requireContext(sessionId: string): CurrentContext {
+    const context = this.cache.contexts.get(sessionId);
+    if (!context) {
+      throw new Error(`Context not found for session: ${sessionId}`);
     }
-    return fileName.replace('.json', '');
-  }
-
-  private normalizeSubTaskRun(raw: SubTaskRunData): SubTaskRunData {
-    const normalizedMessageCount =
-      raw.messageCount ??
-      (Array.isArray(raw.messages) ? raw.messages.length : 0);
-    const { messages: _legacyMessages, ...runWithoutMessages } = raw as SubTaskRunData;
-    return {
-      ...runWithoutMessages,
-      messageCount: normalizedMessageCount,
-    };
+    return context;
   }
 
   private ensureHistoryList(sessionId: string): HistoryMessage[] {
@@ -1181,52 +803,177 @@ export class FileMemoryManager implements IMemoryManager {
   }
 
   private upsertContextMessage(context: CurrentContext, message: Message): boolean {
-    const lastMessage = context.messages[context.messages.length - 1];
-    if (lastMessage?.messageId === message.messageId) {
-      context.messages[context.messages.length - 1] = message;
+    const last = context.messages[context.messages.length - 1];
+    if (last?.messageId === message.messageId) {
+      context.messages[context.messages.length - 1] = this.clone(message);
       return false;
     }
 
-    context.messages.push(message);
+    context.messages.push(this.clone(message));
     return true;
   }
 
-  private upsertHistoryMessage(history: HistoryMessage[], message: Message): void {
+  private upsertHistoryMessage(
+    history: HistoryMessage[],
+    message: Message,
+    extras: Partial<HistoryMessage> = {}
+  ): void {
     const existingIndex = this.findLastHistoryIndex(history, message.messageId);
+
     if (existingIndex === -1) {
       history.push({
-        ...message,
+        ...this.clone(message),
         sequence: history.length + 1,
+        ...extras,
       });
       return;
     }
 
     history[existingIndex] = {
       ...history[existingIndex],
-      ...message,
+      ...this.clone(message),
+      ...extras,
       sequence: history[existingIndex].sequence,
     };
   }
 
   private findLastHistoryIndex(history: HistoryMessage[], messageId: string): number {
-    for (let i = history.length - 1; i >= 0; i--) {
-      if (history[i].messageId === messageId) {
-        return i;
+    for (let index = history.length - 1; index >= 0; index -= 1) {
+      if (history[index].messageId === messageId) {
+        return index;
       }
     }
     return -1;
   }
 
   private findLastContextIndex(messages: Message[], messageId: string): number {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].messageId === messageId) {
-        return i;
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      if (messages[index].messageId === messageId) {
+        return index;
       }
     }
     return -1;
   }
 
-  // ==================== 私有方法 - 工具 ====================
+  private normalizeSubTaskRun(raw: SubTaskRunData): SubTaskRunData {
+    const messageCount = raw.messageCount ?? (Array.isArray(raw.messages) ? raw.messages.length : 0);
+    const { messages: _ignoredMessages, ...rest } = raw;
+
+    return {
+      ...rest,
+      messageCount,
+    };
+  }
+
+  // ==================== 私有方法 - 通用工具 ====================
+
+  private resolveConfig(options: MemoryManagerOptions): FileStorageConfig {
+    const config = options.config as { basePath?: unknown } | undefined;
+    const configBasePath = typeof config?.basePath === 'string' ? config.basePath : undefined;
+
+    return {
+      basePath: configBasePath || options.connectionString || '.memory',
+    };
+  }
+
+  private sortByTimestamp<T extends Timestamped>(items: T[], options?: QueryOptions): T[] {
+    const orderBy = options?.orderBy ?? 'updatedAt';
+    const direction = options?.orderDirection ?? 'desc';
+
+    return [...items].sort((a, b) => {
+      const comparison = a[orderBy] - b[orderBy];
+      return direction === 'asc' ? comparison : -comparison;
+    });
+  }
+
+  private paginate<T>(items: T[], options?: { limit?: number; offset?: number }): T[] {
+    const offset = Math.max(0, options?.offset ?? 0);
+    const limit = Math.max(0, options?.limit ?? items.length);
+    return items.slice(offset, offset + limit);
+  }
+
+  private async listJsonFiles(dirPath: string): Promise<string[]> {
+    const entries = await fs.readdir(dirPath, { withFileTypes: true }).catch(() => []);
+    return entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
+      .map((entry) => entry.name);
+  }
+
+  private async readJsonFile<T>(filePath: string): Promise<T | null> {
+    try {
+      const raw = await fs.readFile(filePath, 'utf-8');
+      return JSON.parse(raw) as T;
+    } catch (error) {
+      if (this.isNotFound(error)) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  private async writeJsonFile(filePath: string, value: unknown): Promise<void> {
+    await fs.writeFile(filePath, JSON.stringify(value, null, 2), 'utf-8');
+  }
+
+  private async deleteFileIfExists(filePath: string): Promise<void> {
+    await fs.unlink(filePath).catch(() => {});
+  }
+
+  private encodeEntityFileName(id: string): string {
+    return `${encodeURIComponent(id)}.json`;
+  }
+
+  private decodeEntityFileName(fileName: string): string {
+    return decodeURIComponent(fileName.replace(/\.json$/, ''));
+  }
+
+  private getSessionFilePath(sessionId: string): string {
+    return path.join(this.sessionsPath, this.encodeEntityFileName(sessionId));
+  }
+
+  private getContextFilePath(sessionId: string): string {
+    return path.join(this.contextsPath, this.encodeEntityFileName(sessionId));
+  }
+
+  private getHistoryFilePath(sessionId: string): string {
+    return path.join(this.historiesPath, this.encodeEntityFileName(sessionId));
+  }
+
+  private getCompactionFilePath(sessionId: string): string {
+    return path.join(this.compactionsPath, this.encodeEntityFileName(sessionId));
+  }
+
+  private getTaskListFilePath(sessionId: string): string {
+    return path.join(this.tasksPath, this.encodeTaskListFileName(sessionId));
+  }
+
+  private encodeTaskListFileName(sessionId: string): string {
+    return `task-list-${encodeURIComponent(sessionId)}.json`;
+  }
+
+  private decodeTaskListFileName(fileName: string): string {
+    return decodeURIComponent(fileName.replace(/^task-list-/, '').replace(/\.json$/, ''));
+  }
+
+  private getSubTaskRunFilePath(runId: string): string {
+    return path.join(this.subTaskRunsPath, this.encodeSubTaskRunFileName(runId));
+  }
+
+  private encodeSubTaskRunFileName(runId: string): string {
+    return `subtask-run-${encodeURIComponent(runId)}.json`;
+  }
+
+  private decodeSubTaskRunFileName(fileName: string): string {
+    return decodeURIComponent(fileName.replace(/^subtask-run-/, '').replace(/\.json$/, ''));
+  }
+
+  private isNotFound(error: unknown): boolean {
+    return Boolean(error && typeof error === 'object' && 'code' in error && (error as { code?: string }).code === 'ENOENT');
+  }
+
+  private clone<T>(value: T): T {
+    return structuredClone(value);
+  }
 
   private ensureInitialized(): void {
     if (!this.initialized) {

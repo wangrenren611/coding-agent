@@ -92,35 +92,101 @@ function ingestStreamMessage(state: AgentChatState, message: AgentMessage): Agen
 }
 
 function ingestTextEvent(state: AgentChatState, message: Extract<AgentMessage, { type: AgentMessageType.TEXT_START | AgentMessageType.TEXT_DELTA | AgentMessageType.TEXT_COMPLETE }>): AgentChatState {
-  // 统一使用 "text" 作为 prefix，避免同一组消息被拆分成多个
-  // 对于 TEXT_DELTA 和 TEXT_COMPLETE，如果没有 msgId，使用最新创建的 text 消息 ID
-  let msgId: string;
-  if (message.msgId) {
-    msgId = message.msgId;
-  } else if (message.type === AgentMessageType.TEXT_START) {
-    msgId = resolveMessageId(state, undefined, "text", message.timestamp);
-  } else {
-    // TEXT_DELTA 或 TEXT_COMPLETE 没有 msgId，使用状态中最新创建的 text 消息 ID
-    msgId = state.latestAssistantMessageId || `text-${message.timestamp}`;
-  }
+  const msgId = resolveTextMessageId(state, message);
   
   const ensured = ensureAssistantMessage(state, msgId, message.timestamp);
   const assistant = ensured.state.messages[ensured.index];
   if (assistant.kind !== "assistant") return ensured.state;
+  const incomingContent = message.payload.content || "";
 
+  // 对于流式输出，只在 TEXT_COMPLETE 时更新 updatedAt
+  const shouldUpdateTimestamp = message.type === AgentMessageType.TEXT_COMPLETE;
+  
   const nextAssistant: UIAssistantMessage = {
     ...assistant,
     content: message.type === AgentMessageType.TEXT_DELTA
-      ? assistant.content + (message.payload.content || "")
-      : (message.payload.content || assistant.content),
+      ? mergeTextDelta(assistant.content, incomingContent)
+      : mergeTextComplete(assistant.content, incomingContent),
     phase: message.type === AgentMessageType.TEXT_COMPLETE ? "completed" : "streaming",
-    updatedAt: message.timestamp,
+    updatedAt: shouldUpdateTimestamp ? message.timestamp : assistant.updatedAt,
   };
 
   return {
     ...replaceAssistantAt(ensured.state, ensured.index, msgId, nextAssistant),
     isStreaming: message.type !== AgentMessageType.TEXT_COMPLETE,
   };
+}
+
+function resolveTextMessageId(
+  state: AgentChatState,
+  message: Extract<AgentMessage, { type: AgentMessageType.TEXT_START | AgentMessageType.TEXT_DELTA | AgentMessageType.TEXT_COMPLETE }>
+): string {
+  const latestId = state.latestAssistantMessageId;
+  const latestIndex = latestId ? state.messageIndexByMsgId[latestId] : undefined;
+  const latestMessage = latestIndex !== undefined ? state.messages[latestIndex] : undefined;
+
+  if (message.msgId) {
+    const existingIndex = state.messageIndexByMsgId[message.msgId];
+    if (existingIndex !== undefined) return message.msgId;
+
+    // Defensive merge for providers that switch msgId mid-stream.
+    if (latestId && latestMessage?.kind === "assistant") {
+      if (message.type !== AgentMessageType.TEXT_START) return latestId;
+      if (message.type === AgentMessageType.TEXT_START && latestMessage.phase === "streaming") return latestId;
+    }
+
+    return message.msgId;
+  }
+
+  if (message.type === AgentMessageType.TEXT_START) {
+    return resolveMessageId(state, undefined, "text", message.timestamp);
+  }
+
+  return latestId || `text-${message.timestamp}`;
+}
+
+function mergeTextDelta(current: string, incoming: string): string {
+  if (!incoming) return current;
+  if (!current) return incoming;
+  if (incoming === current) return current;
+
+  // Some providers emit cumulative snapshots on each delta event.
+  if (incoming.startsWith(current)) return incoming;
+  if (current.startsWith(incoming)) return current;
+
+  // Handle cumulative snapshots that prepend only whitespace/newline.
+  const containedAt = incoming.indexOf(current);
+  if (containedAt >= 0 && !incoming.slice(0, containedAt).trim()) return incoming;
+
+  // Ignore duplicated retransmission chunks.
+  if (current.includes(incoming)) return current;
+
+  // Merge by suffix/prefix overlap to avoid duplicated segments.
+  const overlap = findSuffixPrefixOverlap(current, incoming);
+  if (overlap > 0) return current + incoming.slice(overlap);
+
+  return current + incoming;
+}
+
+function mergeTextComplete(current: string, incoming: string): string {
+  if (!incoming) return current;
+  if (!current) return incoming;
+  if (incoming === current) return current;
+
+  const merged = mergeTextDelta(current, incoming);
+
+  // Completion event should prefer the richest content.
+  if (incoming.length >= merged.length) return incoming;
+
+  return merged;
+}
+
+function findSuffixPrefixOverlap(left: string, right: string): number {
+  const max = Math.min(left.length, right.length);
+  for (let size = max; size > 0; size -= 1) {
+    if (left.slice(-size) === right.slice(0, size)) return size;
+  }
+  return 0;
 }
 
 function ingestToolCreated(state: AgentChatState, message: Extract<AgentMessage, { type: AgentMessageType.TOOL_CALL_CREATED }>): AgentChatState {
@@ -135,9 +201,9 @@ function ingestToolCreated(state: AgentChatState, message: Extract<AgentMessage,
   for (const toolCall of message.payload.tool_calls) {
     const callId = toDisplayString(toolCall.callId);
     if (!callId) continue;
-    const existingIndex = nextToolCalls.findIndex((item) => item.callId === callId);
     const toolName = toDisplayString(toolCall.toolName);
     const args = toDisplayString(toolCall.args);
+    const existingIndex = nextToolCalls.findIndex((item) => item.callId === callId);
     if (existingIndex >= 0) {
       const existing = nextToolCalls[existingIndex];
       nextToolCalls[existingIndex] = {

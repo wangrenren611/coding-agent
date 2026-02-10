@@ -7,24 +7,16 @@ function createMockMemoryManager(overrides: Partial<IMemoryManager> = {}): IMemo
     createSession: vi.fn(async (sessionId?: string) => sessionId || 'new-session'),
     getSession: vi.fn(async () => null as SessionData | null),
     querySessions: vi.fn(async () => []),
-    updateSession: vi.fn(async () => undefined),
-    deleteSession: vi.fn(async () => undefined),
-    archiveSession: vi.fn(async () => undefined),
     getCurrentContext: vi.fn(async () => null),
     saveCurrentContext: vi.fn(async () => undefined),
     addMessageToContext: vi.fn(async () => undefined),
-    addMessagesToContext: vi.fn(async () => undefined),
     updateMessageInContext: vi.fn(async () => undefined),
     clearContext: vi.fn(async () => undefined),
     compactContext: vi.fn(async () => {
       throw new Error('not implemented');
     }),
     getFullHistory: vi.fn(async () => []),
-    addMessageToHistory: vi.fn(async () => undefined),
-    addMessagesToHistory: vi.fn(async () => undefined),
-    getArchivedMessages: vi.fn(async () => []),
     getCompactionRecords: vi.fn(async () => []),
-    getCompactionRecord: vi.fn(async () => null),
     saveTask: vi.fn(async () => undefined),
     getTask: vi.fn(async () => null),
     queryTasks: vi.fn(async () => []),
@@ -35,7 +27,6 @@ function createMockMemoryManager(overrides: Partial<IMemoryManager> = {}): IMemo
     deleteSubTaskRun: vi.fn(async () => undefined),
     initialize: vi.fn(async () => undefined),
     close: vi.fn(async () => undefined),
-    isHealthy: vi.fn(async () => true),
   };
 
   return Object.assign(base, overrides);

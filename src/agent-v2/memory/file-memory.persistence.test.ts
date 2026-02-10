@@ -34,6 +34,13 @@ describe('FileMemoryManager persistence', () => {
     await fs.rm(tempDir, { recursive: true, force: true });
   });
 
+  it('should reject unsupported memory manager types', () => {
+    expect(() => createMemoryManager({
+      type: 'sqlite',
+      connectionString: tempDir,
+    })).toThrow('Unsupported memory manager type: sqlite');
+  });
+
   it('should upsert streamed assistant message instead of duplicating history entries', async () => {
     const sessionId = await memoryManager.createSession('session-stream-upsert', 'test system');
     const usage = createUsage(28);
@@ -193,10 +200,9 @@ describe('FileMemoryManager persistence', () => {
     expect(deleted).toBeNull();
   });
 
-  it('should migrate legacy sub task run files out of tasks directory', async () => {
+  it('should ignore legacy sub task run files in tasks directory', async () => {
     const runId = 'legacy-run-1';
     const legacyDir = path.join(tempDir, 'tasks');
-    const newDir = path.join(tempDir, 'subtask-runs');
     await fs.mkdir(legacyDir, { recursive: true });
 
     const legacyFile = path.join(legacyDir, `subtask-run-${encodeURIComponent(runId)}.json`);
@@ -227,13 +233,51 @@ describe('FileMemoryManager persistence', () => {
     });
     await memoryManager.initialize();
 
-    const migrated = await memoryManager.getSubTaskRun(runId);
-    expect(migrated).toBeTruthy();
-    expect(migrated?.messageCount).toBe(1);
-    expect(migrated?.messages).toBeUndefined();
+    const loaded = await memoryManager.getSubTaskRun(runId);
+    expect(loaded).toBeNull();
+    await expect(fs.access(legacyFile)).resolves.toBeUndefined();
+  });
 
-    const migratedFile = path.join(newDir, `subtask-run-${encodeURIComponent(runId)}.json`);
-    await expect(fs.access(migratedFile)).resolves.toBeUndefined();
-    await expect(fs.access(legacyFile)).rejects.toThrow();
+  it('should preserve system message and keep session stats consistent after compaction', async () => {
+    const sessionId = await memoryManager.createSession('session-compaction-system', 'system prompt');
+
+    await memoryManager.addMessageToContext(sessionId, {
+      messageId: 'user-1',
+      role: 'user',
+      content: 'q1',
+      type: 'text',
+    });
+    await memoryManager.addMessageToContext(sessionId, {
+      messageId: 'assistant-1',
+      role: 'assistant',
+      content: 'a1',
+      type: 'text',
+    });
+    await memoryManager.addMessageToContext(sessionId, {
+      messageId: 'user-2',
+      role: 'user',
+      content: 'q2',
+      type: 'text',
+    });
+
+    await memoryManager.compactContext(sessionId, {
+      keepLastN: 1,
+      summaryMessage: {
+        messageId: 'summary-1',
+        role: 'assistant',
+        type: 'summary',
+        content: 'summary',
+      },
+      reason: 'manual',
+    });
+
+    const context = await memoryManager.getCurrentContext(sessionId);
+    expect(context).toBeTruthy();
+    expect(context?.messages[0].role).toBe('system');
+    expect(context?.messages[1].messageId).toBe('summary-1');
+
+    const history = await memoryManager.getFullHistory({ sessionId });
+    const session = await memoryManager.getSession(sessionId);
+    expect(session?.totalMessages).toBe(history.length);
   });
 });

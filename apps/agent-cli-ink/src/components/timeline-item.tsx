@@ -57,7 +57,7 @@ export function TimelineItem({ entry }: { entry: TimelineEntry }): React.JSX.Ele
     const content = sanitizeForTerminal(toDisplayString(entry.text)).trim() || "...";
     return (
       <Box flexDirection="row" marginBottom={1}>
-        <Text><SpinnerDot state={entry.loading ? "running" : "idle"} /></Text>
+        <Text><SpinnerDot state={entry.loading ? "running" : "idle"} animate={false} /></Text>
         <Box flexDirection="column" marginLeft={1}>
           <Markdown content={content} isStreaming={entry.loading} />
         </Box>

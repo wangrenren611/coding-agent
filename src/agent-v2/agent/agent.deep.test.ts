@@ -161,24 +161,16 @@ function createMemoryManager(overrides: Partial<IMemoryManager> = {}): IMemoryMa
     createSession: vi.fn(async (sessionId?: string) => sessionId || 'new-session'),
     getSession: vi.fn(async () => null as SessionData | null),
     querySessions: vi.fn(async () => []),
-    updateSession: vi.fn(async () => undefined),
-    deleteSession: vi.fn(async () => undefined),
-    archiveSession: vi.fn(async () => undefined),
     getCurrentContext: vi.fn(async () => null as CurrentContext | null),
     saveCurrentContext: vi.fn(async () => undefined),
     addMessageToContext: vi.fn(async () => undefined),
-    addMessagesToContext: vi.fn(async () => undefined),
     updateMessageInContext: vi.fn(async () => undefined),
     clearContext: vi.fn(async () => undefined),
     compactContext: vi.fn(async () => {
       throw new Error('not implemented');
     }),
     getFullHistory: vi.fn(async () => []),
-    addMessageToHistory: vi.fn(async () => undefined),
-    addMessagesToHistory: vi.fn(async () => undefined),
-    getArchivedMessages: vi.fn(async () => []),
     getCompactionRecords: vi.fn(async () => []),
-    getCompactionRecord: vi.fn(async () => null),
     saveTask: vi.fn(async () => undefined),
     getTask: vi.fn(async () => null),
     queryTasks: vi.fn(async () => []),
@@ -189,7 +181,6 @@ function createMemoryManager(overrides: Partial<IMemoryManager> = {}): IMemoryMa
     deleteSubTaskRun: vi.fn(async () => undefined),
     initialize: vi.fn(async () => undefined),
     close: vi.fn(async () => undefined),
-    isHealthy: vi.fn(async () => true),
   };
 
   return Object.assign(base, overrides);
@@ -526,13 +517,100 @@ describe('Agent deep behavior tests', () => {
     expect(result.content).toBe('recovered');
     expect(attempt).toBe(1);
     expect(provider.calls).toHaveLength(2);
-    expect(timeProvider.sleeps).toEqual([3000]);
+    expect(timeProvider.sleeps).toEqual([1000 * 60 * 10]);
     expect(agent.getRetryCount()).toBe(0);
 
     const retryStatus = streamMessages.find((m) => {
       return m.type === AgentMessageType.STATUS && m.payload.state === AgentStatus.RETRYING;
     });
     expect(retryStatus).toBeDefined();
+  });
+
+  it('should use configured retryDelayMs for retryable errors', async () => {
+    const timeProvider = new MockTimeProvider();
+    const provider = new ScriptedProvider([
+      async () => {
+        throw new LLMRetryableError('temporary failure');
+      },
+      async () => textResponse('recovered'),
+    ]);
+
+    const toolRegistry = createToolRegistryStub([]);
+    const agent = new Agent({
+      provider,
+      toolRegistry,
+      stream: false,
+      timeProvider,
+      maxRetries: 3,
+      retryDelayMs: 5000,
+    });
+
+    const result = await agent.execute('retry with custom delay');
+    expect(result.content).toBe('recovered');
+    expect(timeProvider.sleeps).toEqual([5000]);
+  });
+
+  it('should honor retryAfter from LLMRetryableError', async () => {
+    const timeProvider = new MockTimeProvider();
+    const provider = new ScriptedProvider([
+      async () => {
+        throw new LLMRetryableError('rate limited', 15000);
+      },
+      async () => textResponse('recovered'),
+    ]);
+
+    const toolRegistry = createToolRegistryStub([]);
+    const agent = new Agent({
+      provider,
+      toolRegistry,
+      stream: false,
+      timeProvider,
+      maxRetries: 3,
+    });
+
+    const result = await agent.execute('retry with retry-after');
+    expect(result.content).toBe('recovered');
+    expect(timeProvider.sleeps).toEqual([15000]);
+  });
+
+  it('should use requestTimeout from Agent options instead of provider default timeout', async () => {
+    const provider = new ScriptedProvider([
+      async (_messages, options) => {
+        return await new Promise<LLMResponse>((resolve, reject) => {
+          const signal = options?.abortSignal;
+          const timer = setTimeout(() => resolve(textResponse('late response')), 200);
+
+          if (!signal) {
+            clearTimeout(timer);
+            reject(new Error('Missing abort signal'));
+            return;
+          }
+
+          const onAbort = () => {
+            clearTimeout(timer);
+            reject(new LLMRetryableError('request aborted by timeout'));
+          };
+
+          if (signal.aborted) {
+            onAbort();
+            return;
+          }
+
+          signal.addEventListener('abort', onAbort, { once: true });
+        });
+      },
+    ], 10_000);
+
+    const toolRegistry = createToolRegistryStub([]);
+    const agent = new Agent({
+      provider,
+      toolRegistry,
+      stream: false,
+      maxRetries: 0,
+      requestTimeout: 20,
+    });
+
+    await expect(agent.execute('timeout override')).rejects.toThrow('maximum retries (0)');
   });
 
   it('should immediately compensate empty stop response without backoff sleep', async () => {
@@ -682,7 +760,7 @@ describe('Agent deep behavior tests', () => {
 
     expect(agent.getStatus()).toBe(AgentStatus.FAILED);
     expect(provider.calls).toHaveLength(2);
-    expect(timeProvider.sleeps).toEqual([3000]);
+    expect(timeProvider.sleeps).toEqual([1000 * 60 * 10]);
     expect(taskFailedEvents).toHaveLength(1);
     expect(taskFailedEvents[0]).toMatchObject({
       totalLoops: 2,

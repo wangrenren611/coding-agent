@@ -1,11 +1,10 @@
 /**
  * MemoryManager 类型定义
- * 提供可扩展的存储接口，支持消息、任务等数据的持久化
  *
  * 核心概念：
  * 1. 当前上下文 (Current Context) - 用于 LLM 对话的活跃消息，可能被压缩
  * 2. 完整历史 (Full History) - 所有原始消息，包含被压缩替换的消息
- * 3. 压缩记录 (Compaction Records) - 记录何时发生了压缩，原始消息归档位置
+ * 3. 压缩记录 (Compaction Records) - 记录何时发生了压缩以及影响范围
  */
 
 import type { Message } from '../session/types';
@@ -20,11 +19,6 @@ export interface StorageItem {
   createdAt: number;
   updatedAt: number;
 }
-
-/**
- * 消息来源类型
- */
-export type MessageSource = 'user' | 'assistant' | 'system' | 'tool' | 'summary';
 
 /**
  * 历史消息项 - 包含完整元数据
@@ -58,8 +52,6 @@ export interface CompactionRecord extends StorageItem {
   summaryMessageId?: string;
   /** 压缩原因 */
   reason: 'token_limit' | 'manual' | 'auto';
-  /** 原始消息存储位置 */
-  archiveLocation?: string;
   /** 元数据 */
   metadata?: {
     tokenCountBefore?: number;
@@ -153,13 +145,13 @@ export interface SubTaskRunData extends StorageItem {
   error?: string;
   /** 子会话消息数量（实际消息存于 contexts/histories） */
   messageCount?: number;
-  /** 兼容历史数据：旧版本可能会直接内嵌 messages */
+  /** 兼容旧数据时可能存在，持久化时会被移除 */
   messages?: Message[];
   metadata?: Record<string, unknown>;
 }
 
 /**
- * 查询选项接口
+ * 通用查询选项
  */
 export interface QueryOptions {
   limit?: number;
@@ -169,12 +161,12 @@ export interface QueryOptions {
 }
 
 /**
- * 历史查询选项接口
+ * 历史查询选项
  */
 export interface HistoryQueryOptions {
   limit?: number;
   offset?: number;
-  orderBy?: 'createdAt' | 'updatedAt' | 'sequence';
+  orderBy?: 'sequence';
   orderDirection?: 'asc' | 'desc';
 }
 
@@ -229,7 +221,7 @@ export interface HistoryFilter {
  * 压缩上下文参数
  */
 export interface CompactContextOptions {
-  /** 保留最近 N 条消息 */
+  /** 保留最近 N 条非 system 消息 */
   keepLastN: number;
   /** 摘要消息内容 */
   summaryMessage: Message;
@@ -245,71 +237,41 @@ export interface CompactContextOptions {
 
 /**
  * MemoryManager 接口定义
- * 所有存储实现必须遵循此接口
  */
 export interface IMemoryManager {
   // ==================== 会话管理 ====================
 
   /**
    * 创建新会话
-   * @param sessionId 可选的会话ID，不提供则自动生成
+   * @param sessionId 可选会话ID，不提供则自动生成
    * @param systemPrompt 系统提示词
-   * @returns 创建的会话ID
    */
   createSession(sessionId: string | undefined, systemPrompt: string): Promise<string>;
 
   /**
    * 获取会话信息
-   * @param sessionId 会话ID
    */
   getSession(sessionId: string): Promise<SessionData | null>;
 
   /**
    * 查询会话列表
-   * @param filter 过滤条件
-   * @param options 查询选项
    */
   querySessions(filter?: SessionFilter, options?: QueryOptions): Promise<SessionData[]>;
-
-  /**
-   * 更新会话信息
-   * @param sessionId 会话ID
-   * @param updates 更新的字段
-   */
-  updateSession(sessionId: string, updates: Partial<Omit<SessionData, 'id' | 'createdAt' | 'updatedAt'>>): Promise<void>;
-
-  /**
-   * 删除会话（包括所有关联数据）
-   * @param sessionId 会话ID
-   */
-  deleteSession(sessionId: string): Promise<void>;
-
-  /**
-   * 归档会话（保留数据但标记为非活跃）
-   * @param sessionId 会话ID
-   */
-  archiveSession(sessionId: string): Promise<void>;
 
   // ==================== 当前上下文管理 ====================
 
   /**
-   * 获取当前上下文（用于 LLM 对话）
-   * @param sessionId 会话ID
-   * @returns 当前上下文数据
+   * 获取当前上下文
    */
   getCurrentContext(sessionId: string): Promise<CurrentContext | null>;
 
   /**
    * 保存当前上下文
-   * @param context 上下文数据
    */
   saveCurrentContext(context: Omit<CurrentContext, 'createdAt' | 'updatedAt'>): Promise<void>;
 
   /**
    * 添加消息到当前上下文
-   * @param sessionId 会话ID
-   * @param message 消息对象
-   * @param options 可选配置
    */
   addMessageToContext(
     sessionId: string,
@@ -318,105 +280,51 @@ export interface IMemoryManager {
   ): Promise<void>;
 
   /**
-   * 批量添加消息到当前上下文
-   * @param sessionId 会话ID
-   * @param messages 消息数组
-   * @param options 可选配置
-   */
-  addMessagesToContext(
-    sessionId: string,
-    messages: Message[],
-    options?: { addToHistory?: boolean }
-  ): Promise<void>;
-
-  /**
    * 更新当前上下文中的消息
-   * @param sessionId 会话ID
-   * @param messageId 消息ID
-   * @param updates 更新的字段
    */
   updateMessageInContext(sessionId: string, messageId: string, updates: Partial<Message>): Promise<void>;
 
   /**
    * 清空当前上下文（保留系统消息）
-   * @param sessionId 会话ID
    */
   clearContext(sessionId: string): Promise<void>;
 
   /**
    * 压缩当前上下文
-   * 将 keepLastN 之前的消息归档到历史，替换为摘要消息
-   * @param sessionId 会话ID
-   * @param options 压缩选项
-   * @returns 压缩记录
    */
   compactContext(sessionId: string, options: CompactContextOptions): Promise<CompactionRecord>;
 
   // ==================== 完整历史管理 ====================
 
   /**
-   * 获取完整历史消息（按时间顺序）
-   * @param filter 过滤条件
-   * @param options 查询选项
+   * 获取完整历史消息
    */
-  getFullHistory(filter: HistoryFilter, options?: QueryOptions): Promise<HistoryMessage[]>;
-
-  /**
-   * 添加消息到完整历史
-   * @param sessionId 会话ID
-   * @param message 消息对象
-   */
-  addMessageToHistory(sessionId: string, message: HistoryMessage): Promise<void>;
-
-  /**
-   * 批量添加消息到完整历史
-   * @param sessionId 会话ID
-   * @param messages 消息数组
-   */
-  addMessagesToHistory(sessionId: string, messages: HistoryMessage[]): Promise<void>;
-
-  /**
-   * 获取特定压缩记录归档的原始消息
-   * @param recordId 压缩记录ID
-   */
-  getArchivedMessages(recordId: string): Promise<HistoryMessage[]>;
+  getFullHistory(filter: HistoryFilter, options?: HistoryQueryOptions): Promise<HistoryMessage[]>;
 
   /**
    * 获取会话的所有压缩记录
-   * @param sessionId 会话ID
    */
   getCompactionRecords(sessionId: string): Promise<CompactionRecord[]>;
-
-  /**
-   * 获取特定压缩记录
-   * @param recordId 压缩记录ID
-   */
-  getCompactionRecord(recordId: string): Promise<CompactionRecord | null>;
 
   // ==================== 任务管理 ====================
 
   /**
    * 保存或更新任务
-   * @param task 任务数据
    */
   saveTask(task: Omit<TaskData, 'createdAt' | 'updatedAt'>): Promise<void>;
 
   /**
    * 获取任务
-   * @param taskId 任务ID
    */
   getTask(taskId: string): Promise<TaskData | null>;
 
   /**
    * 查询任务列表
-   * @param filter 过滤条件
-   * @param options 查询选项
    */
   queryTasks(filter?: TaskFilter, options?: QueryOptions): Promise<TaskData[]>;
 
   /**
    * 删除任务
-   * @param taskId 任务ID
    */
   deleteTask(taskId: string): Promise<void>;
 
@@ -424,60 +332,41 @@ export interface IMemoryManager {
 
   /**
    * 保存或更新子任务运行记录
-   * @param run 子任务运行数据
    */
   saveSubTaskRun(run: Omit<SubTaskRunData, 'createdAt' | 'updatedAt'>): Promise<void>;
 
   /**
    * 获取子任务运行记录
-   * @param runId 运行 ID
    */
   getSubTaskRun(runId: string): Promise<SubTaskRunData | null>;
 
   /**
    * 查询子任务运行记录
-   * @param filter 过滤条件
-   * @param options 查询选项
    */
   querySubTaskRuns(filter?: SubTaskRunFilter, options?: QueryOptions): Promise<SubTaskRunData[]>;
 
   /**
    * 删除子任务运行记录
-   * @param runId 运行 ID
    */
   deleteSubTaskRun(runId: string): Promise<void>;
 
-  // ==================== 通用操作 ====================
+  // ==================== 生命周期 ====================
 
-  /**
-   * 初始化存储
-   */
+  /** 初始化存储 */
   initialize(): Promise<void>;
 
-  /**
-   * 关闭存储连接/清理资源
-   */
+  /** 关闭存储并清理资源 */
   close(): Promise<void>;
-
-  /**
-   * 检查存储是否可用
-   */
-  isHealthy(): Promise<boolean>;
 }
 
 /**
  * MemoryManager 配置选项
  */
 export interface MemoryManagerOptions {
-  /** 存储类型 */
-  type: 'file' | 'sqlite' | 'memory' | string;
+  /** 存储类型，当前仅支持 file */
+  type: 'file' | string;
   /** 存储路径/连接字符串 */
   connectionString?: string;
   /** 其他配置参数 */
   config?: Record<string, unknown>;
 }
-
-/**
- * MemoryManager 工厂函数类型
- */
-export type MemoryManagerFactory = (options: MemoryManagerOptions) => IMemoryManager;

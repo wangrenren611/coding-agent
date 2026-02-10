@@ -2,6 +2,7 @@ import {
     Chunk,
     InputContentPart,
     LLMError,
+    LLMRetryableError,
     isAbortedError,
     isRetryableError,
     LLMGenerateOptions,
@@ -84,6 +85,9 @@ export class Agent {
     private timeProvider: ITimeProvider;
     private loopMax: number;
     private maxCompensationRetries: number;
+    private readonly defaultRetryDelayMs: number;
+    private readonly requestTimeoutMs?: number;
+    private nextRetryDelayMs: number;
 
     // 流式处理
     private streamProcessor: StreamProcessor;
@@ -115,6 +119,9 @@ export class Agent {
         this.maxBufferSize = config.maxBufferSize ?? 100000;
         this.loopMax = 3000;
         this.maxCompensationRetries = 1;
+        this.defaultRetryDelayMs = this.normalizePositiveMs(config.retryDelayMs, 1000 * 60 * 10);
+        this.requestTimeoutMs = this.normalizeOptionalPositiveMs(config.requestTimeout);
+        this.nextRetryDelayMs = this.defaultRetryDelayMs;
 
         // 初始化流式处理器
         this.streamProcessor = new StreamProcessor({
@@ -371,6 +378,7 @@ export class Agent {
         this.loopCount = 0;
         this.retryCount = 0;
         this.compensationRetryCount = 0;
+        this.nextRetryDelayMs = this.defaultRetryDelayMs;
         this.lastFailure = undefined;
 
         this.session.addMessage(createUserMessage(query));
@@ -530,6 +538,7 @@ export class Agent {
                 await this.executeLLMCall();
                 this.retryCount = 0;
                 this.compensationRetryCount = 0;
+                this.nextRetryDelayMs = this.defaultRetryDelayMs;
             } catch (error) {
                 if (error instanceof CompensationRetryError) {
                     if (this.compensationRetryCount >= this.maxCompensationRetries) {
@@ -549,13 +558,14 @@ export class Agent {
                     throw error;
                 }
                 this.retryCount++;
+                this.nextRetryDelayMs = this.resolveRetryDelay(error);
             }
         }
     }
 
     private async handleRetry(): Promise<void> {
         this.status = AgentStatus.RETRYING;
-        await this.timeProvider.sleep(3000);
+        await this.timeProvider.sleep(this.nextRetryDelayMs);
         this.emitStatus(
             AgentStatus.RETRYING,
             `Agent is retrying... (${this.retryCount}/${this.maxRetries})`
@@ -564,6 +574,24 @@ export class Agent {
 
     private shouldRetry(error: unknown): boolean {
         return !(error instanceof AgentError || !isRetryableError(error));
+    }
+
+    private resolveRetryDelay(error: unknown): number {
+        if (error instanceof LLMRetryableError && typeof error.retryAfter === 'number' && error.retryAfter > 0) {
+            return error.retryAfter;
+        }
+        return this.defaultRetryDelayMs;
+    }
+
+    private normalizeOptionalPositiveMs(value: number | undefined): number | undefined {
+        if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+            return undefined;
+        }
+        return value;
+    }
+
+    private normalizePositiveMs(value: number | undefined, fallback: number): number {
+        return this.normalizeOptionalPositiveMs(value) ?? fallback;
     }
 
     // ==================== LLM 调用 ====================
@@ -575,9 +603,10 @@ export class Agent {
         this.streamProcessor.reset();
 
         const messageId = uuid();
+        const requestTimeout = this.requestTimeoutMs ?? this.provider.getTimeTimeout();
         const timeoutSignal = AbortSignal.any([
             this.abortController.signal,
-            AbortSignal.timeout(this.provider.getTimeTimeout()),
+            AbortSignal.timeout(requestTimeout),
         ]);
 
         const messages = this.getMessagesForLLM();

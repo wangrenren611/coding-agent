@@ -57,8 +57,10 @@ export interface AgentOptions{
     toolRegistry?: ToolRegistry;
     /** 最大重试次数（默认 10） */
     maxRetries?: number;
-    /** 单次 LLM 请求超时时间（毫秒，默认 60000） */
+    /** 单次 LLM 请求超时时间（毫秒，默认使用 provider 配置） */
     requestTimeout?: number;
+    /** 重试等待时间（毫秒，默认 1000 * 60 * 10） */
+    retryDelayMs?: number;
     /** 是否启用流式输出 */
     stream?: boolean;
     /** 流式输出回调函数 - 统一的消息接口 */

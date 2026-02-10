@@ -1,22 +1,21 @@
 /**
  * MemoryManager 模块导出
- * 提供统一的存储接口和默认实现
  */
 
 export * from './types';
-export * from './file-memory';
+export { FileMemoryManager } from './file-memory';
 
-import { IMemoryManager, MemoryManagerOptions } from './types';
+import type { IMemoryManager, MemoryManagerOptions } from './types';
 import { FileMemoryManager } from './file-memory';
 
 /**
  * MemoryManager 工厂函数
- * 根据配置创建对应的存储实现
+ * 当前仅支持 file 实现。
  */
 export function createMemoryManager(options: MemoryManagerOptions): IMemoryManager {
-  switch (options.type) {
-    case 'file':
-    default:
-      return new FileMemoryManager(options);
+  if (options.type !== 'file') {
+    throw new Error(`Unsupported memory manager type: ${options.type}`);
   }
+
+  return new FileMemoryManager(options);
 }
