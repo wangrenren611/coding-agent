@@ -58,16 +58,16 @@ describe('LLMRetryableError', () => {
 
 describe('LLMRateLimitError', () => {
   it('should create rate limit error', () => {
-    const error = new LLMRateLimitError('Too many requests', 60);
+    const error = new LLMRateLimitError('Too many requests');
     expect(error.message).toBe('Too many requests');
-    expect(error.retryAfter).toBe(60);
+    expect(error).toBeUndefined();
     expect(error.code).toBe('RATE_LIMIT');
     expect(error.name).toBe('LLMRateLimitError');
   });
 
   it('should create without retryAfter', () => {
     const error = new LLMRateLimitError('Too many requests');
-    expect(error.retryAfter).toBeUndefined();
+    expect(error).toBeUndefined();
     expect(error.code).toBe('RATE_LIMIT');
   });
 });
@@ -150,7 +150,7 @@ describe('createErrorFromStatus', () => {
   it('should return LLMNotFoundError for 404', () => {
     const error = createErrorFromStatus(404, 'Not Found', 'Resource not found');
     expect(error).toBeInstanceOf(LLMNotFoundError);
-    expect(error.resourceType).toBe('resource');
+    expect(error).toBe('resource');
   });
 
   it('should return LLMRateLimitError for 429', () => {

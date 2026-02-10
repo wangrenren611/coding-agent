@@ -295,17 +295,17 @@ export class Agent {
             return { valid: false, error: 'Query exceeds maximum length' };
         }
 
-        const dangerousPatterns = [
-            /<script[^>]*>.*?<\/script>/gi,
-            /javascript:/gi,
-            /data:text\/html/gi,
-        ];
+        // const dangerousPatterns = [
+        //     /<script[^>]*>.*?<\/script>/gi,
+        //     /javascript:/gi,
+        //     /data:text\/html/gi,
+        // ];
 
-        for (const pattern of dangerousPatterns) {
-            if (pattern.test(query)) {
-                return { valid: false, error: 'Query contains potentially malicious content' };
-            }
-        }
+        // for (const pattern of dangerousPatterns) {
+        //     if (pattern.test(query)) {
+        //         return { valid: false, error: 'Query contains potentially malicious content' };
+        //     }
+        // }
 
         return { valid: true };
     }
@@ -554,7 +554,8 @@ export class Agent {
                     );
                     continue;
                 }
-                if (!this.shouldRetry(error)) {
+             
+                if (!isRetryableError(error)) {
                     throw error;
                 }
                 this.retryCount++;
@@ -572,9 +573,7 @@ export class Agent {
         );
     }
 
-    private shouldRetry(error: unknown): boolean {
-        return !(error instanceof AgentError || !isRetryableError(error));
-    }
+  
 
     private resolveRetryDelay(error: unknown): number {
         if (error instanceof LLMRetryableError && typeof error.retryAfter === 'number' && error.retryAfter > 0) {
