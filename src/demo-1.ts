@@ -73,12 +73,12 @@ async function demo1() {
     let agent: Agent | undefined;
     try {
         agent = new Agent({
-            provider: ProviderRegistry.createFromEnv('glm-4.7'),
+            provider: ProviderRegistry.createFromEnv('glm-5.0'),
             systemPrompt: operatorPrompt({
                 directory: process.cwd(),
                 language: 'Chinese',
             }),
-        //    sessionId: '93a7eea8-c0b9-467a-81f9-a2ef0efbdfb0',
+           sessionId: 'c8d9bb39-242e-4cc7-a32d-a862c905421b',
             stream: true,
             memoryManager,  // 传入 memoryManager 启用持久化
             // 只需设置这一个回调，就能获取所有信息
@@ -86,11 +86,11 @@ async function demo1() {
         });
 
         // EventBus 仍然可用，用于其他监听场景（如日志记录）
-        agent.on(EventType.TASK_START, (data) => {
-            // 可以在这里添加额外的日志记录
+        agent.on(EventType.TASK_RETRY, (data) => {
+           console.log('任务重试中:', data);
         });
 
-        const response = await agent.execute(`深度分析https://www.anthropic.com/engineering/multi-agent-research-system 这篇文章文章内容，中文输出详细md文档`);
+      const response = await agent.execute(`当前目录是否内存溢出的分享`);
         console.log('\n\n最终响应:', response);
 
         // 输出会话 ID，用于后续恢复会话

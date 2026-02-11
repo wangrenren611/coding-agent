@@ -35,7 +35,7 @@ export class LLMRetryableError extends LLMError {
     }
 }
 
-export class LLMRateLimitError extends LLMError {
+export class LLMRateLimitError extends LLMRetryableError {
     constructor(message: string) {
         super(message);
         this.name = 'LLMRateLimitError';

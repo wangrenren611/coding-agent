@@ -24,6 +24,20 @@ export const MODEL_DEFINITIONS: Record<ModelId, Omit<ModelConfig, 'apiKey'>> = {
         LLMMAX_TOKENS: 200 * 1000,
         features: ['streaming', 'function-calling', 'vision'],
     },
+     // GLM 系列
+    'glm-5.0': {
+        id: 'glm-5.0',
+        provider: 'glm',
+        name: 'GLM-5.0',
+        baseURL: 'https://open.bigmodel.cn/api/paas/v4',
+        endpointPath: '/chat/completions',
+        envApiKey: 'GLM_API_KEY',
+        envBaseURL: 'GLM_API_BASE',
+        model: 'GLM-4.7',
+        max_tokens: 8000,
+        LLMMAX_TOKENS: 200 * 1000,
+        features: ['streaming', 'function-calling', 'vision'],
+    },
     // MiniMax 系列
     'minimax-2.1': {
         id: 'minimax-2.1',

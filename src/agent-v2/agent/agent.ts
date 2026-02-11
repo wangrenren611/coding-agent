@@ -295,18 +295,6 @@ export class Agent {
             return { valid: false, error: 'Query exceeds maximum length' };
         }
 
-        // const dangerousPatterns = [
-        //     /<script[^>]*>.*?<\/script>/gi,
-        //     /javascript:/gi,
-        //     /data:text\/html/gi,
-        // ];
-
-        // for (const pattern of dangerousPatterns) {
-        //     if (pattern.test(query)) {
-        //         return { valid: false, error: 'Query contains potentially malicious content' };
-        //     }
-        // }
-
         return { valid: true };
     }
 

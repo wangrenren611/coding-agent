@@ -20,7 +20,9 @@ export type ModelId =
     // Kimi 系列
     | 'kimi-k2.5'
     // DeepSeek 系列
-    | 'deepseek-chat';
+    | 'deepseek-chat'
+    // GLM 5.0 系列
+    | 'glm-5.0';
 
 /**
  * 模型配置
