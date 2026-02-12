@@ -5,6 +5,7 @@
  * 1. 所有写操作立即落盘，避免隐式后台状态
  * 2. 上下文与历史保持一致（尤其是流式 message upsert 与压缩）
  * 3. 去除兼容迁移和元数据噪音，降低维护复杂度
+ * 4. 持久化采用原子写 + 备份恢复，避免异常中断导致空文件
  */
 
 import * as fs from 'fs/promises';
@@ -57,6 +58,8 @@ export class FileMemoryManager implements IMemoryManager {
   private readonly subTaskRunsPath: string;
 
   private initialized = false;
+  private readonly fileOperationQueue = new Map<string, Promise<void>>();
+  private readonly pendingFileOperations = new Set<Promise<void>>();
 
   private readonly cache: MemoryCache = {
     sessions: new Map(),
@@ -98,6 +101,9 @@ export class FileMemoryManager implements IMemoryManager {
   }
 
   async close(): Promise<void> {
+    if (this.pendingFileOperations.size > 0) {
+      await Promise.allSettled([...this.pendingFileOperations]);
+    }
     this.initialized = false;
   }
 
@@ -293,9 +299,11 @@ export class FileMemoryManager implements IMemoryManager {
       throw new Error(`Message not found in context: ${messageId}`);
     }
 
+    const { messageId: _ignoredMessageId, ...safeUpdates } = this.clone(updates);
+
     context.messages[contextIndex] = {
       ...context.messages[contextIndex],
-      ...this.clone(updates),
+      ...safeUpdates,
     };
 
     const history = this.cache.histories.get(sessionId);
@@ -305,7 +313,7 @@ export class FileMemoryManager implements IMemoryManager {
       if (historyIndex !== -1) {
         history[historyIndex] = {
           ...history[historyIndex],
-          ...this.clone(updates),
+          ...safeUpdates,
           sequence: history[historyIndex].sequence,
         };
         historyChanged = true;
@@ -483,6 +491,11 @@ export class FileMemoryManager implements IMemoryManager {
 
     const now = Date.now();
     const existing = this.cache.tasks.get(task.taskId);
+    if (existing && existing.sessionId !== task.sessionId) {
+      throw new Error(
+        `Task ID collision detected: ${task.taskId} belongs to session ${existing.sessionId}, cannot write to ${task.sessionId}`
+      );
+    }
 
     const taskData: TaskData = {
       ...this.clone(task),
@@ -613,12 +626,15 @@ export class FileMemoryManager implements IMemoryManager {
     await this.loadCompactions();
     await this.loadTaskLists();
     await this.loadSubTaskRuns();
+    await this.repairLoadedData();
   }
 
   private async loadSessions(): Promise<void> {
     const files = await this.listJsonFiles(this.sessionsPath);
     for (const fileName of files) {
-      const sessionId = this.decodeEntityFileName(fileName);
+      const sessionId = this.safeDecodeEntityFileName(fileName);
+      if (!sessionId) continue;
+
       const filePath = this.getSessionFilePath(sessionId);
       try {
         const session = await this.readJsonFile<SessionData>(filePath);
@@ -636,7 +652,9 @@ export class FileMemoryManager implements IMemoryManager {
   private async loadContexts(): Promise<void> {
     const files = await this.listJsonFiles(this.contextsPath);
     for (const fileName of files) {
-      const sessionId = this.decodeEntityFileName(fileName);
+      const sessionId = this.safeDecodeEntityFileName(fileName);
+      if (!sessionId) continue;
+
       const filePath = this.getContextFilePath(sessionId);
       try {
         const context = await this.readJsonFile<CurrentContext>(filePath);
@@ -654,7 +672,9 @@ export class FileMemoryManager implements IMemoryManager {
   private async loadHistories(): Promise<void> {
     const files = await this.listJsonFiles(this.historiesPath);
     for (const fileName of files) {
-      const sessionId = this.decodeEntityFileName(fileName);
+      const sessionId = this.safeDecodeEntityFileName(fileName);
+      if (!sessionId) continue;
+
       const filePath = this.getHistoryFilePath(sessionId);
       try {
         const history = await this.readJsonFile<HistoryMessage[]>(filePath);
@@ -669,7 +689,9 @@ export class FileMemoryManager implements IMemoryManager {
   private async loadCompactions(): Promise<void> {
     const files = await this.listJsonFiles(this.compactionsPath);
     for (const fileName of files) {
-      const sessionId = this.decodeEntityFileName(fileName);
+      const sessionId = this.safeDecodeEntityFileName(fileName);
+      if (!sessionId) continue;
+
       const filePath = this.getCompactionFilePath(sessionId);
       try {
         const records = await this.readJsonFile<CompactionRecord[]>(filePath);
@@ -686,7 +708,9 @@ export class FileMemoryManager implements IMemoryManager {
     for (const fileName of files) {
       if (!fileName.startsWith('task-list-')) continue;
 
-      const sessionId = this.decodeTaskListFileName(fileName);
+      const sessionId = this.safeDecodeTaskListFileName(fileName);
+      if (!sessionId) continue;
+
       const filePath = this.getTaskListFilePath(sessionId);
 
       try {
@@ -694,6 +718,12 @@ export class FileMemoryManager implements IMemoryManager {
         if (!tasks) continue;
 
         for (const task of tasks) {
+          const existing = this.cache.tasks.get(task.taskId);
+          if (existing && existing.sessionId !== sessionId) {
+            console.error(
+              `Task ID collision while loading: ${task.taskId} appears in both ${existing.sessionId} and ${sessionId}. Keeping latest file value.`
+            );
+          }
           this.cache.tasks.set(task.taskId, {
             ...task,
             sessionId,
@@ -710,7 +740,9 @@ export class FileMemoryManager implements IMemoryManager {
     for (const fileName of files) {
       if (!fileName.startsWith('subtask-run-')) continue;
 
-      const runId = this.decodeSubTaskRunFileName(fileName);
+      const runId = this.safeDecodeSubTaskRunFileName(fileName);
+      if (!runId) continue;
+
       const filePath = this.getSubTaskRunFilePath(runId);
 
       try {
@@ -721,6 +753,82 @@ export class FileMemoryManager implements IMemoryManager {
       } catch (error) {
         console.error(`Error loading sub task run ${runId}:`, error);
       }
+    }
+  }
+
+  private async repairLoadedData(): Promise<void> {
+    const writeBackJobs: Promise<void>[] = [];
+
+    for (const [sessionId, session] of this.cache.sessions.entries()) {
+      if (!this.cache.contexts.has(sessionId)) {
+        const now = Date.now();
+        const repairedContextId = session.currentContextId || uuid();
+        const history = this.cache.histories.get(sessionId) || [];
+        const activeMessages: Message[] = history
+          .filter((item) => !item.archivedBy)
+          .map((item) => {
+            const { sequence: _sequence, turn: _turn, isSummary: _isSummary, archivedBy: _archivedBy, ...message } = item;
+            return this.clone(message);
+          });
+
+        const systemMessage: Message = {
+          messageId: 'system',
+          role: 'system',
+          content: session.systemPrompt,
+        };
+
+        const repairedMessages = activeMessages.length > 0
+          ? activeMessages
+          : [systemMessage];
+        if (!repairedMessages.some((item) => item.role === 'system')) {
+          repairedMessages.unshift(systemMessage);
+        }
+
+        const repairedContext: CurrentContext = {
+          id: repairedContextId,
+          contextId: repairedContextId,
+          sessionId,
+          systemPrompt: session.systemPrompt,
+          messages: repairedMessages,
+          version: 1,
+          createdAt: now,
+          updatedAt: now,
+          stats: {
+            totalMessagesInHistory: history.length || repairedMessages.length,
+            compactionCount: session.compactionCount,
+          },
+        };
+        this.cache.contexts.set(sessionId, repairedContext);
+        session.currentContextId = repairedContextId;
+        if (history.length > 0) {
+          session.totalMessages = history.length;
+        }
+        writeBackJobs.push(this.saveContextFile(sessionId));
+        writeBackJobs.push(this.saveSessionFile(sessionId));
+      }
+
+      if (!this.cache.histories.has(sessionId)) {
+        const context = this.cache.contexts.get(sessionId);
+        const repairedHistory: HistoryMessage[] = (context?.messages || []).map((message, index) => ({
+          ...this.clone(message),
+          sequence: index + 1,
+          turn: index === 0 && message.role === 'system' ? 0 : undefined,
+        }));
+        this.cache.histories.set(sessionId, repairedHistory);
+        session.totalMessages = repairedHistory.length;
+        session.updatedAt = Date.now();
+        writeBackJobs.push(this.saveHistoryFile(sessionId));
+        writeBackJobs.push(this.saveSessionFile(sessionId));
+      }
+
+      if (!this.cache.compactionRecords.has(sessionId)) {
+        this.cache.compactionRecords.set(sessionId, []);
+        writeBackJobs.push(this.saveCompactionFile(sessionId));
+      }
+    }
+
+    if (writeBackJobs.length > 0) {
+      await Promise.all(writeBackJobs);
     }
   }
 
@@ -896,27 +1004,74 @@ export class FileMemoryManager implements IMemoryManager {
     const entries = await fs.readdir(dirPath, { withFileTypes: true }).catch(() => []);
     return entries
       .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
-      .map((entry) => entry.name);
+      .map((entry) => entry.name)
+      .sort((a, b) => a.localeCompare(b));
   }
 
   private async readJsonFile<T>(filePath: string): Promise<T | null> {
-    try {
-      const raw = await fs.readFile(filePath, 'utf-8');
-      return JSON.parse(raw) as T;
-    } catch (error) {
-      if (this.isNotFound(error)) {
-        return null;
+    const raw = await this.readTextIfExists(filePath);
+    if (raw === null) {
+      const backupPath = this.getBackupFilePath(filePath);
+      const backupRaw = await this.readTextIfExists(backupPath);
+      if (backupRaw !== null) {
+        const parseBackup = this.parseJsonText<T>(backupRaw, backupPath);
+        if (parseBackup.ok) {
+          console.error(`[FileMemoryManager] Restoring missing file from backup: ${filePath}`);
+          await this.writeJsonFile(filePath, parseBackup.value);
+          return parseBackup.value;
+        }
+        const backupError = parseBackup.error;
+        throw backupError;
       }
-      throw error;
+      return null;
     }
+
+    const parsePrimary = this.parseJsonText<T>(raw, filePath);
+    if (parsePrimary.ok) {
+      return parsePrimary.value;
+    }
+    const primaryError = parsePrimary.error;
+
+    const backupPath = this.getBackupFilePath(filePath);
+    const backupRaw = await this.readTextIfExists(backupPath);
+    if (backupRaw !== null) {
+      const parseBackup = this.parseJsonText<T>(backupRaw, backupPath);
+      if (parseBackup.ok) {
+        console.error(
+          `[FileMemoryManager] Recovered from backup for ${filePath}:`,
+          primaryError
+        );
+        await this.archiveCorruptedFile(filePath);
+        await this.writeJsonFile(filePath, parseBackup.value);
+        return parseBackup.value;
+      }
+    }
+
+    throw primaryError;
   }
 
   private async writeJsonFile(filePath: string, value: unknown): Promise<void> {
-    await fs.writeFile(filePath, JSON.stringify(value, null, 2), 'utf-8');
+    const json = JSON.stringify(value, null, 2);
+
+    await this.enqueueFileOperation(filePath, async () => {
+      await fs.mkdir(path.dirname(filePath), { recursive: true });
+      await this.copyFileIfExists(filePath, this.getBackupFilePath(filePath));
+
+      const tempFilePath = this.buildTempFilePath(filePath);
+      try {
+        await fs.writeFile(tempFilePath, json, 'utf-8');
+        await fs.rename(tempFilePath, filePath);
+      } finally {
+        await this.unlinkIfExists(tempFilePath);
+      }
+    });
   }
 
   private async deleteFileIfExists(filePath: string): Promise<void> {
-    await fs.unlink(filePath).catch(() => {});
+    await this.enqueueFileOperation(filePath, async () => {
+      await this.unlinkIfExists(filePath);
+      await this.unlinkIfExists(this.getBackupFilePath(filePath));
+    });
   }
 
   private encodeEntityFileName(id: string): string {
@@ -925,6 +1080,15 @@ export class FileMemoryManager implements IMemoryManager {
 
   private decodeEntityFileName(fileName: string): string {
     return decodeURIComponent(fileName.replace(/\.json$/, ''));
+  }
+
+  private safeDecodeEntityFileName(fileName: string): string | null {
+    try {
+      return this.decodeEntityFileName(fileName);
+    } catch (error) {
+      console.error(`Skipping invalid entity filename: ${fileName}`, error);
+      return null;
+    }
   }
 
   private getSessionFilePath(sessionId: string): string {
@@ -955,6 +1119,15 @@ export class FileMemoryManager implements IMemoryManager {
     return decodeURIComponent(fileName.replace(/^task-list-/, '').replace(/\.json$/, ''));
   }
 
+  private safeDecodeTaskListFileName(fileName: string): string | null {
+    try {
+      return this.decodeTaskListFileName(fileName);
+    } catch (error) {
+      console.error(`Skipping invalid task-list filename: ${fileName}`, error);
+      return null;
+    }
+  }
+
   private getSubTaskRunFilePath(runId: string): string {
     return path.join(this.subTaskRunsPath, this.encodeSubTaskRunFileName(runId));
   }
@@ -965,6 +1138,117 @@ export class FileMemoryManager implements IMemoryManager {
 
   private decodeSubTaskRunFileName(fileName: string): string {
     return decodeURIComponent(fileName.replace(/^subtask-run-/, '').replace(/\.json$/, ''));
+  }
+
+  private safeDecodeSubTaskRunFileName(fileName: string): string | null {
+    try {
+      return this.decodeSubTaskRunFileName(fileName);
+    } catch (error) {
+      console.error(`Skipping invalid subtask-run filename: ${fileName}`, error);
+      return null;
+    }
+  }
+
+  private async readTextIfExists(filePath: string): Promise<string | null> {
+    try {
+      return await fs.readFile(filePath, 'utf-8');
+    } catch (error) {
+      if (this.isNotFound(error)) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  private parseJsonText<T>(
+    raw: string,
+    filePath: string
+  ): { ok: true; value: T } | { ok: false; error: Error } {
+    try {
+      const normalized = raw.trim();
+      if (normalized.length === 0) {
+        return {
+          ok: false,
+          error: new Error(`JSON file is empty: ${filePath}`),
+        };
+      }
+      return {
+        ok: true,
+        value: JSON.parse(normalized) as T,
+      };
+    } catch (error) {
+      const wrapped = error instanceof Error
+        ? new Error(`Failed to parse JSON ${filePath}: ${error.message}`)
+        : new Error(`Failed to parse JSON ${filePath}`);
+      return {
+        ok: false,
+        error: wrapped,
+      };
+    }
+  }
+
+  private getBackupFilePath(filePath: string): string {
+    return `${filePath}.bak`;
+  }
+
+  private buildTempFilePath(filePath: string): string {
+    const base = path.basename(filePath);
+    const dir = path.dirname(filePath);
+    return path.join(dir, `.${base}.${process.pid}.${Date.now()}.${uuid()}.tmp`);
+  }
+
+  private async archiveCorruptedFile(filePath: string): Promise<void> {
+    const archivedPath = `${filePath}.corrupt-${Date.now()}`;
+    try {
+      await fs.rename(filePath, archivedPath);
+    } catch (error) {
+      if (this.isNotFound(error)) {
+        return;
+      }
+      throw error;
+    }
+  }
+
+  private async copyFileIfExists(fromPath: string, toPath: string): Promise<void> {
+    try {
+      await fs.copyFile(fromPath, toPath);
+    } catch (error) {
+      if (this.isNotFound(error)) {
+        return;
+      }
+      throw error;
+    }
+  }
+
+  private async unlinkIfExists(filePath: string): Promise<void> {
+    try {
+      await fs.unlink(filePath);
+    } catch (error) {
+      if (this.isNotFound(error)) {
+        return;
+      }
+      throw error;
+    }
+  }
+
+  private enqueueFileOperation(filePath: string, operation: () => Promise<void>): Promise<void> {
+    const previous = this.fileOperationQueue.get(filePath) || Promise.resolve();
+    const pending = previous
+      .catch(() => {
+        // 忽略上一个操作的错误，确保队列不断开
+      })
+      .then(operation);
+
+    const tracked = pending.finally(() => {
+      if (this.fileOperationQueue.get(filePath) === tracked) {
+        this.fileOperationQueue.delete(filePath);
+      }
+      this.pendingFileOperations.delete(tracked);
+    });
+
+    this.fileOperationQueue.set(filePath, tracked);
+    this.pendingFileOperations.add(tracked);
+    return tracked;
   }
 
   private isNotFound(error: unknown): boolean {

@@ -1,4 +1,5 @@
 import { AgentStatus } from "./types";
+import type { Usage } from "../../providers";
 
 
 
@@ -7,9 +8,14 @@ import { AgentStatus } from "./types";
  */
 export enum AgentMessageType {
   // 文本流
-  TEXT_START = 'text-start',                 // Agent 的最终部分回复
-  TEXT_DELTA = 'text-delta',                 // Agent 的最终部分回复
-  TEXT_COMPLETE = 'text-complete',                 // Agent 的最终回复结束
+  TEXT_START = 'text-start',                 // Agent 开始生成文本回复
+  TEXT_DELTA = 'text-delta',                 // Agent 的增量文本内容
+  TEXT_COMPLETE = 'text-complete',           // Agent 的文本回复结束
+
+  // 推理流 (Reasoning - thinking 模式)
+  REASONING_START = 'reasoning-start',       // 开始推理/思考
+  REASONING_DELTA = 'reasoning-delta',       // 推理/思考增量内容
+  REASONING_COMPLETE = 'reasoning-complete', // 推理/思考完成
 
   // 工具流
   TOOL_CALL_CREATED = 'tool_call_created',  // 准备调用工具（含参数）
@@ -18,6 +24,9 @@ export enum AgentMessageType {
 
   // 代码变更流
   CODE_PATCH = 'code_patch',     // 代码 Diff 变更
+
+  // 资源使用流
+  USAGE_UPDATE = 'usage_update', // Token 使用量更新
 
   // 状态流
   STATUS = 'status',             // 任务状态切换（loading, error, finished）
@@ -57,6 +66,33 @@ export interface TextMessage extends BaseAgentMessage {
   type: AgentMessageType.TEXT_COMPLETE;
   payload: { content: string };
   msgId: string;       // 你后端生成的唯一逻辑 ID
+}
+
+/**
+ * 推理开始消息 (thinking 模式)
+ */
+export interface ReasoningStartMessage extends BaseAgentMessage {
+  type: AgentMessageType.REASONING_START;
+  payload: { content: string };
+  msgId: string;
+}
+
+/**
+ * 推理增量消息 (thinking 模式)
+ */
+export interface ReasoningDeltaMessage extends BaseAgentMessage {
+  type: AgentMessageType.REASONING_DELTA;
+  payload: { content: string };
+  msgId: string;
+}
+
+/**
+ * 推理完成消息 (thinking 模式)
+ */
+export interface ReasoningCompleteMessage extends BaseAgentMessage {
+  type: AgentMessageType.REASONING_COMPLETE;
+  payload: { content: string };
+  msgId: string;
 }
 
 export interface ToolCall {
@@ -141,15 +177,36 @@ export interface ErrorMessage extends BaseAgentMessage {
 }
 
 /**
+ * Token 使用量更新消息
+ */
+export interface UsageUpdateMessage extends BaseAgentMessage {
+  type: AgentMessageType.USAGE_UPDATE;
+  payload: {
+    usage: Usage;
+    /** 累计使用量（多轮对话） */
+    cumulative?: {
+      prompt_tokens: number;
+      completion_tokens: number;
+      total_tokens: number;
+    };
+  };
+  msgId?: string;
+}
+
+/**
  * 统一联合类型
  */
 export type AgentMessage =
   | TextStartMessage
   | ThoughtMessage
   | TextMessage
+  | ReasoningStartMessage
+  | ReasoningDeltaMessage
+  | ReasoningCompleteMessage
   | ToolCallCreatedMessage
   | ToolCallStreamMessage
   | ToolCallResultMessage
   | CodePatchMessage
+  | UsageUpdateMessage
   | StatusMessage
   | ErrorMessage;

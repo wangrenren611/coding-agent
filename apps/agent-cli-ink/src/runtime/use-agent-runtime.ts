@@ -10,9 +10,10 @@ import { createMemoryManager } from "../../../../src/agent-v2/memory";
 
 const MAX_TOOL_OUTPUT_CHARS = 80_000;
 
-// 使用全局缓存确保对象引用稳定
-const globalTimelineCache = new Map<string, TimelineEntry>();
-
+/**
+ * 将 UIMessage 数组转换为 TimelineEntry 数组
+ * 简化版本：不使用缓存，直接根据 messages 生成 entries
+ */
 function toTimelineEntries(messages: UIMessage[]): TimelineEntry[] {
   const entries: TimelineEntry[] = [];
 
@@ -20,37 +21,23 @@ function toTimelineEntries(messages: UIMessage[]): TimelineEntry[] {
     if (message.kind === "assistant") {
       const assistantContent = toDisplayString(message.content);
       if (assistantContent.trim()) {
-        const entryId = `${message.id}:assistant`;
-        // 检查缓存中是否已存在相同内容的条目
-        const cached = globalTimelineCache.get(entryId);
-        const shouldReuseEntry = cached && 
-          cached.type === "assistant" &&
-          cached.text === assistantContent &&
-          cached.loading === (message.phase === "streaming");
-
-        if (shouldReuseEntry) {
-          entries.push(cached);
-        } else {
-          entries.push({
-            id: entryId,
-            type: "assistant",
-            text: assistantContent,
-            loading: message.phase === "streaming",
-            createdAt: message.createdAt,
-          });
-          // 更新缓存
-          globalTimelineCache.set(entryId, entries[entries.length - 1]);
-        }
+        entries.push({
+          id: `${message.id}:assistant`,
+          type: "assistant",
+          text: assistantContent,
+          loading: message.phase === "streaming",
+          createdAt: message.createdAt,
+        });
       }
 
+      // 处理工具调用
       message.toolCalls.forEach((toolCall, index) => {
         const streamOutput = toolCall.streamLogs.map((item) => toDisplayString(item)).join("\n").trim();
         const resultOutput = toDisplayString(toolCall.result?.output);
         const output = truncateText(streamOutput || resultOutput || "", MAX_TOOL_OUTPUT_CHARS);
 
-        const entryId = `${message.id}:tool:${toolCall.callId}`;
-        const toolEntry: TimelineEntry = {
-          id: entryId,
+        entries.push({
+          id: `${message.id}:tool:${toolCall.callId}`,
           type: "tool",
           toolName: toDisplayString(toolCall.toolName) || "Tool",
           args: toDisplayString(toolCall.args),
@@ -58,70 +45,34 @@ function toTimelineEntries(messages: UIMessage[]): TimelineEntry[] {
           status: toolCall.result?.status ?? "running",
           output,
           createdAt: message.createdAt + index + 1,
-        };
-
-        // 检查缓存
-        const cached = globalTimelineCache.get(entryId);
-        const shouldReuseEntry = cached && 
-          cached.type === "tool" &&
-          cached.toolName === toolEntry.toolName &&
-          cached.args === toolEntry.args &&
-          cached.loading === toolEntry.loading &&
-          cached.status === toolEntry.status &&
-          cached.output === toolEntry.output;
-
-        if (shouldReuseEntry) {
-          entries.push(cached);
-        } else {
-          entries.push(toolEntry);
-          globalTimelineCache.set(entryId, toolEntry);
-        }
+        });
       });
-
       continue;
     }
 
     if (message.kind === "code_patch") {
-      const entryId = message.id;
-      const cached = globalTimelineCache.get(entryId);
-      const entry: TimelineEntry = {
-        id: entryId,
+      entries.push({
+        id: message.id,
         type: "code_patch",
         path: message.path,
         diff: message.diff,
         createdAt: message.createdAt,
-      };
-
-      // 简单检查：仅当 diff 变化时才更新
-      if (cached && cached.type === "code_patch" && cached.diff === entry.diff) {
-        entries.push(cached);
-      } else {
-        entries.push(entry);
-        globalTimelineCache.set(entryId, entry);
-      }
+      });
       continue;
     }
 
     if (message.kind === "error") {
-      const entryId = message.id;
-      const cached = globalTimelineCache.get(entryId);
-      const entry: TimelineEntry = {
-        id: entryId,
+      entries.push({
+        id: message.id,
         type: "error",
         error: message.error,
         phase: message.phase,
         createdAt: message.createdAt,
-      };
-
-      if (cached && cached.type === "error" && cached.error === entry.error && cached.phase === entry.phase) {
-        entries.push(cached);
-      } else {
-        entries.push(entry);
-        globalTimelineCache.set(entryId, entry);
-      }
+      });
       continue;
     }
 
+    // system 消息
     entries.push({
       id: message.id,
       type: "system",
@@ -181,11 +132,6 @@ export function useAgentRuntime(options: CliOptions): {
   const agentRef = useRef<Agent | null>(null);
   const isExecutingRef = useRef(false);
   const isCreatingAgentRef = useRef(false);
-
-  // 清理缓存的函数（当有新会话时）
-  const clearTimelineCache = useCallback(() => {
-    globalTimelineCache.clear();
-  }, []);
 
   const ingestStreamMessageRef = useRef(ingestStreamMessage);
   ingestStreamMessageRef.current = ingestStreamMessage;
@@ -286,7 +232,6 @@ export function useAgentRuntime(options: CliOptions): {
       if (command.type === "help") addLocalEntry("system", buildHelpText());
       if (command.type === "clear") {
         setDisplayCutoff(Date.now());
-        clearTimelineCache();
       }
       if (command.type === "abort") abortRunning();
       if (command.type === "pause") {
@@ -309,7 +254,6 @@ export function useAgentRuntime(options: CliOptions): {
         reset();
         setDisplayCutoff(0);
         setLocalEntries([]);
-        clearTimelineCache();
         // 重置时需要重新创建 agent
         if (agentRef.current) {
           agentRef.current.abort();
@@ -367,6 +311,7 @@ export function useAgentRuntime(options: CliOptions): {
   ]);
 
   const timelineEntries = useMemo(() => {
+    // 从 agent 消息生成 timeline entries
     const agentEntries = toTimelineEntries(messages);
     
     // 将 localEntries 也转换为 TimelineEntry
@@ -377,18 +322,17 @@ export function useAgentRuntime(options: CliOptions): {
       createdAt: entry.createdAt,
     }));
 
-    // 合并并去重（agentEntries 已经在 toTimelineEntries 中处理了去重）
+    // 合并：localEntries 主要是用户消息，agentEntries 是 AI 响应
+    // 使用 Map 按 id 去重
     const mergedEntries = new Map<string, TimelineEntry>();
-    for (const entry of agentEntries) {
-      mergedEntries.set(entry.id, entry);
-    }
     for (const entry of localTimelineEntries) {
       mergedEntries.set(entry.id, entry);
     }
+    for (const entry of agentEntries) {
+      mergedEntries.set(entry.id, entry);
+    }
 
-    const deduplicatedEntries = Array.from(mergedEntries.values());
-
-    return deduplicatedEntries
+    return Array.from(mergedEntries.values())
       .filter((entry) => entry.createdAt >= displayCutoff)
       .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
   }, [displayCutoff, localEntries, messages]);

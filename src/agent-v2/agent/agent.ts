@@ -7,7 +7,9 @@ import {
     isRetryableError,
     LLMGenerateOptions,
     LLMResponse,
-    MessageContent
+    MessageContent,
+    LLMRequest,
+    Usage
 } from "../../providers";
 import { Session } from "../session";
 import { ToolRegistry } from "../tool/registry";
@@ -71,6 +73,7 @@ export class Agent {
     private stream: boolean;
     private streamCallback?: StreamCallback;
     private maxBufferSize: number;
+ private thinking?: boolean;
 
     // 状态
     private status: AgentStatus;
@@ -91,6 +94,7 @@ export class Agent {
 
     // 流式处理
     private streamProcessor: StreamProcessor;
+    private cumulativeUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
 
     constructor(config: AgentOptions) {
         this.validateConfig(config);
@@ -117,6 +121,7 @@ export class Agent {
         this.status = AgentStatus.IDLE;
         this.timeProvider = config.timeProvider ?? new DefaultTimeProvider();
         this.maxBufferSize = config.maxBufferSize ?? 100000;
+ this.thinking = config.thinking;
         this.loopMax = 3000;
         this.maxCompensationRetries = 1;
         this.defaultRetryDelayMs = this.normalizePositiveMs(config.retryDelayMs, 1000 * 60 * 10);
@@ -131,12 +136,18 @@ export class Agent {
             onTextDelta: (content, msgId) => this.emitTextDelta(content, msgId),
             onTextStart: (msgId) => this.emitTextStart(msgId),
             onTextComplete: (msgId) => this.emitTextComplete(msgId),
+            // 推理内容回调 (thinking 模式)
+            onReasoningDelta: (content, msgId) => this.emitReasoningDelta(content, msgId),
+            onReasoningStart: (msgId) => this.emitReasoningStart(msgId),
+            onReasoningComplete: (msgId) => this.emitReasoningComplete(msgId),
+            // Token 使用量回调
+            onUsageUpdate: (usage) => this.emitUsageUpdate(usage),
         });
     }
 
     // ==================== 公共 API ====================
 
-    async execute(query: MessageContent): Promise<Message> {
+    async execute(query: MessageContent, options?: LLMGenerateOptions): Promise<Message> {
         const validation = this.validateInput(query);
         if (!validation.valid) {
             throw new AgentError(validation.error || 'Invalid input');
@@ -150,9 +161,13 @@ export class Agent {
         this.initializeTask(query);
 
         try {
-            await this.runLoop();
+            await this.runLoop(options);
             this.completeTask();
-            return this.session.getLastMessage();
+            const lastMessage = this.session.getLastMessage();
+            if (!lastMessage) {
+                throw new Error('No message after execution');
+            }
+            return lastMessage;
         } catch (error) {
             if (this.status !== AgentStatus.ABORTED) {
                 this.failTask(error);
@@ -502,7 +517,7 @@ export class Agent {
 
     // ==================== 主循环 ====================
 
-    private async runLoop(): Promise<void> {
+    private async runLoop(options?: LLMGenerateOptions): Promise<void> {
         this.emitStatus(AgentStatus.RUNNING, 'Agent is running...');
 
         while (this.loopCount < this.loopMax) {
@@ -523,7 +538,7 @@ export class Agent {
             this.status = AgentStatus.RUNNING;
 
             try {
-                await this.executeLLMCall();
+                await this.executeLLMCall(options);
                 this.retryCount = 0;
                 this.compensationRetryCount = 0;
                 this.nextRetryDelayMs = this.defaultRetryDelayMs;
@@ -583,7 +598,7 @@ export class Agent {
 
     // ==================== LLM 调用 ====================
 
-    private async executeLLMCall(): Promise<void> {
+    private async executeLLMCall(options?: LLMGenerateOptions): Promise<void> {
         await this.session.compactBeforeLLMCall();
 
         this.abortController = new AbortController();
@@ -600,6 +615,8 @@ export class Agent {
         const llmOptions: LLMGenerateOptions = {
             tools: this.toolRegistry.toLLMTools(),
             abortSignal: timeoutSignal,
+ thinking: this.thinking,
+            ...options,
         };
 
         try {
@@ -837,7 +854,60 @@ export class Agent {
         });
     }
 
-    private emitToolCallCreated(toolCalls: ToolCall[], messageId: string, content?: string): void {
+        // ==================== 推理内容发射方法 (thinking 模式) ====================
+
+    private emitReasoningStart(messageId: string): void {
+        this.streamCallback?.({
+            type: AgentMessageType.REASONING_START,
+            payload: { content: '' },
+            msgId: messageId,
+            sessionId: this.session.getSessionId(),
+            timestamp: this.timeProvider.getCurrentTime(),
+        });
+    }
+
+    private emitReasoningDelta(content: string, messageId: string): void {
+        this.streamCallback?.({
+            type: AgentMessageType.REASONING_DELTA,
+            payload: { content },
+            msgId: messageId,
+            sessionId: this.session.getSessionId(),
+            timestamp: this.timeProvider.getCurrentTime(),
+        });
+    }
+
+    private emitReasoningComplete(messageId: string): void {
+        this.streamCallback?.({
+            type: AgentMessageType.REASONING_COMPLETE,
+            payload: { content: '' },
+            msgId: messageId,
+            sessionId: this.session.getSessionId(),
+            timestamp: this.timeProvider.getCurrentTime(),
+        });
+    }
+
+    // ==================== Usage 更新发射方法 ====================
+
+    private emitUsageUpdate(usage: Usage): void {
+        // 累加使用量
+        this.cumulativeUsage.prompt_tokens += usage.prompt_tokens;
+        this.cumulativeUsage.completion_tokens += usage.completion_tokens;
+        // total_tokens 用累加后的值计算，确保一致性
+        this.cumulativeUsage.total_tokens = 
+            this.cumulativeUsage.prompt_tokens + this.cumulativeUsage.completion_tokens;
+
+        this.streamCallback?.({
+            type: AgentMessageType.USAGE_UPDATE,
+            payload: {
+                usage,
+                cumulative: { ...this.cumulativeUsage },
+            },
+            sessionId: this.session.getSessionId(),
+            timestamp: this.timeProvider.getCurrentTime(),
+        });
+    }
+
+        private emitToolCallCreated(toolCalls: ToolCall[], messageId: string, content?: string): void {
         this.streamCallback?.({
             type: AgentMessageType.TOOL_CALL_CREATED,
             payload: {
@@ -884,5 +954,9 @@ export class Agent {
 
     getTaskStartTime(): number {
         return this.taskStartTime;
+    }
+
+    getTokenInfo() {
+        return this.session.getTokenInfo();
     }
 }

@@ -1,11 +1,12 @@
 import { v4 as uuid } from "uuid";
-import { Message, SessionOptions } from "./types";
+import { Message } from "./types";
 import type { IMemoryManager } from "../memory/types";
-import { Compaction, CompactionConfig } from "./compaction";
+import { Compaction, CompactionConfig, CompactionResult } from "./compaction";
 import { LLMProvider } from "../../providers";
 
-export interface SessionConfig extends SessionOptions {
+export interface SessionConfig {
   sessionId?: string;
+  systemPrompt: string;
   memoryManager?: IMemoryManager;
   /** 是否启用自动压缩 */
   enableCompaction?: boolean;
@@ -16,28 +17,23 @@ export interface SessionConfig extends SessionOptions {
 }
 
 export type { Message, SessionOptions } from './types';
-export type { CompactionConfig } from './compaction';
+export type { CompactionConfig, CompactionResult } from './compaction';
 
 /**
  * Session 类 - 管理对话消息
  *
- * 核心概念：
- * 1. 当前上下文 (Current Context) - 用于 LLM 对话的活跃消息，可能被压缩
- * 2. 完整历史 (Full History) - 所有原始消息，通过 MemoryManager 管理
- *
- * 设计原则：
- * 1. 所有消息操作保持同步，确保 Agent 执行流程不被阻塞
- * 2. 持久化操作异步在后台执行，失败不影响主流程
- * 3. 支持通过 MemoryManager 恢复历史会话
+ * 职责：
+ * 1. 消息存储和管理（增删改查）
+ * 2. 持久化到 MemoryManager
+ * 3. 压缩功能入口
  */
 export class Session {
-  private sessionId: string;
+  private readonly sessionId: string;
   private messages: Message[] = [];
-  private systemPrompt: string;
-  private memoryManager?: IMemoryManager;
+  private readonly systemPrompt: string;
+  private readonly memoryManager?: IMemoryManager;
   private persistQueue: Promise<void> = Promise.resolve();
-  private compaction?: Compaction;
-  private enableCompaction: boolean;
+  private readonly compaction?: Compaction;
   private initialized = false;
   private initializePromise: Promise<void> | null = null;
 
@@ -45,19 +41,15 @@ export class Session {
     this.sessionId = options.sessionId || uuid();
     this.systemPrompt = options.systemPrompt;
     this.memoryManager = options.memoryManager;
-    this.enableCompaction = options.enableCompaction ?? false;
-
-    if (this.enableCompaction && !options.provider) {
-      throw new Error('Session compaction requires a provider');
-    }
 
     // 初始化压缩器
-    if (this.enableCompaction && options.provider) {
-      const maxTokens = options.compactionConfig?.maxTokens ?? options.provider.getLLMMaxTokens() ?? 200 * 1000;
-      const maxOutputTokens = options.compactionConfig?.maxOutputTokens ?? options.provider.getMaxOutputTokens() ?? 8000;
+    if (options.enableCompaction) {
+      if (!options.provider) {
+        throw new Error('Session compaction requires a provider');
+      }
       this.compaction = new Compaction({
-        maxTokens,
-        maxOutputTokens,
+        maxTokens: options.compactionConfig?.maxTokens ?? options.provider.getLLMMaxTokens() ?? 200000,
+        maxOutputTokens: options.compactionConfig?.maxOutputTokens ?? options.provider.getMaxOutputTokens() ?? 8000,
         llmProvider: options.provider,
         keepMessagesNum: options.compactionConfig?.keepMessagesNum ?? 40,
         triggerRatio: options.compactionConfig?.triggerRatio ?? 0.90,
@@ -71,18 +63,16 @@ export class Session {
       content: this.systemPrompt,
     }];
 
-    // 如果有 memoryManager，需要异步初始化会话
-    if (this.memoryManager) {
-      // 注意：构造函数不能是 async，所以这里只启动初始化
-      // 调用者应该在使用前确保初始化完成
-    } else {
+    // 无 MemoryManager 时直接标记为已初始化
+    if (!this.memoryManager) {
       this.initialized = true;
     }
   }
 
+  // ==================== 初始化 ====================
+
   /**
-   * 初始化会话（创建或加载）
-   * 使用 MemoryManager 时需要先调用此方法
+   * 初始化会话（创建或加载历史）
    */
   async initialize(): Promise<void> {
     if (this.initialized) return;
@@ -92,31 +82,11 @@ export class Session {
     }
 
     if (this.initializePromise) {
-      await this.initializePromise;
-      return;
+      return this.initializePromise;
     }
 
-    this.initializePromise = (async () => {
-      if (!this.memoryManager) return;
-
-      // 尝试加载已有会话
-      const existingSession = await this.memoryManager.getSession(this.sessionId);
-
-      if (existingSession) {
-        // 加载已有会话的上下文
-        const context = await this.memoryManager.getCurrentContext(this.sessionId);
-        if (context) {
-          this.messages = [...context.messages];
-          this.systemPrompt = context.systemPrompt;
-        }
-      } else {
-        // 创建新会话
-        await this.memoryManager.createSession(this.sessionId, this.systemPrompt);
-      }
-
-      this.initialized = true;
-    })();
-
+    this.initializePromise = this.doInitialize();
+    
     try {
       await this.initializePromise;
     } finally {
@@ -124,36 +94,41 @@ export class Session {
     }
   }
 
+  private async doInitialize(): Promise<void> {
+    if (!this.memoryManager) return;
+
+    const existingSession = await this.memoryManager.getSession(this.sessionId);
+
+    if (existingSession) {
+      const context = await this.memoryManager.getCurrentContext(this.sessionId);
+      if (context) {
+        this.messages = [...context.messages];
+      }
+    } else {
+      await this.memoryManager.createSession(this.sessionId, this.systemPrompt);
+    }
+
+    this.initialized = true;
+  }
+
+  // ==================== 消息管理 ====================
+
   /**
    * 添加或更新消息
-   * - 如果 message.messageId 与最后一条消息一致，则更新最后一条消息
-   * - 否则添加新消息
-   * @returns 返回消息的 messageId
+   * 如果 messageId 与最后一条消息一致，则更新；否则添加新消息
    */
   addMessage(message: Message): string {
-    const messageIdentifier = message.messageId;
     const lastMessage = this.getLastMessage();
-    const isUpdate = Boolean(messageIdentifier && lastMessage?.messageId === messageIdentifier);
+    const isUpdate = Boolean(message.messageId && lastMessage?.messageId === message.messageId);
 
-    // 如果是同一条消息的更新，替换最后一条消息
     if (isUpdate) {
       this.messages[this.messages.length - 1] = message;
     } else {
-      // 添加新消息
-      const messageId = message.messageId;
-      const newMessage: Message = {
-        ...message,
-        messageId,
-      };
-      this.messages.push(newMessage);
+      this.messages.push({ ...message });
     }
 
-    // 异步持久化到 MemoryManager
-    if (this.memoryManager) {
-      this.queuePersistOperation(message, isUpdate ? 'update' : 'add');
-    }
-
-    return messageIdentifier;
+    this.schedulePersist(message, isUpdate ? 'update' : 'add');
+    return message.messageId;
   }
 
   /**
@@ -163,92 +138,64 @@ export class Session {
     for (const message of messages) {
       const lastMessage = this.getLastMessage();
       const isUpdate = Boolean(message.messageId && lastMessage?.messageId === message.messageId);
+      
       if (isUpdate) {
         this.messages[this.messages.length - 1] = message;
       } else {
         this.messages.push(message);
       }
-
-      if (this.memoryManager) {
-        this.queuePersistOperation(message, isUpdate ? 'update' : 'add');
-      }
+      
+      this.schedulePersist(message, isUpdate ? 'update' : 'add');
     }
   }
 
-  getMessages() {
+  getMessages(): Message[] {
     return this.messages;
   }
 
-  getSessionId() {
-    return this.sessionId;
-  }
-
-  clearMessages() {
-    // 保留系统消息
-    const systemMessage = this.messages.find((m) => m.role === 'system');
-    this.messages = systemMessage ? [systemMessage] : [];
-
-    if (this.memoryManager) {
-      this.memoryManager.clearContext(this.sessionId).catch(console.error);
-    }
-  }
-
-  getMessageCount() {
-    return this.messages.length;
-  }
-
-  getLastMessage() {
+  getLastMessage(): Message | undefined {
     return this.messages[this.messages.length - 1];
   }
 
-  getFirstMessage() {
+  getFirstMessage(): Message | undefined {
     return this.messages[0];
   }
 
-  /**
-   * 检查是否需要压缩
-   * 压缩后基于内容重新估算 token 数，而不是累加可能不准确的 usage
-   */
-  shouldCompact(): boolean {
-    if (!this.compaction) return false;
-    return this.compaction.shouldCompact(this.messages);
+  getMessageCount(): number {
+    return this.messages.length;
   }
 
+  clearMessages(): void {
+    const systemMessage = this.messages.find(m => m.role === 'system');
+    this.messages = systemMessage ? [systemMessage] : [];
+    this.memoryManager?.clearContext(this.sessionId).catch(console.error);
+  }
+
+  // ==================== 压缩功能 ====================
+
   /**
-   * 获取当前 Token 使用情况
+   * 在 LLM 调用前检查并执行压缩
+   * 
+   * 此方法会：
+   * 1. 修复中断的工具调用
+   * 2. 等待持久化完成
+   * 3. 检查是否需要压缩
+   * 4. 如果需要，执行压缩
    */
-  getTokenInfo(): {
-    estimatedTotal: number;
-    accumulatedTotal: number;
-    hasReliableUsage: boolean;
-    messageCount: number;
-  } {
+  async compactBeforeLLMCall(): Promise<boolean> {
+    // 先修复中断的工具调用
+    this.repairInterruptedToolCalls();
+
     if (!this.compaction) {
-      return {
-        estimatedTotal: 0,
-        accumulatedTotal: 0,
-        hasReliableUsage: false,
-        messageCount: this.messages.length,
-      };
+      return false;
     }
 
-    const info = this.compaction.getCurrentTokenCount(this.messages);
-    return {
-      ...info,
-      messageCount: this.messages.length,
-    };
-  }
+    // 等待持久化完成
+    if (this.memoryManager) {
+      await this.persistQueue;
+    }
 
-  /**
-   * 执行压缩
-   * 使用 Compaction 类自动压缩上下文
-   */
-  async compact(): Promise<boolean> {
-    if (!this.compaction) return false;
-
-    // 压缩前等待消息持久化队列，确保 MemoryManager 侧上下文与内存一致
-    await this.persistQueue;
-
+    // 执行压缩（compaction.compact 内部会检查是否需要压缩）
     const result = await this.compaction.compact(
       this.messages,
       this.sessionId,
@@ -264,64 +211,35 @@ export class Session {
   }
 
   /**
-   * 在发起下一次 LLM 请求前进行压缩检查
-   * 仅在启用压缩时生效
+   * 获取压缩器实例（用于外部查询 token 信息等）
    */
-  async compactBeforeLLMCall(): Promise<boolean> {
-    this.repairInterruptedToolCalls();
-
-    if (!this.enableCompaction || !this.compaction) {
-      return false;
-    }
-
-    if (this.memoryManager) {
-      await this.persistQueue;
-    }
-
-    if (!this.compaction.shouldCompact(this.messages)) {
-      return false;
-    }
-
-    console.log('[Session] LLM 调用前触发压缩检查，执行上下文压缩');
-    return this.compact();
+  getCompaction(): Compaction | undefined {
+    return this.compaction;
   }
 
   /**
-   * 手动压缩上下文（指定保留消息数和摘要）
-   * @param keepLastN 保留最近 N 条消息
-   * @param summaryMessage 摘要消息
+   * 获取当前 Token 使用情况
    */
-  async manualCompact(keepLastN: number, summaryMessage: Message): Promise<void> {
-    if (!this.memoryManager) {
-      // 没有 MemoryManager 时，简单截断内存中的消息
-      const systemMessage = this.messages.find((m) => m.role === 'system');
-      const recentMessages = this.messages.slice(-keepLastN);
-      this.messages = systemMessage
-        ? [systemMessage, summaryMessage, ...recentMessages.filter(m => m.role !== 'system')]
-        : [summaryMessage, ...recentMessages];
-      return;
+  getTokenInfo() {
+    if (!this.compaction) {
+      return {
+        estimatedTotal: 0,
+        accumulatedTotal: 0,
+        hasReliableUsage: false,
+        messageCount: this.messages.length,
+        threshold: 0,
+        shouldCompact: false,
+      };
     }
 
-    // 使用 MemoryManager 的压缩功能
-    await this.memoryManager.compactContext(this.sessionId, {
-      keepLastN,
-      summaryMessage,
-      reason: 'manual',
-    });
-
-    // 重新加载当前上下文
-    const context = await this.memoryManager.getCurrentContext(this.sessionId);
-    if (context) {
-      this.messages = context.messages;
-    }
+    const info = this.compaction.getTokenInfo(this.messages);
+    return {
+      ...info,
+      messageCount: this.messages.length,
+    };
   }
 
-  /**
-   * 计算 Token 使用量
-   */
-  calculateTokens(): number {
-    return this.messages.reduce((acc, msg) => acc + this.getContentLength(msg.content), 0);
-  }
+  // ==================== 持久化 ====================
 
   /**
    * 获取 MemoryManager 实例
@@ -330,16 +248,17 @@ export class Session {
     return this.memoryManager;
   }
 
+  getSessionId(): string {
+    return this.sessionId;
+  }
+
   /**
    * 立即同步当前状态到 MemoryManager
    */
   async sync(): Promise<void> {
     if (!this.memoryManager) return;
-
-    // 等待所有待处理的持久化操作完成
     await this.persistQueue;
-
-    // 保存当前上下文
+    
     const context = await this.memoryManager.getCurrentContext(this.sessionId);
     if (context) {
       await this.memoryManager.saveCurrentContext({
@@ -349,50 +268,46 @@ export class Session {
     }
   }
 
-  /**
-   * 将消息持久化操作串行化，避免流式更新时出现竞态
-   */
-  private queuePersistOperation(
-    message: Message,
-    operation: 'add' | 'update'
-  ): void {
+  private schedulePersist(message: Message, operation: 'add' | 'update'): void {
     this.persistQueue = this.persistQueue
-      .then(async () => {
-        if (!this.memoryManager) return;
-
-        if (operation === 'update') {
-          const { messageId: _messageId, ...updates } = message;
-          await this.memoryManager.updateMessageInContext(
-            this.sessionId,
-            message.messageId,
-            updates
-          );
-          return;
-        }
-
-        await this.memoryManager.addMessageToContext(this.sessionId, message);
-      })
-      .catch((error) => {
-        console.error(`Failed to persist message (${operation}):`, error);
+      .then(() => this.doPersist(message, operation))
+      .catch(error => {
+        console.error(`[Session] Failed to persist message (${operation}):`, error);
       });
   }
 
+  private async doPersist(message: Message, operation: 'add' | 'update'): Promise<void> {
+    if (!this.memoryManager) return;
+
+    if (operation === 'update') {
+      const { messageId: _, ...updates } = message;
+      await this.memoryManager.updateMessageInContext(this.sessionId, message.messageId, updates);
+    } else {
+      await this.memoryManager.addMessageToContext(this.sessionId, message);
+    }
+  }
+
+  // ==================== 工具调用修复 ====================
+
   /**
-   * 修复异常中断导致的未闭合 tool call：
-   * assistant(tool_calls) 后若缺少对应 tool 消息，补一条失败结果，确保后续请求消息结构合法。
+   * 修复异常中断导致的未闭合 tool call
    */
   private repairInterruptedToolCalls(): void {
     let index = 0;
+    
     while (index < this.messages.length) {
       const current = this.messages[index];
-      const expectedToolCallIds = this.extractToolCallIds(current);
-      if (expectedToolCallIds.length === 0) {
+      const toolCallIds = this.extractToolCallIds(current);
+      
+      if (toolCallIds.length === 0) {
         index++;
         continue;
       }
 
+      // 收集后续的 tool 响应
       let cursor = index + 1;
       const responded = new Set<string>();
+      
       while (cursor < this.messages.length && this.messages[cursor].role === 'tool') {
         const toolCallId = this.extractToolCallId(this.messages[cursor]);
         if (toolCallId) {
@@ -401,19 +316,21 @@ export class Session {
         cursor++;
       }
 
-      const missingIds = expectedToolCallIds.filter((id) => !responded.has(id));
+      // 找出缺失响应的 tool calls
+      const missingIds = toolCallIds.filter(id => !responded.has(id));
+      
       if (missingIds.length === 0) {
         index = cursor;
         continue;
       }
 
-      const recoveredMessages = missingIds.map((toolCallId) => this.buildInterruptedToolResult(toolCallId));
+      // 插入失败响应
+      const recoveredMessages = missingIds.map(toolCallId => this.createInterruptedToolResult(toolCallId));
       this.messages.splice(cursor, 0, ...recoveredMessages);
-
-      if (this.memoryManager) {
-        for (const message of recoveredMessages) {
-          this.queuePersistOperation(message, 'add');
-        }
+      
+      // 持久化修复的消息
+      for (const msg of recoveredMessages) {
+        this.schedulePersist(msg, 'add');
       }
 
       index = cursor + recoveredMessages.length;
@@ -422,27 +339,29 @@ export class Session {
 
   private extractToolCallIds(message: Message): string[] {
     if (message.role !== 'assistant') return [];
-    const rawCalls = (message as { tool_calls?: unknown }).tool_calls;
+    
+    const rawCalls = (message as any).tool_calls;
     if (!Array.isArray(rawCalls)) return [];
 
     const uniqueIds = new Set<string>();
     for (const call of rawCalls) {
-      const callId = (call as { id?: unknown })?.id;
+      const callId = call?.id;
       if (typeof callId === 'string' && callId.length > 0) {
         uniqueIds.add(callId);
       }
     }
-
+    
     return Array.from(uniqueIds);
   }
 
   private extractToolCallId(message: Message): string | null {
     if (message.role !== 'tool') return null;
-    const toolCallId = (message as { tool_call_id?: unknown }).tool_call_id;
+    
+    const toolCallId = (message as any).tool_call_id;
     return typeof toolCallId === 'string' && toolCallId.length > 0 ? toolCallId : null;
   }
 
-  private buildInterruptedToolResult(toolCallId: string): Message {
+  private createInterruptedToolResult(toolCallId: string): Message {
     return {
       messageId: uuid(),
       role: 'tool',
@@ -455,12 +374,5 @@ export class Session {
         message: 'Tool execution was interrupted before a result was produced.',
       }),
     };
-  }
-
-  private getContentLength(content: Message['content']): number {
-    if (typeof content === 'string') {
-      return content.length;
-    }
-    return JSON.stringify(content).length;
   }
 }

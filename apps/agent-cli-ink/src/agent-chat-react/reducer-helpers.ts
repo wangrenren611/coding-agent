@@ -158,6 +158,9 @@ export function withToolCallUpdate(state: AgentChatState, options: ToolCallUpdat
   };
 }
 
+// 用于生成唯一 ID 的计数器
+let messageCounter = 0;
+
 export function resolveMessageId(
   state: AgentChatState,
   msgId: string | undefined,
@@ -165,7 +168,9 @@ export function resolveMessageId(
   timestamp: number
 ): string {
   if (msgId) return msgId;
-  return `${prefix}-${timestamp}-${state.messages.length}`;
+  // 使用 timestamp + counter + messages.length 确保唯一性
+  messageCounter += 1;
+  return `${prefix}-${timestamp}-${messageCounter}-${state.messages.length}`;
 }
 
 export function normalizeResultOutput(result: unknown): string | null {

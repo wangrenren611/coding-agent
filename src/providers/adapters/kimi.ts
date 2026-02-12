@@ -7,6 +7,7 @@ export class KimiAdapter extends StandardAdapter {
     }
 
    transformRequest(options?: LLMRequest): LLMRequest {
+ 
     return {
         ...super.transformRequest(options),
          thinking:{

@@ -33,6 +33,7 @@ export interface UserMessageOptions extends BaseMessageOptions {
 export interface AssistantMessageOptions extends BaseMessageOptions {
     content?: MessageContent;
     tool_calls?: ToolCall[];
+    reasoning_content?: string;  // 推理内容
 }
 
 export interface ToolMessageOptions extends BaseMessageOptions {
@@ -68,6 +69,7 @@ export class MessageBuilder {
             finish_reason: options.finish_reason,
             usage: options.usage,
             id: options.id,
+            ...(options.reasoning_content && { reasoning_content: options.reasoning_content }),
         };
     }
 
@@ -84,6 +86,7 @@ export class MessageBuilder {
             finish_reason: options.finish_reason,
             usage: options.usage,
             id: options.id,
+            ...(options.reasoning_content && { reasoning_content: options.reasoning_content }),
         };
     }
 
@@ -112,6 +115,7 @@ export class MessageBuilder {
         const id = messageId || uuid();
         const finishReason = getResponseFinishReason(response);
         const usage = response.usage;
+        const reasoningContent = (response.choices?.[0]?.message as any)?.reasoning_content;
 
         if (responseHasToolCalls(response)) {
             return this.assistantToolCallMessage({
@@ -120,6 +124,7 @@ export class MessageBuilder {
                 tool_calls: getResponseToolCalls(response),
                 finish_reason: finishReason,
                 usage,
+                reasoning_content: reasoningContent,
             });
         }
 
@@ -128,6 +133,7 @@ export class MessageBuilder {
             content: getResponseContent(response),
             finish_reason: finishReason,
             usage,
+            reasoning_content: reasoningContent,
         });
     }
 

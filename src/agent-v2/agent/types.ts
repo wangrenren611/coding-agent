@@ -77,4 +77,6 @@ export interface AgentOptions{
     enableCompaction?: boolean;
     /** 压缩配置（可选，未提供字段会使用 provider 默认值） */
     compactionConfig?: Partial<Omit<CompactionConfig, 'llmProvider'>>;
+    /** 启用 thinking 模式（特定 Provider 如 Kimi 支持） */
+    thinking?: boolean;
 }

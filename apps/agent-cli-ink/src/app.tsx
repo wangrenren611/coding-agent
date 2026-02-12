@@ -1,34 +1,124 @@
-import React, { useEffect, useMemo, useState, memo, useRef } from "react";
-import { Box, Text, useApp, useInput } from "ink";
+import React, { useEffect, useMemo, useState, useRef, useCallback } from "react";
+import { Box, Text, useApp, useInput, Static } from "ink";
 import { Composer } from "./components/composer";
-import { Timeline } from "./components/timeline";
 import { useAgentRuntime } from "./runtime/use-agent-runtime";
 import { TimelineItem } from "./components/timeline-item";
 import type { CliOptions, TimelineEntry } from "./types";
 import Loading from "./components/loading";
 
-const ThinkingIndicator = memo(function ThinkingIndicator({ isExecuting }: { isExecuting: boolean }) {
-  if (!isExecuting) return null;
-  return (
-    <Box marginBottom={1} flexDirection="row" gap={1}>
-      <Loading  type="star"/>
-      <Text color="green">Think...</Text>
-    </Box>
-  );
-});
+// 渲染入口到纯文本
+function renderEntryPlainText(entry: TimelineEntry): string {
+  if (entry.type === "user") {
+    return `❯ ${entry.text}`;
+  }
+  if (entry.type === "assistant") {
+    const prefix = entry.loading ? "⏺ " : "○ ";
+    return `${prefix}${entry.text}`;
+  }
+  if (entry.type === "system") {
+    return `○ ${entry.text}`;
+  }
+  if (entry.type === "error") {
+    return `✗ Error: ${entry.error}${entry.phase ? ` (${entry.phase})` : ""}`;
+  }
+  if (entry.type === "tool") {
+    return `[${entry.toolName}] ${entry.args.slice(0, 30)}`;
+  }
+  if (entry.type === "code_patch") {
+    return `Update: ${entry.path}`;
+  }
+  return "";
+}
 
 export function App({ options }: { options: CliOptions }): React.JSX.Element {
   const { exit } = useApp();
   const runtime = useAgentRuntime(options);
   const [isOutputPaused, setIsOutputPaused] = useState(false);
-  const [displaySnapshot, setDisplaySnapshot] = useState(runtime.snapshot);
-  
-  // 使用 ref 来跟踪最新的 runtime.snapshot，避免不必要的 useEffect 触发
-  const latestSnapshotRef = useRef(runtime.snapshot);
-  const updatePendingRef = useRef(false);
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  latestSnapshotRef.current = runtime.snapshot;
+  // 固定的历史消息
+  const [staticItems, setStaticItems] = useState<TimelineEntry[]>([]);
+  
+  // 追踪已输出到原生终端的活动消息行数
+  const activeLinesCountRef = useRef(0);
+  const lastActiveIdRef = useRef<string | null>(null);
+  const lastActiveTextRef = useRef<string>("");
+
+  const snapshot = runtime.snapshot;
+  const entries = snapshot.timelineEntries;
+
+  // 获取最后一条消息
+  const lastEntry = entries.length > 0 ? entries[entries.length - 1] : null;
+
+  // 判断最后一条消息是否正在流式输出
+  const isLastEntryStreaming = lastEntry &&
+    (lastEntry.type === "assistant" || lastEntry.type === "tool") &&
+    lastEntry.loading;
+
+  // 处理消息输出
+  useEffect(() => {
+    // 1. 处理已完成的消息 -> 添加到 static
+    const completedEntries = entries.filter(entry => {
+      if (entry.type === "assistant" || entry.type === "tool") {
+        return !entry.loading;
+      }
+      return true;
+    });
+
+    // 如果有新的完成消息，更新 static 并清除原生终端输出
+    if (completedEntries.length !== staticItems.length) {
+      // 清除原生终端的活动消息
+      if (activeLinesCountRef.current > 0) {
+        process.stdout.write(`\x1b[${activeLinesCountRef.current}F\x1b[0J`);
+        activeLinesCountRef.current = 0;
+        lastActiveIdRef.current = null;
+        lastActiveTextRef.current = "";
+      }
+      setStaticItems([...completedEntries]);
+    }
+
+    // 2. 处理正在流式输出的消息 -> 原生终端输出（原地更新）
+    if (isLastEntryStreaming && lastEntry) {
+      const text = renderEntryPlainText(lastEntry);
+      const lines = text.split("\n");
+      const newLineCount = lines.length;
+
+      // 如果是同一条消息的更新
+      if (lastEntry.id === lastActiveIdRef.current) {
+        // 清除之前的输出
+        if (activeLinesCountRef.current > 0) {
+          process.stdout.write(`\x1b[${activeLinesCountRef.current}F\x1b[0J`);
+        }
+      } else {
+        // 新消息，清除之前的输出
+        if (activeLinesCountRef.current > 0) {
+          process.stdout.write(`\x1b[${activeLinesCountRef.current}F\x1b[0J`);
+        }
+        lastActiveIdRef.current = lastEntry.id;
+      }
+
+      // 输出新的内容
+      process.stdout.write(`${text}\n`);
+      
+      lastActiveTextRef.current = text;
+      activeLinesCountRef.current = newLineCount;
+    } else if (activeLinesCountRef.current > 0) {
+      // 流式输出结束，清除原生终端输出
+      process.stdout.write(`\x1b[${activeLinesCountRef.current}F\x1b[0J`);
+      activeLinesCountRef.current = 0;
+      lastActiveIdRef.current = null;
+      lastActiveTextRef.current = "";
+    }
+  }, [entries, isLastEntryStreaming, lastEntry, staticItems.length]);
+
+  // 重置
+  useEffect(() => {
+    if (entries.length === 0) {
+      setStaticItems([]);
+      activeLinesCountRef.current = 0;
+      lastActiveIdRef.current = null;
+      lastActiveTextRef.current = "";
+    }
+  }, [entries.length]);
 
   useEffect(() => {
     if (runtime.shouldExit) exit();
@@ -38,65 +128,6 @@ export function App({ options }: { options: CliOptions }): React.JSX.Element {
     if (runtime.outputControl.mode === "pause") setIsOutputPaused(true);
     if (runtime.outputControl.mode === "resume") setIsOutputPaused(false);
   }, [runtime.outputControl.mode, runtime.outputControl.seq]);
-
-  // 优化的 snapshot 更新逻辑：使用 setTimeout 节流
-  useEffect(() => {
-    if (isOutputPaused) return;
-
-    const scheduleUpdate = () => {
-      if (updatePendingRef.current) return;
-      
-      updatePendingRef.current = true;
-      timeoutRef.current = setTimeout(() => {
-        setDisplaySnapshot(latestSnapshotRef.current);
-        updatePendingRef.current = false;
-      }, 0);
-    };
-
-    // 辅助函数：比较两个 TimelineEntry 是否相等
-    function entryEqual(a: TimelineEntry, b: TimelineEntry): boolean {
-      if (a.type !== b.type || a.id !== b.id) return false;
-      // 对于流式输出，主要检查 content 字段
-      if (a.type === 'assistant' && b.type === 'assistant') {
-        return a.text === b.text && a.loading === b.loading;
-      }
-      if (a.type === 'tool' && b.type === 'tool') {
-        return a.loading === b.loading && a.status === b.status && a.output === b.output;
-      }
-      if (a.type === 'user' || a.type === 'system') {
-        return (a as any).text === (b as any).text;
-      }
-      if (a.type === 'code_patch') {
-        return (a as any).diff === (b as any).diff;
-      }
-      if (a.type === 'error') {
-        return (a as any).error === (b as any).error && (a as any).phase === (b as any).phase;
-      }
-      return false;
-    }
-
-    // 只在关键变化时触发更新
-    if (
-      runtime.snapshot.isStreaming !== displaySnapshot.isStreaming ||
-      runtime.snapshot.isExecuting !== displaySnapshot.isExecuting ||
-      runtime.snapshot.status !== displaySnapshot.status ||
-      runtime.snapshot.timelineEntries.length !== displaySnapshot.timelineEntries.length ||
-      (runtime.snapshot.timelineEntries.length > 0 &&
-       displaySnapshot.timelineEntries.length > 0 &&
-       !entryEqual(
-         runtime.snapshot.timelineEntries[runtime.snapshot.timelineEntries.length - 1],
-         displaySnapshot.timelineEntries[displaySnapshot.timelineEntries.length - 1]
-       ))
-    ) {
-      scheduleUpdate();
-    }
-
-    return () => {
-      if (timeoutRef.current !== null) {
-        clearTimeout(timeoutRef.current);
-      }
-    };
-  }, [runtime.snapshot, displaySnapshot, isOutputPaused]);
 
   useInput((_input: string, key: { ctrl?: boolean; s?: boolean; q?: boolean }) => {
     if (key.ctrl && key.s) {
@@ -114,47 +145,38 @@ export function App({ options }: { options: CliOptions }): React.JSX.Element {
     if (!isOutputPaused) return null;
     return (
       <Text color="yellow">
-        Output paused. Use terminal native scroll freely, press Ctrl+Q to resume.
+        Output paused. Press Ctrl+Q to resume.
       </Text>
     );
   }, [isOutputPaused]);
 
-  // 只在最后一条消息正在加载时分离出 activeEntry
-  // 关键：使用 ID 而不是对象引用来判断是否相同
-  const lastEntryId = displaySnapshot.timelineEntries.length > 0 
-    ? displaySnapshot.timelineEntries[displaySnapshot.timelineEntries.length - 1].id 
-    : null;
-    
-  const lastEntry = lastEntryId 
-    ? displaySnapshot.timelineEntries.find(e => e.id === lastEntryId) || null
-    : null;
-    
-  const isLastEntryLoading = lastEntry 
-    ? (lastEntry.type === "assistant" || lastEntry.type === "tool") && lastEntry.loading
-    : false;
-
-  // 如果最后一条正在加载，作为 activeEntry；否则全部显示在 Timeline 中
-  const historyEntries = isLastEntryLoading && lastEntry
-    ? displaySnapshot.timelineEntries.filter(e => e.id !== lastEntryId)
-    : displaySnapshot.timelineEntries;
-
-  const activeEntry = isLastEntryLoading && lastEntry ? lastEntry : null;
-  const hasActiveAssistant = lastEntry?.type === "assistant";
+  // 是否有活动的 assistant 消息
+  const hasActiveAssistant = lastEntry?.type === "assistant" && lastEntry.loading;
 
   return (
     <Box flexDirection="column" marginBottom={2}>
-      {/* <StatusBar
-        model={options.model}
-        snapshot={displaySnapshot}
-        outputPaused={isOutputPaused}
-      /> */}
       {pausedNotice}
-    
-      <Timeline entries={historyEntries} />
-      {activeEntry && <TimelineItem key={activeEntry.id} entry={activeEntry} />}
-      <ThinkingIndicator isExecuting={displaySnapshot.isExecuting && !hasActiveAssistant} />
+
+      {/* 静态区域：已完成的消息 */}
+      {staticItems.length > 0 && (
+        <Static items={staticItems}>
+          {(entry) => <TimelineItem key={entry.id} entry={entry} />}
+        </Static>
+      )}
+
+      {/* 活动消息通过原生终端输出，这里不再渲染 */}
+
+      {/* 思考指示器 */}
+      {snapshot.isExecuting && !hasActiveAssistant && (
+        <Box marginBottom={1} flexDirection="row" gap={1}>
+          <Loading type="star" />
+          <Text color="green">Thinking...</Text>
+        </Box>
+      )}
+
+      {/* 输入框 */}
       <Composer
-        disabled={runtime.snapshot.isExecuting}
+        disabled={snapshot.isExecuting}
         onAbort={runtime.abortRunning}
         onSubmit={runtime.submitInput}
       />

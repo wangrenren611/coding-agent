@@ -22,7 +22,7 @@ export type ModelId =
     // DeepSeek 系列
     | 'deepseek-chat'
     // GLM 5.0 系列
-    | 'glm-5.0';
+    | 'glm-5';
 
 /**
  * 模型配置

@@ -125,24 +125,46 @@ function resolveTextMessageId(
   const latestIndex = latestId ? state.messageIndexByMsgId[latestId] : undefined;
   const latestMessage = latestIndex !== undefined ? state.messages[latestIndex] : undefined;
 
+  // 如果有明确的 msgId
   if (message.msgId) {
+    // 检查是否已存在此 msgId
     const existingIndex = state.messageIndexByMsgId[message.msgId];
     if (existingIndex !== undefined) return message.msgId;
 
-    // Defensive merge for providers that switch msgId mid-stream.
+    // 如果有上一条 assistant 消息
     if (latestId && latestMessage?.kind === "assistant") {
-      if (message.type !== AgentMessageType.TEXT_START) return latestId;
-      if (message.type === AgentMessageType.TEXT_START && latestMessage.phase === "streaming") return latestId;
+      // 如果上一条消息还在流式输出，复用它
+      if (latestMessage.phase === "streaming") {
+        return latestId;
+      }
+      // 如果上一条消息已完成但内容为空，复用它（可能是异常情况）
+      if (!latestMessage.content.trim()) {
+        return latestId;
+      }
     }
 
     return message.msgId;
   }
 
+  // 没有 msgId 的情况
+  // 如果有上一条 assistant 消息
+  if (latestId && latestMessage?.kind === "assistant") {
+    // 如果还在流式输出，继续使用
+    if (latestMessage.phase === "streaming") {
+      return latestId;
+    }
+    // 如果已完成但内容为空，复用
+    if (!latestMessage.content.trim()) {
+      return latestId;
+    }
+  }
+
+  // 创建新消息
   if (message.type === AgentMessageType.TEXT_START) {
     return resolveMessageId(state, undefined, "text", message.timestamp);
   }
 
-  return latestId || `text-${message.timestamp}`;
+  return latestId || resolveMessageId(state, undefined, "text", message.timestamp);
 }
 
 function mergeTextDelta(current: string, incoming: string): string {

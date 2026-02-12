@@ -126,6 +126,14 @@ export function hasContentDelta(chunk: Chunk): boolean {
 }
 
 /**
+ * 检查 chunk 是否包含推理内容增量 (reasoning_content)
+ */
+export function hasReasoningDelta(chunk: Chunk): boolean {
+    const delta = chunk.choices?.[0]?.delta;
+    return !!delta && typeof (delta as any).reasoning_content === 'string' && (delta as any).reasoning_content !== '';
+}
+
+/**
  * 检查 chunk 是否包含工具调用
  */
 export function hasToolCalls(chunk: Chunk): boolean {
@@ -152,6 +160,16 @@ export function getChunkContent(chunk: Chunk): string {
         .map((part) => stringifyContentPart(part))
         .filter(Boolean)
         .join('\n');
+}
+
+/**
+ * 获取 chunk 中的 reasoning_content
+ */
+export function getChunkReasoningContent(chunk: Chunk): string {
+    const delta = chunk.choices?.[0]?.delta;
+    const reasoningContent = (delta as any)?.reasoning_content;
+    if (!reasoningContent) return '';
+    return typeof reasoningContent === 'string' ? reasoningContent : '';
 }
 
 /**
