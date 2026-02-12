@@ -122,7 +122,10 @@ export class Session {
     const isUpdate = Boolean(message.messageId && lastMessage?.messageId === message.messageId);
 
     if (isUpdate) {
-      this.messages[this.messages.length - 1] = message;
+      this.messages[this.messages.length - 1] = {
+        ...lastMessage,
+        ...message,
+      };
     } else {
       this.messages.push({ ...message });
     }

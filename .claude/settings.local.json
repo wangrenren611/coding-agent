@@ -1,48 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(pnpm add:*)",
-      "Bash(pnpm test:run)",
+      "Bash(npm:*)",
+      "Edit",
+      "Bash(npx:*)",
       "Bash(npx tsc:*)",
-      "Bash(npm test)",
-      "Bash(wc:*)",
-      "Bash(find:*)",
-      "Bash(npm install:*)",
-      "Bash(timeout:*)",
-      "Bash(npm run build:*)",
-      "Bash(echo:*)",
-      "Bash(npx vitest run:*)",
-      "Bash(node:*)",
-      "Bash(pnpm build:cli:*)",
-      "Bash(pnpm run:*)",
-      "Bash(pnpm build:*)",
-      "Bash(npx tsx:*)",
-      "WebSearch",
-      "mcp__tavily__tavily_search",
-      "mcp__tavily__tavily_extract",
-      "mcp__sequential-thinking__sequentialthinking",
-      "Bash(tree:*)",
-      "Bash(pnpm install)",
-      "Bash(ls:*)",
-      "Bash(npm run demo-1:*)",
-      "Bash(dir:*)",
-      "Bash(pnpm dev:*)",
-      "mcp__deepwiki__search_deepwiki",
-      "mcp__deepwiki__ask_repository",
-      "Bash(bun run:*)",
-      "Bash(where:*)",
-      "Bash(npx ts-node:*)",
-      "Bash(npx tsup:*)",
-      "Bash(git clone:*)",
-      "Bash(pnpm bench:agent:adapter:*)",
-      "Bash(pip install:*)",
-      "Bash(pnpm bench:multi-swe:*)",
-      "Bash(yarn test)",
-      "Bash(corepack yarn install:*)",
-      "Bash(corepack enable:*)",
-      "Bash(pnpm batch:test:skip-agent:*)",
-      "Bash(YARN_IGNORE_PATH=1 yarn test:*)",
-      "Bash(corepack disable:*)"
+      "Bash(npx vitest run:*)"
     ]
   },
   "enableAllProjectMcpServers": true,
@@ -51,5 +14,10 @@
     "context7",
     "tavily",
     "shadcn"
-  ]
+  ],
+  "enabledPlugins": {
+    "typescript-lsp@claude-plugins-official": true
+  },
+  "outputStyle": "Explanatory",
+  "alwaysThinkingEnabled": true
 }

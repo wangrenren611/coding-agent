@@ -73,7 +73,7 @@ export class Agent {
     private stream: boolean;
     private streamCallback?: StreamCallback;
     private maxBufferSize: number;
- private thinking?: boolean;
+    private thinking?: boolean;
 
     // 状态
     private status: AgentStatus;
@@ -121,7 +121,7 @@ export class Agent {
         this.status = AgentStatus.IDLE;
         this.timeProvider = config.timeProvider ?? new DefaultTimeProvider();
         this.maxBufferSize = config.maxBufferSize ?? 100000;
- this.thinking = config.thinking;
+        this.thinking = config.thinking;
         this.loopMax = 3000;
         this.maxCompensationRetries = 1;
         this.defaultRetryDelayMs = this.normalizePositiveMs(config.retryDelayMs, 1000 * 60 * 10);

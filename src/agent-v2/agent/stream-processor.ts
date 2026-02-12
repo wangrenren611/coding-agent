@@ -1,14 +1,20 @@
 /**
- * 流式处理器
- * 负责处理 LLM 流式响应，管理缓冲区和元数据
- * 
- * 支持两种内容类型：
- * - content: 普通文本内容
- * - reasoning_content: 推理/思考内容 (thinking 模式)
+ * 流式处理器 v2
+ *
+ * 负责处理 LLM 流式响应，统一管理 reasoning_content、content、tool_calls 三种内容类型。
+ *
+ * 设计原则：
+ * 1. 统一的消息更新机制：所有内容变更都通过 onMessageUpdate 持久化
+ * 2. 状态机驱动：通过 started 标志位追踪各类内容的处理状态
+ * 3. 缓冲区管理：独立的缓冲区存储不同类型内容，支持大小限制
+ * 4. 事件驱动：通过回调函数向外部通知状态变化
+ *
+ * 内容处理顺序（典型 LLM 响应）：
+ * reasoning_content → content → tool_calls → finish_reason
  */
 
-import { Chunk, FinishReason, LLMResponse, Usage } from "../../providers";
-import { Message } from "../session/types";
+import { Chunk, FinishReason, LLMResponse, Usage } from '../../providers';
+import { Message } from '../session/types';
 import {
     StreamChunkMetadata,
     StreamToolCall,
@@ -20,54 +26,124 @@ import {
     hasContentDelta,
     hasReasoningDelta,
     hasToolCalls,
-} from "./types-internal";
+} from './types-internal';
 
+// ==================== 类型定义 ====================
+
+/**
+ * 消息类型枚举
+ */
+export type MessageType = 'text' | 'tool-call';
+
+/**
+ * 处理器状态
+ */
+interface ProcessorState {
+    /** 是否已中止 */
+    aborted: boolean;
+    /** 推理内容是否已开始 */
+    reasoningStarted: boolean;
+    /** 普通文本是否已开始 */
+    textStarted: boolean;
+    /** 工具调用是否已开始 */
+    toolCallsStarted: boolean;
+    /** 推理内容是否已完成 */
+    reasoningCompleted: boolean;
+    /** 普通文本是否已完成 */
+    textCompleted: boolean;
+}
+
+/**
+ * 缓冲区数据
+ */
+interface BufferData {
+    /** 推理内容缓冲区 */
+    reasoning: string;
+    /** 普通文本缓冲区 */
+    content: string;
+    /** 工具调用映射 (index -> ToolCall) */
+    toolCalls: Map<number, StreamToolCall>;
+}
+
+/**
+ * 流式处理器配置选项
+ */
 export interface StreamProcessorOptions {
+    /** 最大缓冲区大小（字节） */
     maxBufferSize: number;
+
+    // ==================== 消息持久化回调 ====================
+
+    /** 消息更新回调（用于持久化） */
     onMessageUpdate: (message: Partial<Message> & { messageId: string }) => void;
+    /** 消息创建回调（用于工具调用场景） */
     onMessageCreate: (message: Partial<Message> & { messageId: string; role: 'assistant' }) => void;
+
+    // ==================== 文本事件回调 ====================
+
+    /** 文本增量回调 */
     onTextDelta: (content: string, messageId: string) => void;
+    /** 文本开始回调 */
     onTextStart: (messageId: string) => void;
+    /** 文本完成回调 */
     onTextComplete: (messageId: string) => void;
-    // 推理内容回调 (thinking 模式)
+
+    // ==================== 推理内容事件回调 ====================
+
+    /** 推理增量回调 */
     onReasoningDelta?: (content: string, messageId: string) => void;
+    /** 推理开始回调 */
     onReasoningStart?: (messageId: string) => void;
+    /** 推理完成回调 */
     onReasoningComplete?: (messageId: string) => void;
-    // Token 使用量回调
+
+    // ==================== Token 使用量回调 ====================
+
+    /** Token 使用量更新回调 */
     onUsageUpdate?: (usage: Usage) => void;
 }
 
+// ==================== 主类 ====================
+
 export class StreamProcessor {
-    private buffer = '';
-    private reasoningBuffer = '';  // 推理内容缓冲区
-    private toolCalls = new Map<number, StreamToolCall>();
+    // 配置
+    private readonly options: StreamProcessorOptions;
+    private readonly maxBufferSize: number;
+
+    // 状态
+    private state: ProcessorState = this.createInitialState();
+
+    // 缓冲区
+    private buffers: BufferData = this.createInitialBuffers();
+
+    // 元数据
     private metadata: StreamChunkMetadata = {};
     private currentMessageId: string = '';
-    private aborted = false;
-    private reasoningStarted = false;
-    private textStarted = false;
 
-    constructor(private options: StreamProcessorOptions) {}
+    constructor(options: StreamProcessorOptions) {
+        this.options = options;
+        this.maxBufferSize = options.maxBufferSize;
+    }
+
+    // ==================== 公共 API ====================
 
     /**
      * 重置处理器状态
+     * 用于开始处理新的消息
      */
     reset(): void {
-        this.buffer = '';
-        this.reasoningBuffer = '';
-        this.toolCalls.clear();
+        this.state = this.createInitialState();
+        this.buffers = this.createInitialBuffers();
         this.metadata = {};
         this.currentMessageId = '';
-        this.aborted = false;
-        this.reasoningStarted = false;
-        this.textStarted = false;
     }
 
     /**
      * 中止处理
+     * 当缓冲区超出限制时自动调用
      */
     abort(): void {
-        this.aborted = true;
+        this.state.aborted = true;
     }
 
     /**
@@ -79,36 +155,43 @@ export class StreamProcessor {
 
     /**
      * 处理单个 chunk
+     *
+     * 处理顺序：
+     * 1. 更新元数据
+     * 2. 处理 reasoning_content
+     * 3. 处理 content
+     * 4. 处理 tool_calls
+     * 5. 处理 finish_reason
      */
     processChunk(chunk: Chunk): void {
-        if (this.aborted) return;
+        if (this.state.aborted) return;
 
-        const content = getChunkContent(chunk);
-        const reasoningContent = getChunkReasoningContent(chunk);
-        const toolCalls = getChunkToolCalls(chunk);
         const finishReason = getFinishReason(chunk);
 
-        // 更新元数据
+        // 1. 更新元数据
         this.updateMetadata(chunk, finishReason);
 
-        // 处理推理内容增量 (reasoning_content) - thinking 模式
+        // 2. 处理 reasoning_content
         if (hasReasoningDelta(chunk)) {
-            this.handleReasoningDelta(reasoningContent, chunk.id, finishReason);
+            const content = getChunkReasoningContent(chunk);
+            this.handleReasoningContent(content, chunk.id, finishReason);
         }
 
-        // 处理普通内容增量 (content)
+        // 3. 处理 content
         if (hasContentDelta(chunk)) {
-            this.handleContentDelta(content, chunk.id, finishReason);
+            const content = getChunkContent(chunk);
+            this.handleTextContent(content, chunk.id, finishReason);
         }
 
-        // 处理工具调用
+        // 4. 处理 tool_calls
         if (hasToolCalls(chunk)) {
-            this.handleToolCalls(toolCalls!, chunk.id, finishReason);
+            const toolCalls = getChunkToolCalls(chunk)!;
+            this.handleToolCalls(toolCalls, chunk.id, finishReason);
         }
 
-        // 处理单独的 finish_reason（没有 content 或 tool_calls 的情况）
+        // 5. 处理单独的 finish_reason
         if (finishReason && !hasContentDelta(chunk) && !hasReasoningDelta(chunk) && !hasToolCalls(chunk)) {
-            this.handleFinishReason(finishReason, chunk.id);
+            this.handleFinishReasonOnly(finishReason, chunk.id);
         }
     }
 
@@ -116,7 +199,7 @@ export class StreamProcessor {
      * 构建最终的 LLMResponse
      */
     buildResponse(): LLMResponse {
-        const toolCalls = Array.from(this.toolCalls.values());
+        const toolCalls = Array.from(this.buffers.toolCalls.values());
 
         return {
             id: this.metadata.id || '',
@@ -128,10 +211,9 @@ export class StreamProcessor {
                     index: 0,
                     message: {
                         role: 'assistant',
-                        content: this.buffer,
+                        content: this.buffers.content || '',
                         tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
-                        // 添加 reasoning_content 到响应中
-                        ...(this.reasoningBuffer && { reasoning_content: this.reasoningBuffer }),
+                        ...(this.buffers.reasoning && { reasoning_content: this.buffers.reasoning }),
                     },
                     finish_reason: this.metadata.finish_reason,
                 },
@@ -140,110 +222,129 @@ export class StreamProcessor {
         };
     }
 
-    /**
-     * 获取当前元数据
-     */
+    // ==================== 状态查询方法 ====================
+
     getMetadata(): Readonly<StreamChunkMetadata> {
         return { ...this.metadata };
     }
 
-    /**
-     * 获取缓冲区内容
-     */
     getBuffer(): string {
-        return this.buffer;
+        return this.buffers.content;
     }
 
-    /**
-     * 获取推理内容缓冲区
-     */
     getReasoningBuffer(): string {
-        return this.reasoningBuffer;
+        return this.buffers.reasoning;
     }
 
-    /**
-     * 获取工具调用列表
-     */
     getToolCalls(): StreamToolCall[] {
-        return Array.from(this.toolCalls.values());
+        return Array.from(this.buffers.toolCalls.values());
     }
 
-    /**
-     * 检查是否有工具调用
-     */
     hasToolCalls(): boolean {
-        return this.toolCalls.size > 0;
+        return this.buffers.toolCalls.size > 0;
     }
 
-    // ==================== 私有方法 ====================
+    isAborted(): boolean {
+        return this.state.aborted;
+    }
+
+    // ==================== 私有方法：状态初始化 ====================
+
+    private createInitialState(): ProcessorState {
+        return {
+            aborted: false,
+            reasoningStarted: false,
+            textStarted: false,
+            toolCallsStarted: false,
+            reasoningCompleted: false,
+            textCompleted: false,
+        };
+    }
+
+    private createInitialBuffers(): BufferData {
+        return {
+            reasoning: '',
+            content: '',
+            toolCalls: new Map(),
+        };
+    }
+
+    // ==================== 私有方法：内容处理 ====================
 
     /**
-     * 处理推理内容增量 (thinking 模式)
+     * 处理推理内容 (reasoning_content)
      */
-    private handleReasoningDelta(
+    private handleReasoningContent(
         content: string,
         chunkId: string | undefined,
         finishReason: FinishReason | undefined
     ): void {
-        // 检查缓冲区大小限制
-        if (!this.appendToReasoningBuffer(content)) {
+        // 追加到缓冲区
+        if (!this.appendToBuffer('reasoning', content)) {
             return;
         }
 
-        // 触发推理开始事件（首次推理内容）
-        if (!this.reasoningStarted) {
-            this.reasoningStarted = true;
+        // 触发开始事件
+        if (!this.state.reasoningStarted) {
+            this.state.reasoningStarted = true;
             this.options.onReasoningStart?.(this.currentMessageId);
         }
 
-        // 触发推理增量事件
+        // 触发增量事件
         this.options.onReasoningDelta?.(content, this.currentMessageId);
 
-        // 触发推理完成事件
-        if (finishReason) {
+        // 持久化消息
+        this.persistMessage(chunkId, finishReason);
+
+        // 触发完成事件
+        if (finishReason && !this.state.reasoningCompleted) {
+            this.state.reasoningCompleted = true;
             this.options.onReasoningComplete?.(this.currentMessageId);
         }
     }
 
     /**
-     * 处理普通内容增量
+     * 处理普通文本内容 (content)
      */
-    private handleContentDelta(
+    private handleTextContent(
         content: string,
         chunkId: string | undefined,
         finishReason: FinishReason | undefined
     ): void {
-        // 检查缓冲区大小限制
-        if (!this.appendToBuffer(content)) {
+        // 追加到缓冲区
+        if (!this.appendToBuffer('content', content)) {
             return;
         }
 
-        // 触发文本开始事件（首次内容）
-        if (!this.textStarted) {
-            this.textStarted = true;
+        // 触发开始事件
+        if (!this.state.textStarted) {
+            
+            if(this.state.reasoningStarted&&!this.state.reasoningCompleted){
+              this.state.reasoningCompleted = true;
+              this.options.onReasoningComplete?.(this.currentMessageId);
+            }
+
+            this.state.textStarted=true
             this.options.onTextStart(this.currentMessageId);
+            
         }
 
         // 触发增量事件
         this.options.onTextDelta(content, this.currentMessageId);
 
-        // 更新或创建消息
-        this.options.onMessageUpdate({
-            messageId: this.currentMessageId,
-            role: 'assistant',
-            content: this.buffer,
-            id: chunkId,
-            finish_reason: finishReason,
-            type: 'text',
-            ...(this.reasoningBuffer && { reasoning_content: this.reasoningBuffer }),
-        });
+        // 持久化消息
+        this.persistMessage(chunkId, finishReason);
 
         // 触发完成事件
-        if (finishReason) {
+        if (finishReason && !this.state.textCompleted) {
+            this.state.textCompleted = true;
             this.options.onTextComplete(this.currentMessageId);
         }
     }
 
+    /**
+     * 处理工具调用 (tool_calls)
+     */
     private handleToolCalls(
         toolCalls: ToolCall[],
         chunkId: string | undefined,
@@ -254,31 +355,126 @@ export class StreamProcessor {
             this.updateToolCall(toolCall);
         }
 
-        // 触发文本完成（工具调用前）
-        if (this.textStarted) {
+        // 标记工具调用开始
+        if (!this.state.toolCallsStarted) {
+            this.state.toolCallsStarted = true;
+            
+            // 如果之前有文本内容，先触发完成
+            if (this.state.textStarted && !this.state.textCompleted) {
+                this.state.textCompleted = true;
+                this.options.onTextComplete(this.currentMessageId);
+            }
+
+            if(this.state.reasoningStarted&&!this.state.reasoningCompleted){
+              this.state.reasoningCompleted = true;
+              this.options.onReasoningComplete?.(this.currentMessageId);
+            }
+        }
+
+        // 使用 onMessageCreate 创建工具调用消息
+        const streamToolCalls = Array.from(this.buffers.toolCalls.values());
+        this.options.onMessageCreate({
+            messageId: this.currentMessageId,
+            role: 'assistant',
+            content: this.buffers.content,
+            tool_calls: streamToolCalls,
+            type: 'tool-call',
+            id: chunkId,
+            finish_reason: finishReason,
+            ...(this.buffers.reasoning && { reasoning_content: this.buffers.reasoning }),
+        });
+    }
+
+    /**
+     * 处理单独的 finish_reason
+     * 当 chunk 只有 finish_reason 没有其他内容时调用
+     */
+    private handleFinishReasonOnly(
+        finishReason: FinishReason,
+        chunkId: string | undefined
+    ): void {
+        // 触发文本完成
+        if (this.state.textStarted && !this.state.textCompleted) {
+            this.state.textCompleted = true;
             this.options.onTextComplete(this.currentMessageId);
         }
 
-        // 构建消息数据 - 保留 buffer 中的 content 内容
-        const streamToolCalls = Array.from(this.toolCalls.values());
-        const messageData = {
-            role: 'assistant' as const,
-            messageId: this.currentMessageId,
-            content: this.buffer, // 保留 content 内容
-            tool_calls: streamToolCalls,
-            type: 'tool-call' as const,
-            id: chunkId,
-            finish_reason: finishReason,
-        };
+        // 触发推理完成
+        if (this.state.reasoningStarted && !this.state.reasoningCompleted) {
+            this.state.reasoningCompleted = true;
+            this.options.onReasoningComplete?.(this.currentMessageId);
+        }
 
-        this.options.onMessageCreate(messageData);
+        // 持久化最终消息
+        this.persistMessage(chunkId, finishReason);
     }
 
+    // ==================== 私有方法：辅助方法 ====================
+
+    /**
+     * 持久化消息
+     * 统一的消息持久化入口
+     */
+    private persistMessage(chunkId: string | undefined, finishReason: FinishReason | undefined): void {
+        const hasTools = this.buffers.toolCalls.size > 0;
+
+        const messageData: Partial<Message> & { messageId: string } = {
+            messageId: this.currentMessageId,
+            role: 'assistant',
+            id: chunkId,
+            finish_reason: finishReason,
+            type: hasTools ? 'tool-call' : 'text',
+        };
+
+        // 只添加有内容的字段
+        if (this.buffers.content) {
+            messageData.content = this.buffers.content;
+        }
+
+        if (this.buffers.reasoning) {
+            messageData.reasoning_content = this.buffers.reasoning;
+        }
+
+        if (hasTools) {
+            messageData.tool_calls = Array.from(this.buffers.toolCalls.values());
+        }
+
+        this.options.onMessageUpdate(messageData);
+    }
+
+    /**
+     * 追加内容到缓冲区
+     */
+    private appendToBuffer(type: 'reasoning' | 'content', content: string): boolean {
+        const currentSize = type === 'reasoning'
+            ? this.buffers.reasoning.length
+            : this.buffers.content.length;
+
+        const projectedSize = currentSize + content.length;
+
+        if (projectedSize > this.maxBufferSize) {
+            this.abort();
+            return false;
+        }
+
+        if (type === 'reasoning') {
+            this.buffers.reasoning += content;
+        } else {
+            this.buffers.content += content;
+        }
+
+        return true;
+    }
+
+    /**
+     * 更新工具调用
+     */
     private updateToolCall(toolCall: ToolCall): void {
         const index = toolCall.index ?? 0;
 
-        if (!this.toolCalls.has(index)) {
-            this.toolCalls.set(index, {
+        if (!this.buffers.toolCalls.has(index)) {
+            // 创建新的工具调用
+            this.buffers.toolCalls.set(index, {
                 id: toolCall.id || '',
                 type: toolCall.type || 'function',
                 index,
@@ -288,81 +484,35 @@ export class StreamProcessor {
                 },
             });
         } else {
-            const existing = this.toolCalls.get(index)!;
+            // 累积更新现有工具调用
+            const existing = this.buffers.toolCalls.get(index)!;
+
+            if (toolCall.id) {
+                existing.id = toolCall.id;
+            }
+
             if (toolCall.function?.name) {
                 existing.function.name = toolCall.function.name;
             }
+
             if (toolCall.function?.arguments) {
                 existing.function.arguments += toolCall.function.arguments;
             }
         }
     }
 
-    private handleFinishReason(
-        finishReason: FinishReason,
-        chunkId: string | undefined
-    ): void {
-        // 触发文本完成
-        if (this.textStarted) {
-            this.options.onTextComplete(this.currentMessageId);
-        }
-        
-        // 触发推理完成
-        if (this.reasoningStarted) {
-            this.options.onReasoningComplete?.(this.currentMessageId);
-        }
-
-        // 更新消息 finish_reason
-        const streamToolCalls = Array.from(this.toolCalls.values());
-        const hasToolCalls = streamToolCalls.length > 0;
-
-        this.options.onMessageUpdate({
-            messageId: this.currentMessageId,
-            role: 'assistant',
-            content: this.buffer,
-            id: chunkId,
-            finish_reason: finishReason,
-            ...(this.reasoningBuffer && { reasoning_content: this.reasoningBuffer }),
-            ...(hasToolCalls
-                ? {
-                    tool_calls: streamToolCalls,
-                    type: 'tool-call' as const,
-                }
-                : {
-                    type: 'text' as const,
-                }),
-        });
-    }
-
+    /**
+     * 更新元数据
+     */
     private updateMetadata(chunk: Chunk, finishReason: FinishReason | undefined): void {
         if (chunk.id) this.metadata.id = chunk.id;
         if (chunk.model) this.metadata.model = chunk.model;
         if (chunk.created) this.metadata.created = chunk.created;
         if (finishReason) this.metadata.finish_reason = finishReason;
+
         if (chunk.usage) {
             this.metadata.usage = chunk.usage;
-            // 触发 usage 更新回调
             this.options.onUsageUpdate?.(chunk.usage);
         }
-    }
-
-    private appendToBuffer(content: string): boolean {
-        const projectedSize = this.buffer.length + content.length;
-        if (projectedSize > this.options.maxBufferSize) {
-            this.aborted = true;
-            return false;
-        }
-        this.buffer += content;
-        return true;
-    }
-
-    private appendToReasoningBuffer(content: string): boolean {
-        const projectedSize = this.reasoningBuffer.length + content.length;
-        if (projectedSize > this.options.maxBufferSize) {
-            this.aborted = true;
-            return false;
-        }
-        this.reasoningBuffer += content;
-        return true;
     }
 }
