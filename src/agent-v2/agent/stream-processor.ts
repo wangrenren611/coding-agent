@@ -193,6 +193,11 @@ export class StreamProcessor {
         if (finishReason && !hasContentDelta(chunk) && !hasReasoningDelta(chunk) && !hasToolCalls(chunk)) {
             this.handleFinishReasonOnly(finishReason, chunk.id);
         }
+
+        if (chunk.usage) {
+            this.metadata.usage = chunk.usage;
+            this.options.onUsageUpdate?.(chunk.usage);
+        }
     }
 
     /**
@@ -318,7 +323,7 @@ export class StreamProcessor {
 
         // 触发开始事件
         if (!this.state.textStarted) {
-            
+
             if(this.state.reasoningStarted&&!this.state.reasoningCompleted){
               this.state.reasoningCompleted = true;
               this.options.onReasoningComplete?.(this.currentMessageId);
@@ -510,9 +515,6 @@ export class StreamProcessor {
         if (chunk.created) this.metadata.created = chunk.created;
         if (finishReason) this.metadata.finish_reason = finishReason;
 
-        if (chunk.usage) {
-            this.metadata.usage = chunk.usage;
-            this.options.onUsageUpdate?.(chunk.usage);
-        }
+    
     }
 }

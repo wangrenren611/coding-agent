@@ -1060,11 +1060,38 @@ export class FileMemoryManager implements IMemoryManager {
       const tempFilePath = this.buildTempFilePath(filePath);
       try {
         await fs.writeFile(tempFilePath, json, 'utf-8');
-        await fs.rename(tempFilePath, filePath);
+        await this.renameWithRetry(tempFilePath, filePath);
       } finally {
         await this.unlinkIfExists(tempFilePath);
       }
     });
+  }
+
+  /**
+   * 带重试的文件重命名（解决 Windows EPERM 问题）
+   * Windows 上文件可能被其他进程（杀毒软件、编辑器等）临时锁定
+   */
+  private async renameWithRetry(src: string, dest: string, maxRetries = 5, delayMs = 100): Promise<void> {
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        await fs.rename(src, dest);
+        return;
+      } catch (error) {
+        lastError = error as Error;
+        const isEperm = error && typeof error === 'object' && 'code' in error && (error as { code?: string }).code === 'EPERM';
+
+        if (isEperm && attempt < maxRetries - 1) {
+          // Windows EPERM 错误，等待后重试
+          await new Promise(resolve => setTimeout(resolve, delayMs * (attempt + 1)));
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    throw lastError;
   }
 
   private async deleteFileIfExists(filePath: string): Promise<void> {

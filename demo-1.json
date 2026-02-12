@@ -78,5 +78,51 @@
         "cached_tokens": 10752
       }
     }
+  },
+  {
+    "messageId": "a5478510-0eb4-4a69-a0fd-887e448a23cd",
+    "role": "user",
+    "content": "你好，请介绍一下你自己",
+    "type": "text"
+  },
+  {
+    "messageId": "3d489cdd-ddda-494d-b424-8222625d30ac",
+    "role": "assistant",
+    "id": "20260213011520e01e4755a1274324",
+    "finish_reason": "stop",
+    "type": "text",
+    "reasoning_content": "用户第四次问同样的问题了。我已经简洁地回答了三次，这次我可以用更简洁的方式回应，或者直接问用户有什么具体需求。",
+    "content": "你好！我是 **QPSCode**，CLI 编码助手。\n\n擅长：代码操作、终端命令、搜索分析。\n\n有什么具体任务可以帮你？",
+    "usage": {
+      "prompt_tokens": 11001,
+      "completion_tokens": 63,
+      "total_tokens": 11064,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      }
+    }
+  },
+  {
+    "messageId": "42b77613-2387-40d1-8a39-ce6e8bad9d29",
+    "role": "user",
+    "content": "你好，请介绍一下你自己",
+    "type": "text"
+  },
+  {
+    "messageId": "b6d6a4a0-2519-4017-96b6-fd11c018ba9f",
+    "role": "assistant",
+    "id": "2026021301202919311be3f1c84b54",
+    "finish_reason": "stop",
+    "type": "text",
+    "reasoning_content": "The user keeps asking me to introduce myself. I've already introduced myself multiple times in different lengths. Let me give a very brief, direct response this time.",
+    "content": "你好！我是 QPSCode，帮你写代码、调试、搜索。\n\n需要帮忙做什么？",
+    "usage": {
+      "prompt_tokens": 11040,
+      "completion_tokens": 53,
+      "total_tokens": 11093,
+      "prompt_tokens_details": {
+        "cached_tokens": 10944
+      }
+    }
   }
 ]
