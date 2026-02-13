@@ -368,5 +368,20 @@ export interface MemoryManagerOptions {
   /** 存储路径/连接字符串 */
   connectionString?: string;
   /** 其他配置参数 */
-  config?: Record<string, unknown>;
+  config?: MemoryManagerConfig;
+}
+
+
+/**
+ * MemoryManager 详细配置
+ */
+export interface MemoryManagerConfig {
+  /** 基础路径（默认 .memory） */
+  basePath?: string;
+  /** 是否启用懒加载（默认 false）- 启用后不会在初始化时加载所有数据 */
+  lazyLoad?: boolean;
+  /** 缓存的最大会话数（默认 100）- 仅在懒加载启用时有效 */
+  maxCachedSessions?: number;
+  /** 是否启用 LRU 缓存淘汰（默认 true） */
+  enableLRUCache?: boolean;
 }

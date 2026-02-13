@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { BaseTool, ToolContext, ToolResult } from './base';
+import { DEFAULT_IGNORE_PATTERNS, normalizeFilePath } from './utils';
 
 const schema = z.object({
   pattern: z.string().min(1).describe('Regex pattern'),
@@ -48,11 +49,6 @@ function toDisplayString(arbitrary: any): string {
   return '';
 }
 
-function normalizeFilePath(cwd: string, p: string): string {
-  const rel = path.isAbsolute(p) ? path.relative(cwd, p) : p;
-  return rel.split(path.sep).join('/');
-}
-
 export default class GrepTool extends BaseTool<typeof schema> {
   name = 'grep';
   timeoutMs = 1000 * 60;
@@ -92,17 +88,7 @@ Usage:
     } = input;
 
     const cwd = process.cwd();
-    const ignoreGlobs = [
-      '**/node_modules/**',
-      '**/dist/**',
-      '**/.git/**',
-      '**/*.min.js',
-      '**/*.min.css',
-      '**/coverage/**',
-      '**/.next/**',
-      '**/.nuxt/**',
-      '**/build/**',
-    ];
+    const ignoreGlobs = [...DEFAULT_IGNORE_PATTERNS];
 
     // === 获取 ripgrep 路径（使用动态导入）===
     let rgBin: string;

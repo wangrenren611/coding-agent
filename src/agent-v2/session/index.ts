@@ -16,7 +16,7 @@ export interface SessionConfig {
   provider?: LLMProvider;
 }
 
-export type { Message, SessionOptions } from './types';
+export type { Message } from './types';
 export type { CompactionConfig, CompactionResult } from './compaction';
 
 /**

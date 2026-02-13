@@ -11,6 +11,28 @@ export type {
 } from './agent/types';
 export { AgentError, ToolError } from './agent/errors';
 
+// Agent 配置管理
+export {
+    AgentConfig,
+    QueryValidator,
+    ErrorHandler,
+    DEFAULT_LOOP_MAX,
+    DEFAULT_MAX_RETRIES,
+    DEFAULT_MAX_COMPENSATION_RETRIES,
+    DEFAULT_RETRY_DELAY_MS,
+    DEFAULT_MAX_BUFFER_SIZE,
+    DEFAULT_TOOL_TIMEOUT_MS,
+    DEFAULT_COMPACTION_TRIGGER_RATIO,
+    DEFAULT_KEEP_MESSAGES_NUM,
+    MAX_QUERY_LENGTH,
+} from './agent/config';
+export type {
+    NormalizedAgentConfig,
+    QueryValidationResult,
+    SafeError,
+    ErrorClassification,
+} from './agent/config';
+
 // Agent 内部类型和工具
 export type { ITimeProvider } from './agent/types-internal';
 export { MessageBuilder } from './agent/message-builder';
@@ -61,7 +83,6 @@ export type { ToolSchema } from './tool/type';
 export { Session } from './session';
 export { Compaction } from './session/compaction';
 export type {
-  SessionOptions,
   SessionConfig,
   Message,
   CompactionConfig,
@@ -91,3 +112,45 @@ export type {
 
 // 工具函数
 export { v4 as uuid } from 'uuid';
+
+
+// 实用工具
+export {
+    safeParse,
+    safeJSONStringify,
+    LRUCache,
+    TTLLRUCache,
+    Semaphore,
+    TimeoutSemaphore,
+    SemaphoreGuard,
+    now,
+    nowISO,
+    formatDuration,
+    sleep,
+    timeout,
+    isNonEmptyString,
+    isPositiveInteger,
+    isObject,
+    isArray,
+    hasProperty,
+    getProperty,
+    validateRequired,
+    validateLength,
+    validateRange,
+    validatePattern,
+    validateEmail,
+    validateUrl,
+} from './util';
+
+export type { ValidationResult } from './util';
+
+
+// 消息仓储
+export {
+    InMemoryMessageRepository,
+} from './session/message-repository';
+
+export type {
+    MessageRepository,
+    MessageQueryOptions,
+} from './session/message-repository';

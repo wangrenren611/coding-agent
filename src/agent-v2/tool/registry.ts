@@ -3,9 +3,13 @@ import { z } from 'zod';
 import { ToolSchema } from "./type";
 import { ToolCall } from "../../providers";
 import { safeParse } from "../util";
+import { Semaphore } from "../util/semaphore";
 
 /** 默认工具执行超时时间（毫秒） */
 const DEFAULT_TOOL_TIMEOUT = 300000; // 5分钟
+
+/** 默认最大并发工具数 */
+const DEFAULT_MAX_CONCURRENT_TOOLS = 10;
 
 interface ExecutionContext {
     sessionId?: string;
@@ -20,6 +24,8 @@ export interface ToolRegistryConfig {
     workingDirectory: string;
     /** 单个工具执行超时时间（毫秒，默认 300000） */
     toolTimeout?: number;
+    /** 最大并发工具数（默认 10）- 超过此数量的工具将排队等待 */
+    maxConcurrentTools?: number;
 }
 
 /**
@@ -44,10 +50,12 @@ export class ToolRegistry {
     private tools: Map<string, BaseTool<z.ZodType>> = new Map();
     private toolTimeout: number;
     private eventCallbacks?: ToolEventCallbacks;
+    private concurrencySemaphore: Semaphore;
 
     constructor(config: ToolRegistryConfig) {
         this.workingDirectory = config.workingDirectory;
         this.toolTimeout = config.toolTimeout ?? DEFAULT_TOOL_TIMEOUT;
+        this.concurrencySemaphore = new Semaphore(config.maxConcurrentTools ?? DEFAULT_MAX_CONCURRENT_TOOLS);
     }
 
     private buildToolContext(ctx?: ExecutionContext): ToolContext {
@@ -107,7 +115,7 @@ export class ToolRegistry {
     }
 
     /**
-     * 执行工具
+     * 执行工具（带并发限制）
      */
     async execute(
       toolCalls: ToolCall[],
@@ -116,6 +124,26 @@ export class ToolRegistry {
       const toolContext = this.buildToolContext(context);
 
       const results = await Promise.all(toolCalls.map(async toolCall => {
+          // 使用信号量控制并发
+          await this.concurrencySemaphore.acquire();
+          try {
+              return await this.executeSingleTool(toolCall, toolContext);
+          } finally {
+              this.concurrencySemaphore.release();
+          }
+      }));
+
+      return results as {tool_call_id: string, name: string, arguments: string, result: any}[];
+    }
+
+
+    /**
+     * 执行单个工具
+     */
+    private async executeSingleTool(
+        toolCall: ToolCall,
+        toolContext: ToolContext
+    ): Promise<{tool_call_id: string, name: string, arguments: string, result: any}> {
           const { name, arguments: paramsStr } = toolCall.function;
           const tool = this.tools.get(name);
 
@@ -217,12 +245,12 @@ export class ToolRegistry {
                 }
             };
         }
-      }))
-
-
-      return results as {tool_call_id: string, name: string, arguments: string, result: any}[];
     }
- 
+
+
+    /**
+     * 转换为 LLM 工具格式
+     */
 
 
   /**

@@ -8,7 +8,6 @@ import {
     LLMGenerateOptions,
     LLMResponse,
     MessageContent,
-    LLMRequest,
     Usage
 } from "../../providers";
 import { Session } from "../session";

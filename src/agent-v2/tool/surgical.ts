@@ -2,6 +2,13 @@ import fs from 'fs';
 import path from 'path';
 import { z } from 'zod';
 import { BaseTool, ToolContext, ToolResult } from './base';
+import {
+    normalizeLineEndings,
+    splitAndFilterEmptyTail,
+    escapeString,
+    generateContextSnippet,
+    generateDiffReport
+} from './utils';
 
 /**
  * Normalize line endings: convert CRLF to LF
