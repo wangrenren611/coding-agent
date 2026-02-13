@@ -180,7 +180,7 @@ async function demo1() {
     let agent: Agent | undefined;
     try {
         agent = new Agent({
-            provider: ProviderRegistry.createFromEnv('glm-5'),
+            provider: ProviderRegistry.createFromEnv('minimax-2.5'),
             systemPrompt: operatorPrompt({
                 directory: process.cwd(),
                 language: 'Chinese',
@@ -188,7 +188,8 @@ async function demo1() {
             //  sessionId: '06aca3c8-231d-4be2-bd54-d6e2a66ad64e',
             // sessionId: '5c3e51ce-e1b7-44a3-b039-e5210181b45e',
             // 2af7d7dc-e795-4815-87f2-0ed2c1f0e4ed
-            sessionId: 'c631d5d4-cd59-4916-8852-c66f763962f8',
+            // sessionId: 'c631d5d4-cd59-4916-8852-c66f763962f8',
+            sessionId: '20219dd1-c75d-4354-9588-c1626b325ae6',
             stream: true,
             thinking: true,  // 🔥 启用 thinking 模式，支持推理内容
             enableCompaction: true,  // 🔥 启用上下文压缩

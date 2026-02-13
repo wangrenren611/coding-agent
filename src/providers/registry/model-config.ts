@@ -39,15 +39,15 @@ export const MODEL_DEFINITIONS: Record<ModelId, Omit<ModelConfig, 'apiKey'>> = {
         features: ['streaming', 'function-calling', 'vision'],
     },
     // MiniMax 系列
-    'minimax-2.1': {
-        id: 'minimax-2.1',
+    'minimax-2.5': {
+        id: 'minimax-2.5',
         provider: 'minimax',
-        name: 'MiniMax-2.1',
+        name: 'MiniMax-2.5',
         baseURL: 'https://api.minimaxi.com/v1',
         endpointPath: '/chat/completions',
         envApiKey: 'MINIMAX_API_KEY',
-        envBaseURL: 'MINIMAX_API_BASE',
-        model: 'MiniMax-M2.1',
+        envBaseURL: 'MINIMAX_API_URL',
+        model: 'MiniMax-M2.5',
         max_tokens: 8000,
         LLMMAX_TOKENS: 200 * 1000,
         features: ['streaming', 'function-calling'],

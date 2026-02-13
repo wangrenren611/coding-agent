@@ -16,7 +16,7 @@ export type ModelId =
     // GLM 系列
     | 'glm-4.7'
     // MiniMax 系列
-    | 'minimax-2.1'
+    | 'minimax-2.5'
     // Kimi 系列
     | 'kimi-k2.5'
     // DeepSeek 系列
