@@ -79,6 +79,19 @@ Usage:
       throw new Error(`Failed to read file: ${error}`);
     }
 
+    // 特殊处理：空文件直接返回
+    if (content === '') {
+      return this.result({
+        success: true,
+        metadata: {
+          filePath,
+          content: '',
+          range: { startLine: 0, endLine: 0 },
+        },
+        output: `Content from ${filePath}: (empty file)`,
+      });
+    }
+
     // 规范化换行符：将 CRLF 转换为 LF，避免 split 后行末尾有 \r
     const normalizedContent = content.replace(/\r\n/g, '\n');
     
@@ -115,16 +128,18 @@ Usage:
     }
 
     const selectedLines = lines.slice(startIndex, endIndex);
-    const fileContent = selectedLines.join('\n');
+    // 如果没有指定行范围，直接返回原始内容（保留原始换行符）
+    const hasLineRange = startLine !== undefined || endLine !== undefined;
+    const fileContent = hasLineRange ? selectedLines.join('\n') : content;
 
     return this.result({
       success: true,
       metadata: {
         filePath,
-        content: content,
+        content: fileContent,
         range: { startLine: startIndex + 1, endLine: endIndex },
       },
-      output: content.length > 50000
+      output: fileContent.length > 50000
         ? `Content from ${filePath} (lines ${startIndex + 1}-${endIndex}):\n\n${fileContent}\n\n[... Content truncated for brevity ...]`
         : `Content from ${filePath}:\n\n${fileContent}`,
     });

@@ -1,7 +1,7 @@
 /**
- * Agent-V4 统一导出
+ * Agent 统一导出
  *
- * 导出 Provider 和 Agent 模块
+ * 导出 Provider 和 Agent-v2 模块
  */
 
 // =============================================================================
@@ -10,288 +10,130 @@
 export * from './providers';
 
 // =============================================================================
-// Agent 模块导出
+// Agent-v2 模块导出
 // =============================================================================
-export * from './agent-v1';
+export * from './agent-v2';
 
 // =============================================================================
-// 示例代码
+// 示例代码 - 使用 Agent-v2
 // =============================================================================
+import { Agent } from './agent-v2/agent/agent';
+import { ToolRegistry } from './agent-v2/tool/registry';
+import { createMemoryManager } from './agent-v2/memory';
 import { ProviderRegistry } from './providers/registry';
-import { OpenAICompatibleProvider } from './providers/openai-compatible';
-import type { LLMGenerateOptions, LLMRequestMessage } from './providers';
+import { operatorPrompt } from './agent-v2/prompts/operator';
+import type { AgentMessage } from './agent-v2/agent/stream-types';
+import BashTool from './agent-v2/tool/bash';
 import dotenv from 'dotenv';
-dotenv.config({
-    path: './.env.development',
-});
-// =============================================================================
-// 示例 1: 使用 ProviderRegistry 从环境变量创建 Provider
-// =============================================================================
 
-async function example1_UsingRegistry() {
-    console.log('=== 示例 1: 使用 ProviderRegistry ===\n');
+dotenv.config({ path: './.env.development' });
 
-    // 创建 GLM-4.7 Provider (需要设置 GLM_API_KEY 环境变量)
-    const provider = ProviderRegistry.createFromEnv('glm-4.7', {
-        temperature: 0.7,
-    });
+// ANSI 颜色
+const CYAN = '\x1b[36m';
+const GREEN = '\x1b[32m';
+const GRAY = '\x1b[90m';
+const YELLOW = '\x1b[33m';
+const RESET = '\x1b[0m';
 
-    const messages: LLMRequestMessage[] = [
-        { role: 'user', content: '你好，请用一句话介绍你自己' },
-    ];
-
-    const response = await provider.generate(messages,{
-        model: 'glm-4.7',
-        max_tokens: 2000,
-        temperature: 0.7,
-        stream: false,
-    });
-
-    console.log('Response:', response);
-}
-
-// =============================================================================
-// 示例 2: 使用手动配置创建 Provider
-// =============================================================================
-
-async function example2_ManualConfig() {
-    console.log('\n=== 示例 2: 手动配置 Provider ===\n');
-
-    const provider = new OpenAICompatibleProvider({
-        apiKey: 'your-api-key',
-        baseURL: 'https://api.openai.com/v1',
-        model: 'gpt-4',
-        temperature: 0.5,
-        max_tokens: 2000,
-        LLMMAX_TOKENS: 8000,
-        timeout: 30000,
-        maxRetries: 3,
-        debug: false,
-    });
-
-    const messages: LLMRequestMessage[] = [
-        { role: 'system', content: '你是一个有帮助的助手' },
-        { role: 'user', content: '什么是 TypeScript?' },
-    ];
-
-    const response = await provider.generate(messages);
-    if (!response) {
-        console.log('No response received');
-        return;
-    }
-    console.log('Response:', response.choices[0].message.content);
-}
-
-// =============================================================================
-// 示例 3: 流式请求
-// =============================================================================
-
-async function example3_Streaming() {
-    console.log('\n=== 示例 3: 流式请求 ===\n');
-
-    const provider = ProviderRegistry.createFromEnv('glm-4.7');
-
-    const messages: LLMRequestMessage[] = [
-        { role: 'user', content: '写一首关于编程的诗' },
-    ];
-
-    const options: LLMGenerateOptions = {
-        stream: true,
-        streamCallback: (chunk) => {
-            // 实时接收每个流式数据块
-            const content = chunk.choices?.[0]?.delta?.content;
-            if (content) {
-                process.stdout.write(content); // 逐字输出
-            }
-        },
-    };
-
-    await provider.generate(messages, options);
-    console.log('\n');
-}
-
-// =============================================================================
-// 示例 4: 工具调用 (Function Calling)
-// =============================================================================
-
-async function example4_ToolCalling() {
-    console.log('\n=== 示例 4: 工具调用 ===\n');
-
-    const provider = ProviderRegistry.createFromEnv('glm-4.7');
-
-    // 定义工具
-    const tools = [
-        {
-            type: 'function',
-            function: {
-                name: 'get_weather',
-                description: '获取指定城市的天气信息',
-                parameters: {
-                    type: 'object',
-                    properties: {
-                        city: {
-                            type: 'string',
-                            description: '城市名称',
-                        },
-                    },
-                    required: ['city'],
-                },
-            },
-        },
-    ];
-
-    const messages: LLMRequestMessage[] = [
-        { role: 'user', content: '北京今天天气怎么样?' },
-    ];
-
-    const response = await provider.generate(messages, { tools });
-    if (!response) {
-        console.log('No response received');
-        return;
-    }
-
-    const toolCalls = response.choices[0].message.tool_calls;
-    if (toolCalls && toolCalls.length > 0) {
-        console.log('模型请求调用工具:');
-        for (const toolCall of toolCalls) {
-            console.log(`  - ${toolCall.function.name}`);
-            console.log(`    参数: ${toolCall.function.arguments}`);
-        }
-
-        // 模拟执行工具并返回结果
-        messages.push(response.choices[0].message);
-        messages.push({
-            role: 'tool',
-            content: '{"temperature": "22°C", "condition": "晴朗"}',
-            tool_call_id: toolCalls[0].id,
-        });
-
-        const finalResponse = await provider.generate(messages);
-        if (finalResponse) {
-            console.log('\n最终回复:', finalResponse.choices[0].message.content);
-        }
+/**
+ * 统一流式消息处理
+ */
+function handleStreamMessage(message: AgentMessage) {
+    switch (message.type) {
+        case 'reasoning-start':
+            process.stdout.write(`${GRAY}┌─ 💭 思考过程${RESET}\n`);
+            process.stdout.write(`${GRAY}│${RESET} `);
+            break;
+        case 'reasoning-delta':
+            process.stdout.write(message.payload.content);
+            break;
+        case 'reasoning-complete':
+            process.stdout.write('\n');
+            process.stdout.write(`${GRAY}└─ 思考完成${RESET}\n\n`);
+            break;
+        case 'text-start':
+            process.stdout.write(`${GREEN}┌─ 🤖 回复${RESET}\n`);
+            process.stdout.write(`${GREEN}│${RESET} `);
+            break;
+        case 'text-delta':
+            process.stdout.write(message.payload.content);
+            break;
+        case 'text-complete':
+            process.stdout.write('\n');
+            process.stdout.write(`${GREEN}└─ 回复完成${RESET}\n`);
+            break;
+        case 'tool-call-created':
+            const tools = message.payload.tool_calls.map((call) => 
+                `${call.toolName}(${call.args.slice(0, 50)}${call.args.length > 50 ? '...' : ''})`
+            );
+            console.log(`${YELLOW}🔧 工具调用:${RESET}`, tools.join(', '));
+            break;
+        case 'status':
+            console.log(`\n📋 状态: ${message.payload.state}`);
+            break;
+        default:
+            break;
     }
 }
 
-// =============================================================================
-// 示例 5: 列出所有可用模型
-// =============================================================================
+/**
+ * 示例: 使用 Agent-v2
+ */
+async function demo() {
+    console.log('='.repeat(60));
+    console.log('🤖 Agent-v2 Demo');
+    console.log('='.repeat(60));
+    console.log();
 
-function example5_ListModels() {
-    console.log('\n=== 示例 5: 可用模型列表 ===\n');
-
-    // 获取所有模型
-    const models = ProviderRegistry.listModels();
-    console.log('所有可用模型:');
-    models.forEach(m => {
-        console.log(`  - ${m.id} (${m.provider}): ${m.name}`);
-        console.log(`    特性: ${m.features.join(', ')}`);
+    const toolRegistry = new ToolRegistry({
+        workingDirectory: process.cwd(),
     });
+    toolRegistry.register([new BashTool()]);
 
-    // 按厂商筛选
-    console.log('\nGLM 厂商的模型:');
-    const glmModels = ProviderRegistry.listModelsByProvider('glm');
-    glmModels.forEach(m => {
-        console.log(`  - ${m.id}: ${m.name}`);
+    const memoryManager = createMemoryManager({
+        type: 'file',
+        connectionString: './data/agent-memory',
     });
-}
-
-// =============================================================================
-// 示例 6: 多轮对话
-// =============================================================================
-
-async function example6_MultiTurnConversation() {
-    console.log('\n=== 示例 6: 多轮对话 ===\n');
-
-    const provider = ProviderRegistry.createFromEnv('minimax-2.1');
-
-    const messages: LLMRequestMessage[] = [
-        { role: 'system', content: '你是一个专业的技术顾问' },
-    ];
-
-    // 第一轮
-    messages.push({ role: 'user', content: '什么是 React?' });
-    let response = await provider.generate(messages);
-    if (!response) {
-        console.log('No response received');
-        return;
-    }
-    console.log('Assistant:', response.choices[0].message.content);
-
-    // 第二轮
-    messages.push(response.choices[0].message);
-    messages.push({ role: 'user', content: '它和 Vue 有什么区别?' });
-    response = await provider.generate(messages);
-    if (response) {
-        console.log('\nAssistant:', response.choices[0].message.content);
-    }
-}
-
-// =============================================================================
-// 示例 7: 带中止信号的请求
-// =============================================================================
-
-async function example7_WithAbortSignal() {
-    console.log('\n=== 示例 7: 带中止信号的请求 ===\n');
-
-    const provider = ProviderRegistry.createFromEnv('glm-4.7');
-
-    const messages: LLMRequestMessage[] = [
-        { role: 'user', content: '请详细解释量子计算' },
-    ];
-
-    // 创建可中止的控制器
-    const controller = new AbortController();
-
-    // 模拟 3 秒后中止请求
-    setTimeout(() => {
-        console.log('中止请求...');
-        controller.abort();
-    }, 3000);
+    await memoryManager.initialize();
 
     try {
-        await provider.generate(messages, {
-            abortSignal: controller.signal,
+        const agent = new Agent({
+            provider: ProviderRegistry.createFromEnv('glm-4.7'),
+            systemPrompt: operatorPrompt({
+                directory: process.cwd(),
+                language: 'Chinese',
+            }),
+            toolRegistry,
+            stream: true,
+            thinking: true,
+            enableCompaction: true,
+            memoryManager,
+            streamCallback: handleStreamMessage,
         });
-    } catch (error) {
-        if (error instanceof Error && error.name === 'AbortError') {
-            console.log('请求已被中止');
+
+        const query = process.argv[2] || '你好，请介绍一下你自己';
+        console.log(`${CYAN}❯${RESET} ${query}\n`);
+
+        const response = await agent.execute(query);
+
+        console.log('\n' + '='.repeat(60));
+        console.log('📋 最终响应:');
+        console.log('='.repeat(60));
+        console.log(`会话 ID: ${agent.getSessionId()}`);
+        console.log(`消息数: ${agent.getMessages().length}`);
+        if (response.usage) {
+            console.log(`Token 使用: ${response.usage.total_tokens}`);
         }
+
+    } finally {
+        await memoryManager.close();
     }
 }
 
-// =============================================================================
-// 主入口
-// =============================================================================
+// 导出
+export { demo };
 
-async function main() {
-    // 运行示例
-    try {
-    //      await example1_UsingRegistry();
-    //      await example4_ToolCalling();
-    //     // example2_ManualConfig();
-    //    await  example3_Streaming();
-    //   await  example4_ToolCalling();
-    //   await  example5_ListModels();
-      await  example6_MultiTurnConversation();
-      await  example7_WithAbortSignal();
-    } catch (error) {
-        console.error('Error:', error);
-    }
-}
-
-// 导出示例函数供外部使用
-export {
-    example1_UsingRegistry,
-    example2_ManualConfig,
-    example3_Streaming,
-    example4_ToolCalling,
-    example5_ListModels,
-    example6_MultiTurnConversation,
-    example7_WithAbortSignal,
-};
-
-// 如果直接运行此文件，执行 main
+// 如果直接运行此文件，执行 demo
 if (require.main === module) {
-    main();
+    demo().catch(console.error);
 }

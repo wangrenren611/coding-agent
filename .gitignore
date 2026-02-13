@@ -10,8 +10,10 @@ dist
 /doc/*
 /web/.next/
 /web/.next/*
-data/*
+# data/*
 src/cli-tui/.coding-agent
 test-agent
 typescript
 apps/agent-cli-ink-v2/data/*
+
+/test-memory

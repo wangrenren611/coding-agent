@@ -62,6 +62,8 @@ const ALLOWED_COMMANDS = new Set([
     'docker', 'docker-compose', 'kubectl', 'helm',
     'make', 'cmake', 'ninja',
     'cp', 'mv', 'mkdir', 'touch', 'ln', 'rm', 'rmdir', 'chmod', 'chown',
+    // Windows 文件操作命令
+    'del', 'rd', 'erase',
     'tar', 'zip', 'unzip', 'gzip', 'gunzip',
     'sh', 'bash', 'zsh',
     'true', 'false', 'test',

@@ -45,6 +45,7 @@ import {
 } from "./types-internal";
 import { AgentMessageType } from "./stream-types";
 import { ToolContext } from "../tool/base";
+import { AgentEmitter } from "./agent-emitter";
 
 // ==================== 默认实现 ====================
 
@@ -94,7 +95,7 @@ export class Agent {
 
     // 流式处理
     private streamProcessor: StreamProcessor;
-    private cumulativeUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+    private emitter: AgentEmitter;
 
     constructor(config: AgentOptions) {
         this.validateConfig(config);
@@ -128,20 +129,27 @@ export class Agent {
         this.requestTimeoutMs = this.normalizeOptionalPositiveMs(config.requestTimeout);
         this.nextRetryDelayMs = this.defaultRetryDelayMs;
 
+        // 初始化事件发射器
+        this.emitter = new AgentEmitter({
+            streamCallback: this.streamCallback,
+            sessionId: this.session.getSessionId(),
+            getTimestamp: () => this.timeProvider.getCurrentTime(),
+        });
+
         // 初始化流式处理器
         this.streamProcessor = new StreamProcessor({
             maxBufferSize: this.maxBufferSize,
             onMessageCreate: (msg) => this.session.addMessage(msg as Message),
             onMessageUpdate: (msg) => this.session.addMessage(msg as Message),
-            onTextDelta: (content, msgId) => this.emitTextDelta(content, msgId),
-            onTextStart: (msgId) => this.emitTextStart(msgId),
-            onTextComplete: (msgId) => this.emitTextComplete(msgId),
+            onTextDelta: (content, msgId) => this.emitter.emitTextDelta(content, msgId),
+            onTextStart: (msgId) => this.emitter.emitTextStart(msgId),
+            onTextComplete: (msgId) => this.emitter.emitTextComplete(msgId),
             // 推理内容回调 (thinking 模式)
-            onReasoningDelta: (content, msgId) => this.emitReasoningDelta(content, msgId),
-            onReasoningStart: (msgId) => this.emitReasoningStart(msgId),
-            onReasoningComplete: (msgId) => this.emitReasoningComplete(msgId),
+            onReasoningDelta: (content, msgId) => this.emitter.emitReasoningDelta(content, msgId),
+            onReasoningStart: (msgId) => this.emitter.emitReasoningStart(msgId),
+            onReasoningComplete: (msgId) => this.emitter.emitReasoningComplete(msgId),
             // Token 使用量回调
-            onUsageUpdate: (usage) => this.emitUsageUpdate(usage),
+            onUsageUpdate: (usage) => this.emitter.emitUsageUpdate(usage),
         });
     }
 
@@ -229,7 +237,7 @@ export class Agent {
             userMessage: 'Task was aborted.',
             internalMessage: 'Agent aborted by user.',
         };
-        this.emitStatus(AgentStatus.ABORTED, 'Agent aborted by user.');
+        this.emitter.emitStatus(AgentStatus.ABORTED, 'Agent aborted by user.');
     }
 
     // ==================== 状态检查 ====================
@@ -453,7 +461,7 @@ export class Agent {
 
     private completeTask(): void {
         this.status = AgentStatus.COMPLETED;
-        this.emitStatus(AgentStatus.COMPLETED, 'Task completed successfully');
+        this.emitter.emitStatus(AgentStatus.COMPLETED, 'Task completed successfully');
     }
 
     private failTask(error: unknown): void {
@@ -468,7 +476,7 @@ export class Agent {
             totalRetries: this.retryCount,
         } as TaskFailedEvent);
 
-        this.emitStatus(AgentStatus.FAILED, safeError.userMessage);
+        this.emitter.emitStatus(AgentStatus.FAILED, safeError.userMessage);
     }
 
     private buildFailure(error: unknown, safeError: SafeError): AgentFailure {
@@ -518,7 +526,7 @@ export class Agent {
     // ==================== 主循环 ====================
 
     private async runLoop(options?: LLMGenerateOptions): Promise<void> {
-        this.emitStatus(AgentStatus.RUNNING, 'Agent is running...');
+        this.emitter.emitStatus(AgentStatus.RUNNING, 'Agent is running...');
 
         while (this.loopCount < this.loopMax) {
             if (this.retryCount > this.maxRetries) {
@@ -526,7 +534,7 @@ export class Agent {
             }
 
             if (this.checkComplete()) {
-                this.emitStatus(AgentStatus.COMPLETED, 'Agent completed the task.');
+                this.emitter.emitStatus(AgentStatus.COMPLETED, 'Agent completed the task.');
                 break;
             }
 
@@ -551,7 +559,7 @@ export class Agent {
                     }
                     this.compensationRetryCount++;
                     this.status = AgentStatus.RETRYING;
-                    this.emitStatus(
+                    this.emitter.emitStatus(
                         AgentStatus.RETRYING,
                         `Agent is retrying immediately... (${this.compensationRetryCount}/${this.maxCompensationRetries})`
                     );
@@ -570,7 +578,7 @@ export class Agent {
     private async handleRetry(): Promise<void> {
         this.status = AgentStatus.RETRYING;
         await this.timeProvider.sleep(this.nextRetryDelayMs);
-        this.emitStatus(
+        this.emitter.emitStatus(
             AgentStatus.RETRYING,
             `Agent is retrying... (${this.retryCount}/${this.maxRetries})`
         );
@@ -640,7 +648,7 @@ export class Agent {
         llmOptions: LLMGenerateOptions,
         messageId: string
     ): Promise<LLMResponse> {
-        this.emitStatus(AgentStatus.THINKING, 'Agent is thinking...', messageId);
+        this.emitter.emitStatus(AgentStatus.THINKING, 'Agent is thinking...', messageId);
 
         this.streamProcessor.setMessageId(messageId);
 
@@ -747,7 +755,7 @@ export class Agent {
         const messageContent = currentMessage?.messageId === messageId
             ? this.contentToText(currentMessage.content)
             : '';
-        this.emitToolCallCreated(toolCalls, messageId, messageContent);
+        this.emitter.emitToolCallCreated(toolCalls, messageId, messageContent);
 
         // 在执行工具前注入最新会话上下文，确保工具可读取 session 级数据
         const toolContext = this.injectToolContext();
@@ -772,7 +780,7 @@ export class Agent {
             const messageId = uuid();
             const sanitized = this.sanitizeToolResult(result);
 
-            this.emitToolCallResult(result, sanitized, messageId);
+            this.emitter.emitToolCallResult(result.tool_call_id, sanitized, result.result?.success ? 'success' : 'error', messageId);
 
             this.session.addMessage(
                 createToolResultMessage(
@@ -812,135 +820,6 @@ export class Agent {
         }
     }
 
-    // ==================== 事件发射 ====================
-
-    private emitStatus(state: AgentStatus, message: string, msgId?: string): void {
-        this.streamCallback?.({
-            type: AgentMessageType.STATUS,
-            payload: { state, message },
-            ...(msgId && { msgId }),
-            sessionId: this.session.getSessionId(),
-            timestamp: this.timeProvider.getCurrentTime(),
-        });
-    }
-
-    private emitTextStart(messageId: string): void {
-        this.streamCallback?.({
-            type: AgentMessageType.TEXT_START,
-            payload: { content: '' },
-            msgId: messageId,
-            sessionId: this.session.getSessionId(),
-            timestamp: this.timeProvider.getCurrentTime(),
-        });
-    }
-
-    private emitTextDelta(content: string, messageId: string): void {
-        this.streamCallback?.({
-            type: AgentMessageType.TEXT_DELTA,
-            payload: { content },
-            msgId: messageId,
-            sessionId: this.session.getSessionId(),
-            timestamp: this.timeProvider.getCurrentTime(),
-        });
-    }
-
-    private emitTextComplete(messageId: string): void {
-        this.streamCallback?.({
-            type: AgentMessageType.TEXT_COMPLETE,
-            payload: { content: '' },
-            msgId: messageId,
-            sessionId: this.session.getSessionId(),
-            timestamp: this.timeProvider.getCurrentTime(),
-        });
-    }
-
-        // ==================== 推理内容发射方法 (thinking 模式) ====================
-
-    private emitReasoningStart(messageId: string): void {
-        this.streamCallback?.({
-            type: AgentMessageType.REASONING_START,
-            payload: { content: '' },
-            msgId: messageId,
-            sessionId: this.session.getSessionId(),
-            timestamp: this.timeProvider.getCurrentTime(),
-        });
-    }
-
-    private emitReasoningDelta(content: string, messageId: string): void {
-        this.streamCallback?.({
-            type: AgentMessageType.REASONING_DELTA,
-            payload: { content },
-            msgId: messageId,
-            sessionId: this.session.getSessionId(),
-            timestamp: this.timeProvider.getCurrentTime(),
-        });
-    }
-
-    private emitReasoningComplete(messageId: string): void {
-        this.streamCallback?.({
-            type: AgentMessageType.REASONING_COMPLETE,
-            payload: { content: '' },
-            msgId: messageId,
-            sessionId: this.session.getSessionId(),
-            timestamp: this.timeProvider.getCurrentTime(),
-        });
-    }
-
-    // ==================== Usage 更新发射方法 ====================
-
-    private emitUsageUpdate(usage: Usage): void {
-        // 累加使用量
-        this.cumulativeUsage.prompt_tokens += usage.prompt_tokens;
-        this.cumulativeUsage.completion_tokens += usage.completion_tokens;
-        // total_tokens 用累加后的值计算，确保一致性
-        this.cumulativeUsage.total_tokens = 
-            this.cumulativeUsage.prompt_tokens + this.cumulativeUsage.completion_tokens;
-
-        this.streamCallback?.({
-            type: AgentMessageType.USAGE_UPDATE,
-            payload: {
-                usage,
-                cumulative: { ...this.cumulativeUsage },
-            },
-            sessionId: this.session.getSessionId(),
-            timestamp: this.timeProvider.getCurrentTime(),
-        });
-    }
-
-        private emitToolCallCreated(toolCalls: ToolCall[], messageId: string, content?: string): void {
-        this.streamCallback?.({
-            type: AgentMessageType.TOOL_CALL_CREATED,
-            payload: {
-                tool_calls: toolCalls.map((item) => ({
-                    callId: item.id,
-                    toolName: item.function.name,
-                    args: item.function.arguments,
-                })),
-                content: content || '',
-            },
-            msgId: messageId,
-            sessionId: this.session.getSessionId(),
-            timestamp: this.timeProvider.getCurrentTime(),
-        });
-    }
-
-    private emitToolCallResult(
-        result: ToolExecutionResult,
-        sanitizedResult: unknown,
-        messageId: string
-    ): void {
-        this.streamCallback?.({
-            type: AgentMessageType.TOOL_CALL_RESULT,
-            payload: {
-                callId: result.tool_call_id,
-                result: JSON.stringify(sanitizedResult),
-                status: result.result?.success ? 'success' : 'error',
-            },
-            msgId: messageId,
-            sessionId: this.session.getSessionId(),
-            timestamp: this.timeProvider.getCurrentTime(),
-        });
-    }
 
     // ==================== 测试方法 ====================
 

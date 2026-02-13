@@ -3,6 +3,7 @@ import { Message } from "./types";
 import type { IMemoryManager } from "../memory/types";
 import { Compaction, CompactionConfig, CompactionResult } from "./compaction";
 import { LLMProvider } from "../../providers";
+import { ToolCallRepairer } from "./tool-call-repairer";
 
 export interface SessionConfig {
   sessionId?: string;
@@ -34,6 +35,7 @@ export class Session {
   private readonly memoryManager?: IMemoryManager;
   private persistQueue: Promise<void> = Promise.resolve();
   private readonly compaction?: Compaction;
+  private readonly repairer = new ToolCallRepairer();
   private initialized = false;
   private initializePromise: Promise<void> | null = null;
 
@@ -300,93 +302,9 @@ export class Session {
    * 修复异常中断导致的未闭合 tool call
    */
   private repairInterruptedToolCalls(): void {
-    let index = 0;
-    
-    while (index < this.messages.length) {
-      const current = this.messages[index];
-      const toolCallIds = this.extractToolCallIds(current);
-      
-      if (toolCallIds.length === 0) {
-        index++;
-        continue;
-      }
-
-      // 收集后续的 tool 响应
-      let cursor = index + 1;
-      const responded = new Set<string>();
-      
-      while (cursor < this.messages.length && this.messages[cursor].role === 'tool') {
-        const toolCallId = this.extractToolCallId(this.messages[cursor]);
-        if (toolCallId) {
-          responded.add(toolCallId);
-        }
-        cursor++;
-      }
-
-      // 找出缺失响应的 tool calls
-      const missingIds = toolCallIds.filter(id => !responded.has(id));
-      
-      if (missingIds.length === 0) {
-        index = cursor;
-        continue;
-      }
-
-      // 插入失败响应
-      const recoveredMessages = missingIds.map(toolCallId => this.createInterruptedToolResult(toolCallId));
-      
-      // 防止无限循环：如果 recoveredMessages 为空（不应该发生，但作为安全保障），强制前进
-      if (recoveredMessages.length === 0) {
-        index = cursor + 1;
-        continue;
-      }
-      
-      this.messages.splice(cursor, 0, ...recoveredMessages);
-      
-      // 持久化修复的消息
-      for (const msg of recoveredMessages) {
-        this.schedulePersist(msg, 'add');
-      }
-
-      index = cursor + recoveredMessages.length;
-    }
-  }
-
-  private extractToolCallIds(message: Message): string[] {
-    if (message.role !== 'assistant') return [];
-    
-    const rawCalls = (message as any).tool_calls;
-    if (!Array.isArray(rawCalls)) return [];
-
-    const uniqueIds = new Set<string>();
-    for (const call of rawCalls) {
-      const callId = call?.id;
-      if (typeof callId === 'string' && callId.length > 0) {
-        uniqueIds.add(callId);
-      }
-    }
-    
-    return Array.from(uniqueIds);
-  }
-
-  private extractToolCallId(message: Message): string | null {
-    if (message.role !== 'tool') return null;
-    
-    const toolCallId = (message as any).tool_call_id;
-    return typeof toolCallId === 'string' && toolCallId.length > 0 ? toolCallId : null;
-  }
-
-  private createInterruptedToolResult(toolCallId: string): Message {
-    return {
-      messageId: uuid(),
-      role: 'tool',
-      type: 'tool-result',
-      tool_call_id: toolCallId,
-      content: JSON.stringify({
-        success: false,
-        error: 'TOOL_CALL_INTERRUPTED',
-        interrupted: true,
-        message: 'Tool execution was interrupted before a result was produced.',
-      }),
-    };
+    // 使用 ToolCallRepairer 进行修复
+    this.repairer.repairInPlace(this.messages, (msg) => {
+      this.schedulePersist(msg, 'add');
+    });
   }
 }

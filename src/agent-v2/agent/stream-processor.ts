@@ -5,7 +5,7 @@
  *
  * 设计原则：
  * 1. 统一的消息更新机制：所有内容变更都通过 onMessageUpdate 持久化
- * 2. 状态机驱动：通过 started 标志位追踪各类内容的处理状态
+ * 2. 状态机驱动：通过状态枚举追踪处理状态
  * 3. 缓冲区管理：独立的缓冲区存储不同类型内容，支持大小限制
  * 4. 事件驱动：通过回调函数向外部通知状态变化
  *
@@ -27,18 +27,19 @@ import {
     hasReasoningDelta,
     hasToolCalls,
 } from './types-internal';
+import { 
+    ProcessorState as State, 
+    ContentType,
+    canTransition,
+} from './processor-state';
 
-// ==================== 类型定义 ====================
+// 重新导出状态枚举供外部使用
+export { ProcessorState, ContentType } from './processor-state';
 
 /**
- * 消息类型枚举
+ * 内部处理器状态（细粒度状态追踪）
  */
-export type MessageType = 'text' | 'tool-call';
-
-/**
- * 处理器状态
- */
-interface ProcessorState {
+interface InternalProcessorState {
     /** 是否已中止 */
     aborted: boolean;
     /** 推理内容是否已开始 */
@@ -51,6 +52,8 @@ interface ProcessorState {
     reasoningCompleted: boolean;
     /** 普通文本是否已完成 */
     textCompleted: boolean;
+    /** 当前状态机状态 */
+    currentState: State;
 }
 
 /**
@@ -111,7 +114,7 @@ export class StreamProcessor {
     private readonly maxBufferSize: number;
 
     // 状态
-    private state: ProcessorState = this.createInitialState();
+    private state: InternalProcessorState = this.createInitialState();
 
     // 缓冲区
     private buffers: BufferData = this.createInitialBuffers();
@@ -255,7 +258,7 @@ export class StreamProcessor {
 
     // ==================== 私有方法：状态初始化 ====================
 
-    private createInitialState(): ProcessorState {
+    private createInitialState(): InternalProcessorState {
         return {
             aborted: false,
             reasoningStarted: false,
@@ -263,6 +266,7 @@ export class StreamProcessor {
             toolCallsStarted: false,
             reasoningCompleted: false,
             textCompleted: false,
+            currentState: State.IDLE,
         };
     }
 
