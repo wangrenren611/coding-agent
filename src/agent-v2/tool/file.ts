@@ -79,7 +79,14 @@ Usage:
       throw new Error(`Failed to read file: ${error}`);
     }
 
-    const lines = content.split('\n');
+    // 规范化换行符：将 CRLF 转换为 LF，避免 split 后行末尾有 \r
+    const normalizedContent = content.replace(/\r\n/g, '\n');
+    
+    // 按换行符分割，并移除末尾空行（由文件末尾换行符产生的空字符串）
+    const allLines = normalizedContent.split('\n');
+    const lines = allLines.filter((line, idx) => 
+      !(idx === allLines.length - 1 && line === '')
+    );
     const totalLines = lines.length;
 
     // 将 1-based 行号转换为 0-based 数组索引
@@ -114,7 +121,7 @@ Usage:
       success: true,
       metadata: {
         filePath,
-        content: fileContent,
+        content: content,
         range: { startLine: startIndex + 1, endLine: endIndex },
       },
       output: content.length > 50000

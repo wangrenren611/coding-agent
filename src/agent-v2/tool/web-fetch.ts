@@ -22,26 +22,26 @@ export class WebFetchTool extends BaseTool<typeof schema> {
   async execute(params: z.infer<typeof schema>, _context?: ToolContext): Promise<ToolResult> {
     const startTime = Date.now();
 
+    // 验证 URL 格式
+    if (!params.url.startsWith('http://') && !params.url.startsWith('https://')) {
+      return this.result({
+        success: false,
+        metadata: {
+          error: 'INVALID_URL',
+          duration: Date.now() - startTime,
+        } as any,
+        output: 'INVALID_URL: URL must start with http:// or https://',
+      });
+    }
+
+    // 计算超时时间
+    const timeoutMs = Math.min((params.timeout ?? DEFAULT_TIMEOUT / 1000) * 1000, MAX_TIMEOUT);
+
+    // 创建 AbortController 用于超时控制
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
     try {
-      // 验证 URL 格式
-      if (!params.url.startsWith('http://') && !params.url.startsWith('https://')) {
-        return this.result({
-          success: false,
-          metadata: {
-            error: 'INVALID_URL',
-            duration: Date.now() - startTime,
-          } as any,
-          output: 'INVALID_URL: URL must start with http:// or https://',
-        });
-      }
-
-      // 计算超时时间
-      const timeoutMs = Math.min((params.timeout ?? DEFAULT_TIMEOUT / 1000) * 1000, MAX_TIMEOUT);
-
-      // 创建 AbortController 用于超时控制
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
       // 根据请求格式构建 Accept 头
       let acceptHeader = '*/*';
       switch (params.format) {
@@ -65,9 +65,6 @@ export class WebFetchTool extends BaseTool<typeof schema> {
           'Accept-Language': 'en-US,en;q=0.9',
         },
       });
-
-      // 清除超时定时器
-      clearTimeout(timeoutId);
 
       // 检查响应状态
       if (!response.ok) {
@@ -160,6 +157,9 @@ export class WebFetchTool extends BaseTool<typeof schema> {
         } as any,
         output: `FETCH_ERROR: Web fetch failed: ${errorMessage}`,
       });
+    } finally {
+      // 确保在任何情况下都清除超时定时器，防止内存泄漏
+      clearTimeout(timeoutId);
     }
   }
 }

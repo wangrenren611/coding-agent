@@ -63,7 +63,7 @@ export class OpenAICompatibleProvider extends LLMProvider {
         // 初始化 HTTP 客户端
         this.httpClient = new HTTPClient({
             timeout: this.timeout,
-            debug: true//config.debug ?? false,
+            debug: config.debug ?? false,
         });
 
         // 初始化 Adapter（未提供则使用标准适配器）

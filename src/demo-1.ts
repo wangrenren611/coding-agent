@@ -185,7 +185,10 @@ async function demo1() {
                 directory: process.cwd(),
                 language: 'Chinese',
             }),
-            sessionId: '06aca3c8-231d-4be2-bd54-d6e2a66ad64e',
+            //  sessionId: '06aca3c8-231d-4be2-bd54-d6e2a66ad64e',
+            // sessionId: '5c3e51ce-e1b7-44a3-b039-e5210181b45e',
+            // 2af7d7dc-e795-4815-87f2-0ed2c1f0e4ed
+            sessionId: 'c631d5d4-cd59-4916-8852-c66f763962f8',
             stream: true,
             thinking: true,  // 🔥 启用 thinking 模式，支持推理内容
             enableCompaction: true,  // 🔥 启用上下文压缩

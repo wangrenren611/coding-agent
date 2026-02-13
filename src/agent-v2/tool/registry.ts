@@ -81,6 +81,32 @@ export class ToolRegistry {
     }
 
     /**
+     * 带超时控制的工具执行
+     * 使用 setTimeout/clearTimeout 确保超时定时器被正确清理，防止内存泄漏
+     */
+    private async executeWithTimeout<T>(
+        toolName: string,
+        executeFn: () => Promise<T>,
+        timeoutMs: number
+    ): Promise<T> {
+        return new Promise<T>((resolve, reject) => {
+            const timeoutId = setTimeout(() => {
+                reject(new Error(`Tool "${toolName}" execution timeout (${timeoutMs}ms)`));
+            }, timeoutMs);
+
+            executeFn()
+                .then(result => {
+                    clearTimeout(timeoutId);
+                    resolve(result);
+                })
+                .catch(error => {
+                    clearTimeout(timeoutId);
+                    reject(error);
+                });
+        });
+    }
+
+    /**
      * 执行工具
      */
     async execute(
@@ -125,10 +151,10 @@ export class ToolRegistry {
            // 验证参数
         const schema = tool.schema;
 
-        const resultSchema: any= schema.safeParse(params);
+        const resultSchema = schema.safeParse(params);
 
         if (!resultSchema.success) {
-            const error = resultSchema.error.issues.map((issue: any)  => issue.message).join(', ');
+            const error = resultSchema.error.issues.map(issue => issue.message).join(', ');
             this.eventCallbacks?.onToolFailed?.(name, error);
             return {
                 tool_call_id: toolCall.id,
@@ -149,19 +175,16 @@ export class ToolRegistry {
           const timeoutMs = tool.executionTimeoutMs === undefined
             ? this.toolTimeout
             : tool.executionTimeoutMs;
+          
+          // 使用带清理的超时执行，防止内存泄漏
           const result = timeoutMs === null || timeoutMs <= 0
             ? await tool.execute(resultSchema.data, toolContext)
-            : await Promise.race([
-                tool.execute(resultSchema.data, toolContext),
-                new Promise((_, reject) => {
-                    const timeoutSignal = AbortSignal.timeout(timeoutMs);
-                    timeoutSignal.addEventListener('abort', () => {
-                        reject(new Error(`Tool "${name}" execution timeout (${timeoutMs}ms)`));
-                    });
-                }),
-              ]);
-
-           
+            : await this.executeWithTimeout(
+                name,
+                // 使用 Promise.resolve 包装，因为 execute 可能返回同步值
+                () => Promise.resolve(tool.execute(resultSchema.data, toolContext)),
+                timeoutMs
+              );
 
           const duration = Date.now() - startTime;
         

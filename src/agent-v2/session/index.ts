@@ -73,18 +73,22 @@ export class Session {
 
   /**
    * 初始化会话（创建或加载历史）
+   * 使用 initializePromise 防止并发初始化导致的竞态条件
    */
   async initialize(): Promise<void> {
+    // 已初始化则直接返回
     if (this.initialized) return;
     if (!this.memoryManager) {
       this.initialized = true;
       return;
     }
 
+    // 如果已有初始化进行中，等待其完成（防止竞态条件）
     if (this.initializePromise) {
       return this.initializePromise;
     }
 
+    // 创建初始化 Promise 并立即赋值，防止后续调用重复初始化
     this.initializePromise = this.doInitialize();
     
     try {
@@ -329,6 +333,13 @@ export class Session {
 
       // 插入失败响应
       const recoveredMessages = missingIds.map(toolCallId => this.createInterruptedToolResult(toolCallId));
+      
+      // 防止无限循环：如果 recoveredMessages 为空（不应该发生，但作为安全保障），强制前进
+      if (recoveredMessages.length === 0) {
+        index = cursor + 1;
+        continue;
+      }
+      
       this.messages.splice(cursor, 0, ...recoveredMessages);
       
       // 持久化修复的消息

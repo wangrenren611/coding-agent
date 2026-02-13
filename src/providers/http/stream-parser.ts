@@ -48,6 +48,9 @@ export class StreamParser {
 
     /**
      * 处理可读流并返回 AsyncGenerator
+     * 
+     * 注意：使用 try/finally 确保在生成器被提前终止时（如 break 或 return）
+     * reader 能够被正确释放，避免流锁定问题
      *
      * @param reader - 可读流读取器
      * @returns 异步生成器，每次 yield 一个 chunk
@@ -59,39 +62,49 @@ export class StreamParser {
         let buffer = '';
         let shouldStop = false;
 
-        while (!shouldStop) {
-            const { done, value } = await reader.read();
+        try {
+            while (!shouldStop) {
+                const { done, value } = await reader.read();
 
-            if (done) {
-                // 处理流结束时剩余的缓冲区
-                if (buffer.trim()) {
-                    const data = this.parseSseLine(buffer);
-                    if (data && !this.isStreamEnd(data)) {
-                        const chunk = this.safeJsonParse<Chunk>(data);
-                        if (chunk) yield chunk;
+                if (done) {
+                    // 处理流结束时剩余的缓冲区
+                    if (buffer.trim()) {
+                        const data = this.parseSseLine(buffer);
+                        if (data && !this.isStreamEnd(data)) {
+                            const chunk = this.safeJsonParse<Chunk>(data);
+                            if (chunk) yield chunk;
+                        }
                     }
-                }
-                break;
-            }
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split(/[\r\n]+/);
-            buffer = lines.pop() ?? '';
-
-            for (const line of lines) {
-                const data = this.parseSseLine(line);
-
-                if (!data) continue;
-
-                if (this.isStreamEnd(data)) {
-                    shouldStop = true;
                     break;
                 }
 
-                const chunk = this.safeJsonParse<Chunk>(data);
-                if (!chunk) continue;
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split(/[\r\n]+/);
+                buffer = lines.pop() ?? '';
 
-                yield chunk;
+                for (const line of lines) {
+                    const data = this.parseSseLine(line);
+
+                    if (!data) continue;
+
+                    if (this.isStreamEnd(data)) {
+                        shouldStop = true;
+                        break;
+                    }
+
+                    const chunk = this.safeJsonParse<Chunk>(data);
+                    if (!chunk) continue;
+
+                    yield chunk;
+                }
+            }
+        } finally {
+            // 确保在生成器结束时释放 reader 锁
+            // 这样即使消费者提前 break，也不会导致流被锁定
+            try {
+                reader.releaseLock();
+            } catch {
+                // 忽略释放锁时的错误（如流已关闭）
             }
         }
     }

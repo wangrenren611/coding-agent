@@ -24,9 +24,12 @@
     "bench:agent:ts-bench": "tsx test-agent/run-ts-bench.ts",
     "bench:multi-swe": "tsx test-agent/multi-swe-bench-adapter.ts",
     "batch:test": "tsx test-agent/batch-test-direct.ts",
-    "batch:test:skip-agent": "tsx test-agent/batch-test-direct.ts --skip-agent"
+    "batch:test:skip-agent": "tsx test-agent/batch-test-direct.ts --skip-agent",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.2",
     "@types/node": "^25.2.0",
     "@types/react": "^19.0.6",
     "@types/shell-quote": "^1.7.5",
@@ -34,9 +37,13 @@
     "@vitest/ui": "^4.0.18",
     "chalk": "^5.4.1",
     "cross-env": "^10.1.0",
+    "eslint": "^9.39.2",
+    "eslint-plugin-react": "^7.37.5",
+    "globals": "^17.3.0",
     "tsup": "^8.4.0",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
+    "typescript-eslint": "^8.55.0",
     "vitest": "^4.0.18"
   },
   "dependencies": {
