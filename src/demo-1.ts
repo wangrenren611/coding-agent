@@ -180,7 +180,7 @@ async function demo1() {
     let agent: Agent | undefined;
     try {
         agent = new Agent({
-            provider: ProviderRegistry.createFromEnv('glm-5',{
+            provider: ProviderRegistry.createFromEnv('minimax-2.5',{
                 timeout: 1000*60*3,
             }),
             systemPrompt: operatorPrompt({
