@@ -9,6 +9,7 @@ import type { ITimeProvider } from './types-internal';
 import type { IMemoryManager } from '../memory/types';
 import type { CompactionConfig } from '../session';
 import type { Message } from '../session/types';
+import type { ResponseValidatorOptions, ValidationResult } from './response-validator';
 
 export enum AgentStatus {
   THINKING = 'thinking',
@@ -79,4 +80,8 @@ export interface AgentOptions{
     compactionConfig?: Partial<Omit<CompactionConfig, 'llmProvider'>>;
     /** 启用 thinking 模式（特定 Provider 如 Kimi 支持） */
     thinking?: boolean;
+    /** 响应验证器配置（用于检测模型幻觉等问题） */
+    validationOptions?: Partial<ResponseValidatorOptions>;
+    /** 验证失败回调 */
+    onValidationViolation?: (result: ValidationResult) => void;
 }

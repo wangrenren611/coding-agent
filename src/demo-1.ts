@@ -180,7 +180,9 @@ async function demo1() {
     let agent: Agent | undefined;
     try {
         agent = new Agent({
-            provider: ProviderRegistry.createFromEnv('glm-5'),
+            provider: ProviderRegistry.createFromEnv('glm-5',{
+                timeout: 1000*60*3,
+            }),
             systemPrompt: operatorPrompt({
                 directory: process.cwd(),
                 language: 'Chinese',
@@ -190,7 +192,7 @@ async function demo1() {
             stream: true,
             thinking: true,  // 启用 thinking 模式，支持推理内容
             enableCompaction: true,  // 启用上下文压缩
-            sessionId: '063347b3-d379-4d0b-8674-d65a1936a469',
+            // sessionId: '063347b3-d379-4d0b-8674-d65a1936a469',
             compactionConfig: {
                 keepMessagesNum: 40,    // 保留最近 40 条消息
                 triggerRatio: 0.90,     // Token 使用达 90% 时触发压缩

@@ -25,6 +25,7 @@ async function demo() {
         provider,
         systemPrompt: '你是一个智能助手',
         memoryManager,
+        sessionId: '7fe1f1cd-fc93-4133-aa66-bcc850f7686c',
         enableCompaction: true,
         compactionConfig: {
             maxTokens: 4000,        // 设置较低的阈值以便演示

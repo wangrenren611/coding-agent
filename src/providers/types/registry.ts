@@ -55,4 +55,5 @@ export interface ModelConfig {
     /** 温度（可选） */
     temperature?: number;
     thinking?: boolean;
+    timeout?: number;
 }

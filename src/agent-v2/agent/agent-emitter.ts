@@ -9,6 +9,7 @@ import { AgentStatus } from './types';
 import type { StreamCallback } from './types';
 import type { Usage } from '../../providers';
 import type { ToolCall } from './core-types';
+import { safeToolResultToString } from '../util';
 
 /**
  * 累积使用量
@@ -166,7 +167,7 @@ export class AgentEmitter {
             type: AgentMessageType.TOOL_CALL_RESULT,
             payload: {
                 callId: toolCallId,
-                result: typeof result === 'string' ? result : JSON.stringify(result),
+                result: safeToolResultToString(result),
                 status,
             },
             msgId: messageId,

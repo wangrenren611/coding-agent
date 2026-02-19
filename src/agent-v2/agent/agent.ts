@@ -38,7 +38,7 @@ import {
     TaskFailedEvent,
     ToolCall,
     ToolExecutionResult,
-    ValidationResult,
+    ValidationResult as InternalValidationResult,
     getResponseFinishReason,
     getResponseToolCalls,
     responseHasToolCalls,
@@ -46,6 +46,11 @@ import {
 import { AgentMessageType } from "./stream-types";
 import { ToolContext } from "../tool/base";
 import { AgentEmitter } from "./agent-emitter";
+import { safeToolResultToString } from "../util";
+import {
+    ResponseValidatorOptions,
+    ValidationResult,
+} from "./response-validator";
 
 // ==================== 默认实现 ====================
 
@@ -75,6 +80,8 @@ export class Agent {
     private streamCallback?: StreamCallback;
     private maxBufferSize: number;
     private thinking?: boolean;
+    private validationOptions?: Partial<ResponseValidatorOptions>;
+    private onValidationViolation?: (result: ValidationResult) => void;
 
     // 状态
     private status: AgentStatus;
@@ -123,6 +130,8 @@ export class Agent {
         this.timeProvider = config.timeProvider ?? new DefaultTimeProvider();
         this.maxBufferSize = config.maxBufferSize ?? 100000;
         this.thinking = config.thinking;
+        this.validationOptions = config.validationOptions;
+        this.onValidationViolation = config.onValidationViolation;
         this.loopMax = 3000;
         this.maxCompensationRetries = 1;
         this.defaultRetryDelayMs = this.normalizePositiveMs(config.retryDelayMs, 1000 * 60 * 10);
@@ -150,6 +159,9 @@ export class Agent {
             onReasoningComplete: (msgId) => this.emitter.emitReasoningComplete(msgId),
             // Token 使用量回调
             onUsageUpdate: (usage) => this.emitter.emitUsageUpdate(usage),
+            // 响应验证配置
+            validatorOptions: this.validationOptions,
+            onValidationViolation: this.onValidationViolation,
         });
     }
 
@@ -534,7 +546,6 @@ export class Agent {
             }
 
             if (this.checkComplete()) {
-                this.emitter.emitStatus(AgentStatus.COMPLETED, 'Agent completed the task.');
                 break;
             }
 
@@ -785,7 +796,7 @@ export class Agent {
             this.session.addMessage(
                 createToolResultMessage(
                     result.tool_call_id,
-                    JSON.stringify(sanitized),
+                    safeToolResultToString(sanitized),
                     messageId
                 )
             );

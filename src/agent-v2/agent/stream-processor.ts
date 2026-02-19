@@ -27,11 +27,17 @@ import {
     hasReasoningDelta,
     hasToolCalls,
 } from './types-internal';
-import { 
-    ProcessorState as State, 
+import {
+    ProcessorState as State,
     ContentType,
     canTransition,
 } from './processor-state';
+import {
+    ResponseValidator,
+    ResponseValidatorOptions,
+    ValidationResult,
+    createResponseValidator,
+} from './response-validator';
 
 // 重新导出状态枚举供外部使用
 export { ProcessorState, ContentType } from './processor-state';
@@ -104,6 +110,13 @@ export interface StreamProcessorOptions {
 
     /** Token 使用量更新回调 */
     onUsageUpdate?: (usage: Usage) => void;
+
+    // ==================== 响应验证选项 ====================
+
+    /** 响应验证器配置（可选，用于检测模型幻觉） */
+    validatorOptions?: Partial<ResponseValidatorOptions>;
+    /** 验证失败回调 */
+    onValidationViolation?: (result: ValidationResult) => void;
 }
 
 // ==================== 主类 ====================
@@ -123,9 +136,13 @@ export class StreamProcessor {
     private metadata: StreamChunkMetadata = {};
     private currentMessageId: string = '';
 
+    // 响应验证器
+    private readonly validator: ResponseValidator;
+
     constructor(options: StreamProcessorOptions) {
         this.options = options;
         this.maxBufferSize = options.maxBufferSize;
+        this.validator = createResponseValidator(options.validatorOptions);
     }
 
     // ==================== 公共 API ====================
@@ -139,6 +156,7 @@ export class StreamProcessor {
         this.buffers = this.createInitialBuffers();
         this.metadata = {};
         this.currentMessageId = '';
+        this.validator.reset();
     }
 
     /**
@@ -293,6 +311,16 @@ export class StreamProcessor {
             return;
         }
 
+        // 增量验证 - 检测幻觉
+        const validationResult = this.validator.validateIncremental(content);
+        if (!validationResult.valid) {
+            this.handleValidationViolation(validationResult);
+            if (validationResult.action === 'abort') {
+                this.state.aborted = true;
+                return;
+            }
+        }
+
         // 触发开始事件
         if (!this.state.reasoningStarted) {
             this.state.reasoningStarted = true;
@@ -325,6 +353,16 @@ export class StreamProcessor {
             return;
         }
 
+        // 增量验证 - 检测幻觉
+        const validationResult = this.validator.validateIncremental(content);
+        if (!validationResult.valid) {
+            this.handleValidationViolation(validationResult);
+            if (validationResult.action === 'abort') {
+                this.state.aborted = true;
+                return;
+            }
+        }
+
         // 触发开始事件
         if (!this.state.textStarted) {
 
@@ -335,7 +373,7 @@ export class StreamProcessor {
 
             this.state.textStarted=true
             this.options.onTextStart(this.currentMessageId);
-            
+
         }
 
         // 触发增量事件
@@ -519,6 +557,39 @@ export class StreamProcessor {
         if (chunk.created) this.metadata.created = chunk.created;
         if (finishReason) this.metadata.finish_reason = finishReason;
 
-    
+
+    }
+
+    // ==================== 验证相关方法 ====================
+
+    /**
+     * 处理验证违规
+     */
+    private handleValidationViolation(result: ValidationResult): void {
+        // 调用外部回调（如果有）
+        this.options.onValidationViolation?.(result);
+
+        // 记录日志
+        console.warn('[StreamProcessor] Response validation violation detected:', {
+            type: result.violationType,
+            details: result.details,
+            action: result.action,
+            patterns: result.detectedPatterns,
+        });
+    }
+
+    /**
+     * 获取验证器检测到的问题
+     */
+    getValidationIssues(): string[] {
+        return this.validator.getDetectedIssues();
+    }
+
+    /**
+     * 对当前缓冲区内容进行完整验证
+     */
+    validateCurrentBuffer(): ValidationResult {
+        const fullContent = this.buffers.content + this.buffers.reasoning;
+        return this.validator.validateFull(fullContent);
     }
 }
