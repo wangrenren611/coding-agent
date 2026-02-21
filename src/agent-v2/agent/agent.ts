@@ -8,8 +8,6 @@ import {
     LLMGenerateOptions,
     LLMResponse,
     MessageContent,
-    LLMRequest,
-    Usage
 } from "../../providers";
 import { Session } from "../session";
 import { ToolRegistry } from "../tool/registry";
@@ -38,31 +36,20 @@ import {
     TaskFailedEvent,
     ToolCall,
     ToolExecutionResult,
-    ValidationResult as InternalValidationResult,
+    ValidationResult,
     getResponseFinishReason,
     getResponseToolCalls,
     responseHasToolCalls,
 } from "./types-internal";
-import { AgentMessageType } from "./stream-types";
 import { ToolContext } from "../tool/base";
 import { AgentEmitter } from "./agent-emitter";
 import { safeToolResultToString } from "../util";
 import {
     ResponseValidatorOptions,
-    ValidationResult,
+    ValidationResult as ValidatorValidationResult,
 } from "./response-validator";
-
-// ==================== 默认实现 ====================
-
-class DefaultTimeProvider implements ITimeProvider {
-    getCurrentTime(): number {
-        return Date.now();
-    }
-
-    async sleep(ms: number): Promise<void> {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    }
-}
+import { DefaultTimeProvider } from "./time-provider";
+import { contentToText, hasContent } from "./core-types";
 
 // ==================== Agent 类 ====================
 
@@ -281,7 +268,7 @@ export class Agent {
             // 文本消息但没有工具调用，且有内容，也视为完成
             if (
                 lastMessage.type === 'text' &&
-                this.hasMessageContent(lastMessage.content) &&
+                hasContent(lastMessage.content) &&
                 !lastMessage.tool_calls
             ) {
                 return true;
@@ -407,57 +394,24 @@ export class Agent {
         this.session.addMessage(createUserMessage(query));
     }
 
-    private contentToText(content: MessageContent): string {
-        if (typeof content === 'string') {
-            return content;
-        }
-
-        return content
-            .map((part) => {
-                switch (part.type) {
-                    case 'text':
-                        return part.text || '';
-                    case 'image_url':
-                        return `[image] ${part.image_url?.url || ''}`.trim();
-                    case 'file':
-                        return `[file] ${part.file?.filename || part.file?.file_id || ''}`.trim();
-                    case 'input_audio':
-                        return '[audio]';
-                    case 'input_video':
-                        return `[video] ${part.input_video?.url || part.input_video?.file_id || ''}`.trim();
-                    default:
-                        return '';
-                }
-            })
-            .filter(Boolean)
-            .join('\n');
-    }
-
-    private hasMessageContent(content: MessageContent): boolean {
-        if (typeof content === 'string') {
-            return content.length > 0;
-        }
-        return content.length > 0;
-    }
-
     private isCompensationRetryCandidate(message: Message): boolean {
         if (message.role !== 'assistant') return false;
         if (message.finish_reason !== 'stop') return false;
         if (Array.isArray(message.tool_calls) && message.tool_calls.length > 0) return false;
-        return !this.hasMessageContent(message.content);
+        return !hasContent(message.content);
     }
 
     private shouldSendMessageToLLM(message: Message): boolean {
         if (message.role === 'system') return true;
         if (message.role === 'assistant') {
             if (Array.isArray(message.tool_calls) && message.tool_calls.length > 0) return true;
-            return this.hasMessageContent(message.content);
+            return hasContent(message.content);
         }
         if (message.role === 'tool') {
             const hasToolCallId = typeof message.tool_call_id === 'string' && message.tool_call_id.length > 0;
-            return hasToolCallId || this.hasMessageContent(message.content);
+            return hasToolCallId || hasContent(message.content);
         }
-        return this.hasMessageContent(message.content);
+        return hasContent(message.content);
     }
 
     private getMessagesForLLM(): Message[] {
@@ -764,7 +718,7 @@ export class Agent {
         // 触发工具调用回调 - 传递当前消息的 content
         const currentMessage = this.session.getLastMessage();
         const messageContent = currentMessage?.messageId === messageId
-            ? this.contentToText(currentMessage.content)
+            ? contentToText(currentMessage.content)
             : '';
         this.emitter.emitToolCallCreated(toolCalls, messageId, messageContent);
 
