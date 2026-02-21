@@ -1,0 +1,15 @@
+❌ 状态: failed - An unexpected error occurred. Please try again.
+
+❌ demo1 执行失败: LLMAbortedError: Request was cancelled by upstream signal
+    at HTTPClient.fetchWithTimeout (D:\work\coding-agent\src\providers\http\client.ts:99:23)
+    at processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at runNextTicks (node:internal/process/task_queues:69:3)
+    at listOnTimeout (node:internal/timers:549:9)
+    at process.processTimers (node:internal/timers:523:7)
+    at async HTTPClient.fetch (D:\work\coding-agent\src\providers\http\client.ts:50:30)
+    at async OpenAICompatibleProvider._generateStream (D:\work\coding-agent\src\providers\openai-compatible.ts:190:26)
+    at async Agent.executeStreamCall (D:\work\coding-agent\src\agent-v2\agent\agent.ts:488:26)
+    at async Agent.executeLLMCall (D:\work\coding-agent\src\agent-v2\agent\agent.ts:461:19)
+    at async Agent.runLoop (D:\work\coding-agent\src\agent-v2\agent\agent.ts:382:17) {
+  code: 'ABORTED'
+}

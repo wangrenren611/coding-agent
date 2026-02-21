@@ -438,6 +438,8 @@ export class Agent {
     private async executeLLMCall(options?: LLMGenerateOptions): Promise<void> {
         await this.session.compactBeforeLLMCall();
 
+        // 为每次 LLM 调用创建新的 AbortController
+        this.agentState.prepareLLMCall();
         this.streamProcessor.reset();
 
         const messageId = uuid();

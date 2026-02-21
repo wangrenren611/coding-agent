@@ -410,9 +410,12 @@ export class Compaction {
    * 内容转文本
    */
   private contentToText(content: Message['content']): string {
+    if (!content) return '';
+
     if (typeof content === 'string') {
       return content;
     }
+ 
     return content.map(this.stringifyContentPart).filter(Boolean).join('\n');
   }
 

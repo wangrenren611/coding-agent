@@ -203,6 +203,13 @@ export class AgentState {
     }
 
     /**
+     * 准备新的 LLM 调用（创建新的 AbortController）
+     */
+    prepareLLMCall(): void {
+        this._abortController = new AbortController();
+    }
+
+    /**
      * 标记任务完成
      */
     completeTask(): void {
