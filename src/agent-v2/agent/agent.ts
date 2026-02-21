@@ -44,12 +44,26 @@ import {
 import { ToolContext } from "../tool/base";
 import { AgentEmitter } from "./agent-emitter";
 import { safeToolResultToString } from "../util";
-import {
-    ResponseValidatorOptions,
-    ValidationResult as ValidatorValidationResult,
-} from "./response-validator";
+import type { ResponseValidatorOptions } from "./response-validator";
 import { DefaultTimeProvider } from "./time-provider";
 import { contentToText, hasContent } from "./core-types";
+import { InputValidator } from "./input-validator";
+import { ErrorClassifier } from "./error-classifier";
+import { AgentState } from "./core/agent-state";
+
+// ==================== Agent 常量 ====================
+
+/** 最大循环次数 */
+const LOOP_MAX = 3000;
+
+/** 默认最大重试次数 */
+const DEFAULT_MAX_RETRIES = 10;
+
+/** 默认重试延迟（毫秒）- 10 分钟 */
+const DEFAULT_RETRY_DELAY_MS = 1000 * 60 * 10;
+
+/** 最大补偿重试次数 */
+const MAX_COMPENSATION_RETRIES = 1;
 
 // ==================== Agent 类 ====================
 
@@ -91,6 +105,12 @@ export class Agent {
     private streamProcessor: StreamProcessor;
     private emitter: AgentEmitter;
 
+    // 验证器
+    private inputValidator: InputValidator;
+
+    // 错误分类器
+    private errorClassifier: ErrorClassifier;
+
     constructor(config: AgentOptions) {
         this.validateConfig(config);
 
@@ -109,7 +129,7 @@ export class Agent {
             { workingDirectory: process.cwd() },
             this.provider
         );
-        this.maxRetries = config.maxRetries ?? 10;
+        this.maxRetries = config.maxRetries ?? DEFAULT_MAX_RETRIES;
         this.stream = config.stream ?? false;
         this.streamCallback = config.streamCallback;
         this.eventBus = new EventBus();
@@ -119,9 +139,9 @@ export class Agent {
         this.thinking = config.thinking;
         this.validationOptions = config.validationOptions;
         this.onValidationViolation = config.onValidationViolation;
-        this.loopMax = 3000;
-        this.maxCompensationRetries = 1;
-        this.defaultRetryDelayMs = this.normalizePositiveMs(config.retryDelayMs, 1000 * 60 * 10);
+        this.loopMax = LOOP_MAX;
+        this.maxCompensationRetries = MAX_COMPENSATION_RETRIES;
+        this.defaultRetryDelayMs = this.normalizePositiveMs(config.retryDelayMs, DEFAULT_RETRY_DELAY_MS);
         this.requestTimeoutMs = this.normalizeOptionalPositiveMs(config.requestTimeout);
         this.nextRetryDelayMs = this.defaultRetryDelayMs;
 
@@ -150,12 +170,18 @@ export class Agent {
             validatorOptions: this.validationOptions,
             onValidationViolation: this.onValidationViolation,
         });
+
+        // 初始化输入验证器
+        this.inputValidator = new InputValidator();
+
+        // 初始化错误分类器
+        this.errorClassifier = new ErrorClassifier();
     }
 
     // ==================== 公共 API ====================
 
     async execute(query: MessageContent, options?: LLMGenerateOptions): Promise<Message> {
-        const validation = this.validateInput(query);
+        const validation = this.inputValidator.validate(query);
         if (!validation.valid) {
             throw new AgentError(validation.error || 'Invalid input');
         }
@@ -196,7 +222,7 @@ export class Agent {
                 sessionId: this.session.getSessionId(),
             };
         } catch (error) {
-            const failure = this.lastFailure ?? this.buildFailure(error, this.sanitizeError(error));
+            const failure = this.lastFailure ?? this.errorClassifier.buildFailure(error, this.status);
             const status = this.status === AgentStatus.ABORTED ? 'aborted' : 'failed';
             return {
                 status,
@@ -289,98 +315,6 @@ export class Agent {
         }
     }
 
-    private validateInput(query: MessageContent): ValidationResult {
-        if (typeof query === 'string') {
-            return this.validateTextInput(query);
-        }
-
-        if (!Array.isArray(query) || query.length === 0) {
-            return { valid: false, error: 'Query content parts cannot be empty' };
-        }
-
-        for (const part of query) {
-            const partValidation = this.validateContentPart(part);
-            if (!partValidation.valid) {
-                return partValidation;
-            }
-        }
-
-        return { valid: true };
-    }
-
-    private validateTextInput(query: string): ValidationResult {
-        if (query.length === 0) {
-            return { valid: false, error: 'Query cannot be empty' };
-        }
-
-        if (query.length > 100000) {
-            return { valid: false, error: 'Query exceeds maximum length' };
-        }
-
-        return { valid: true };
-    }
-
-    private validateContentPart(part: InputContentPart): ValidationResult {
-        if (!part || typeof part !== 'object' || !('type' in part)) {
-            return { valid: false, error: 'Invalid content part structure' };
-        }
-
-        switch (part.type) {
-            case 'text':
-                return this.validateTextInput(part.text || '');
-            case 'image_url':
-                if (!part.image_url?.url) {
-                    return { valid: false, error: 'image_url part must include a valid url' };
-                }
-                return { valid: true };
-            case 'file':
-                if (!part.file?.file_id && !part.file?.file_data) {
-                    return { valid: false, error: 'file part must include file_id or file_data' };
-                }
-                return { valid: true };
-            case 'input_audio':
-                if (!part.input_audio?.data || !part.input_audio?.format) {
-                    return { valid: false, error: 'input_audio part must include data and format' };
-                }
-                return { valid: true };
-            case 'input_video':
-                if (!part.input_video?.url && !part.input_video?.file_id && !part.input_video?.data) {
-                    return { valid: false, error: 'input_video part must include url, file_id, or data' };
-                }
-                return { valid: true };
-            default:
-                return { valid: false, error: `Unsupported content part type: ${(part as { type?: string }).type}` };
-        }
-    }
-
-    private sanitizeError(error: unknown): SafeError {
-        if (error instanceof AgentError) {
-            return {
-                userMessage: error.message,
-                internalMessage: error.stack,
-            };
-        }
-
-        if (error instanceof ToolError) {
-            return {
-                userMessage: 'Tool execution failed. Please try again.',
-                internalMessage: error.message,
-            };
-        }
-
-        if (error instanceof Error) {
-            return {
-                userMessage: 'An unexpected error occurred. Please try again.',
-                internalMessage: error.message,
-            };
-        }
-
-        return {
-            userMessage: 'An unexpected error occurred. Please try again.',
-            internalMessage: String(error),
-        };
-    }
-
     // ==================== 任务生命周期 ====================
 
     private initializeTask(query: MessageContent): void {
@@ -432,8 +366,8 @@ export class Agent {
 
     private failTask(error: unknown): void {
         this.status = AgentStatus.FAILED;
-        const safeError = this.sanitizeError(error);
-        this.lastFailure = this.buildFailure(error, safeError);
+        const safeError = this.errorClassifier.sanitizeError(error);
+        this.lastFailure = this.errorClassifier.buildFailure(error, this.status);
 
         this.eventBus.emit(EventType.TASK_FAILED, {
             timestamp: this.timeProvider.getCurrentTime(),
@@ -443,50 +377,6 @@ export class Agent {
         } as TaskFailedEvent);
 
         this.emitter.emitStatus(AgentStatus.FAILED, safeError.userMessage);
-    }
-
-    private buildFailure(error: unknown, safeError: SafeError): AgentFailure {
-        return {
-            code: this.classifyFailureCode(error),
-            userMessage: safeError.userMessage,
-            internalMessage: safeError.internalMessage,
-        };
-    }
-
-    private classifyFailureCode(error: unknown): AgentFailureCode {
-        if (this.status === AgentStatus.ABORTED || isAbortedError(error) || this.isAbortLikeError(error)) {
-            return 'AGENT_ABORTED';
-        }
-        if (error instanceof AgentError && /maximum retries/i.test(error.message)) {
-            return 'AGENT_MAX_RETRIES_EXCEEDED';
-        }
-        if (error instanceof ToolError) {
-            return 'TOOL_EXECUTION_FAILED';
-        }
-        if (this.isTimeoutLikeError(error)) {
-            return 'LLM_TIMEOUT';
-        }
-        if (error instanceof LLMError) {
-            return 'LLM_REQUEST_FAILED';
-        }
-        return 'AGENT_RUNTIME_ERROR';
-    }
-
-    private isAbortLikeError(error: unknown): boolean {
-        if (!(error instanceof Error)) return false;
-        const message = `${error.name} ${error.message}`.toLowerCase();
-        return message.includes('abort') || message.includes('aborted');
-    }
-
-    private isTimeoutLikeError(error: unknown): boolean {
-        if (!(error instanceof Error)) return false;
-        const message = `${error.name} ${error.message}`.toLowerCase();
-        return (
-            message.includes('timeout')
-            || message.includes('timed out')
-            || message.includes('time out')
-            || message.includes('signal timed out')
-        );
     }
 
     // ==================== 主循环 ====================

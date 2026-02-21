@@ -161,7 +161,7 @@ export function stringifyContentPart(part: InputContentPart): string {
  */
 export function hasContent(content: MessageContent): boolean {
     if (typeof content === 'string') {
-        return content.length > 0;
+        return content?.length > 0;
     }
-    return content.length > 0;
+    return content?.length > 0;
 }
