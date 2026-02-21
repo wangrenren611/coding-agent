@@ -34,6 +34,7 @@
     "@types/react": "^19.0.6",
     "@types/shell-quote": "^1.7.5",
     "@types/turndown": "^5.0.6",
+    "@types/uuid": "^10.0.0",
     "@vitest/ui": "^4.0.18",
     "chalk": "^5.4.1",
     "cross-env": "^10.1.0",
@@ -47,17 +48,14 @@
     "vitest": "^4.0.18"
   },
   "dependencies": {
-    "@opentui/core": "latest",
-    "@opentui/react": "latest",
+    "@opentui/core": "^0.1.80",
+    "@opentui/react": "^0.1.80",
     "@tavily/core": "^0.7.1",
-    "@types/glob": "^8.1.0",
-    "@types/uuid": "^10.0.0",
     "@vscode/ripgrep": "^1.17.0",
     "agent-browser": "^0.9.0",
     "dotenv": "^17.2.3",
     "execa": "^9.6.1",
     "fast-glob": "^3.3.3",
-    "glob": "^11.1.0",
     "iconv-lite": "^0.7.2",
     "isbinaryfile": "^5.0.7",
     "react": "^19.2.4",
@@ -66,7 +64,6 @@
     "strip-ansi": "^7.1.2",
     "turndown": "^7.2.2",
     "uuid": "^11.1.0",
-    "uuidv4": "^6.2.13",
     "zod": "^4.3.6"
   },
   "ts-node": {

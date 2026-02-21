@@ -4,6 +4,54 @@ import { isBinaryFile } from 'isbinaryfile';
 import { z } from 'zod';
 import { BaseTool, ToolContext, ToolResult } from './base';
 
+/**
+ * 安全路径解析错误
+ */
+export class PathTraversalError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PathTraversalError';
+  }
+}
+
+/**
+ * 解析并验证路径，防止目录遍历攻击
+ * 
+ * @param filePath 用户提供的文件路径
+ * @param baseDir 基础目录（默认为 process.cwd()）
+ * @returns 解析后的绝对路径
+ * @throws PathTraversalError 如果路径尝试逃逸基础目录
+ */
+export function resolveAndValidatePath(filePath: string, baseDir: string = process.cwd()): string {
+  // 规范化路径分隔符
+  const normalizedPath = filePath.replace(/\\/g, '/');
+  
+  // 解析为绝对路径
+  const resolvedPath = path.resolve(baseDir, normalizedPath);
+  
+  // 规范化基础目录用于比较
+  const normalizedBaseDir = path.resolve(baseDir);
+  
+  // 路径遍历检测策略：
+  // 1. 如果输入是绝对路径，允许访问（用户明确指定了目标）
+  // 2. 如果输入是相对路径且包含 ..，检查是否逃逸工作目录
+  const isAbsoluteInput = path.isAbsolute(normalizedPath);
+  
+  if (!isAbsoluteInput) {
+    // 对于相对路径，检查是否逃逸了工作目录
+    const relative = path.relative(normalizedBaseDir, resolvedPath);
+    
+    // 如果相对路径以 .. 开头，说明路径逃逸了基础目录
+    if (relative.startsWith('..')) {
+      throw new PathTraversalError(
+        `Path traversal detected: "${filePath}" attempts to escape the allowed directory`
+      );
+    }
+  }
+  
+  return resolvedPath;
+}
+
 const readFileSchema = z.object({
   filePath: z.string(),
   startLine: z.number().optional().describe("The line number to start reading from (1-based, defaults to 1)"),
@@ -146,8 +194,15 @@ Usage:
   }
 
   private resolvePath(filePath: string): string {
-    const normalizedPath = filePath.replace(/\\/g, '/');
-    return path.resolve(process.cwd(), normalizedPath);
+    try {
+      return resolveAndValidatePath(filePath);
+    } catch (error) {
+      if (error instanceof PathTraversalError) {
+        // 路径遍历攻击，返回业务错误
+        throw error;
+      }
+      throw error;
+    }
   }
 }
 
@@ -223,7 +278,6 @@ When the user provides a path to a file assume that path is valid.`;
   }
 
   private resolvePath(filePath: string): string {
-    const normalizedPath = filePath.replace(/\\/g, '/');
-    return path.resolve(process.cwd(), normalizedPath);
+    return resolveAndValidatePath(filePath);
   }
 }

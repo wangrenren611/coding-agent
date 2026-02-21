@@ -3,6 +3,7 @@ import * as path from 'path';
 import { z } from 'zod';
 import { BaseTool, ToolContext, ToolResult } from './base';
 import { getBackupManager } from '../util/backup-manager';
+import { resolveAndValidatePath, PathTraversalError } from './file';
 
 export class RollbackTool extends BaseTool<any> {
     name = 'rollback_file';
@@ -15,7 +16,19 @@ export class RollbackTool extends BaseTool<any> {
     });
 
     async execute({ filePath, backupId }: z.infer<typeof this.schema>, _context?: ToolContext): Promise<ToolResult> {
-        const fullPath = path.resolve(process.cwd(), filePath);
+        let fullPath: string;
+        try {
+            fullPath = resolveAndValidatePath(filePath);
+        } catch (error) {
+            if (error instanceof PathTraversalError) {
+                return this.result({
+                    success: false,
+                    metadata: { error: 'PATH_TRAVERSAL_DETECTED', filePath } as any,
+                    output: `PATH_TRAVERSAL_DETECTED: ${error.message}`,
+                });
+            }
+            throw error;
+        }
 
         // === 业务错误：文件不存在 ===
         if (!fs.existsSync(fullPath)) {
@@ -68,7 +81,19 @@ export class ListBackupsTool extends BaseTool<any> {
     });
 
     async execute({ filePath }: z.infer<typeof this.schema>, _context?: ToolContext): Promise<ToolResult> {
-        const fullPath = path.resolve(process.cwd(), filePath);
+        let fullPath: string;
+        try {
+            fullPath = resolveAndValidatePath(filePath);
+        } catch (error) {
+            if (error instanceof PathTraversalError) {
+                return this.result({
+                    success: false,
+                    metadata: { error: 'PATH_TRAVERSAL_DETECTED', filePath } as any,
+                    output: `PATH_TRAVERSAL_DETECTED: ${error.message}`,
+                });
+            }
+            throw error;
+        }
 
         const backupManager = getBackupManager();
         await backupManager.initialize();
@@ -112,7 +137,19 @@ export class CleanBackupsTool extends BaseTool<any> {
             });
         }
 
-        const fullPath = path.resolve(process.cwd(), filePath);
+        let fullPath: string;
+        try {
+            fullPath = resolveAndValidatePath(filePath);
+        } catch (error) {
+            if (error instanceof PathTraversalError) {
+                return this.result({
+                    success: false,
+                    metadata: { error: 'PATH_TRAVERSAL_DETECTED', filePath } as any,
+                    output: `PATH_TRAVERSAL_DETECTED: ${error.message}`,
+                });
+            }
+            throw error;
+        }
 
         const backupManager = getBackupManager();
         await backupManager.initialize();

@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { z } from 'zod';
 import { BaseTool, ToolContext, ToolResult } from './base';
+import { resolveAndValidatePath, PathTraversalError } from './file';
 
 /**
  * Normalize line endings: convert CRLF to LF
@@ -143,7 +144,19 @@ Use that content EXACTLY (copy it verbatim) for your retry.`;
   }).strict();
 
   async execute({ filePath, line, oldText, newText }: z.infer<typeof this.schema>, _context?: ToolContext): Promise<ToolResult> {
-    const fullPath = path.resolve(process.cwd(), filePath);
+    let fullPath: string;
+    try {
+      fullPath = resolveAndValidatePath(filePath);
+    } catch (error) {
+      if (error instanceof PathTraversalError) {
+        return this.result({
+          success: false,
+          metadata: { error: 'PATH_TRAVERSAL_DETECTED', filePath } as any,
+          output: `PATH_TRAVERSAL_DETECTED: ${error.message}`,
+        });
+      }
+      throw error;
+    }
 
     // === 1. Check if file exists ===
     if (!fs.existsSync(fullPath)) {

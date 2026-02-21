@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { z } from 'zod';
 import { BaseTool, ToolContext, ToolResult } from './base';
+import { resolveAndValidatePath, PathTraversalError } from './file';
 
 /**
  * 批量替换工具
@@ -36,7 +37,19 @@ export class BatchReplaceTool extends BaseTool<any> {
       });
     }
 
-    const fullPath = path.resolve(process.cwd(), filePath);
+    let fullPath: string;
+    try {
+      fullPath = resolveAndValidatePath(filePath);
+    } catch (error) {
+      if (error instanceof PathTraversalError) {
+        return this.result({
+          success: false,
+          metadata: { error: 'PATH_TRAVERSAL_DETECTED', filePath } as any,
+          output: `PATH_TRAVERSAL_DETECTED: ${error.message}`,
+        });
+      }
+      throw error;
+    }
 
     // === 业务错误：文件不存在 ===
     if (!fs.existsSync(fullPath)) {
