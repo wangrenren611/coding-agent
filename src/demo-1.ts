@@ -180,7 +180,7 @@ async function demo1() {
     let agent: Agent | undefined;
     try {
         agent = new Agent({
-            provider: ProviderRegistry.createFromEnv('minimax-2.5',{
+            provider: ProviderRegistry.createFromEnv('glm-5',{
                 timeout: 1000*60*3,
             }),
             systemPrompt: operatorPrompt({
@@ -188,7 +188,7 @@ async function demo1() {
                 language: 'Chinese',
             }),
             // 如需恢复会话，请取消注释并填入有效 sessionId
-           sessionId: '0e1ff44d-8668-4636-bd92-ddbde50522e4',
+           sessionId: 'agent-1',
             stream: true,
             thinking: true,  // 启用 thinking 模式，支持推理内容
             enableCompaction: true,  // 启用上下文压缩
