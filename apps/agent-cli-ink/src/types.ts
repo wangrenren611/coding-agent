@@ -1,5 +1,5 @@
 import type { AgentStatus } from "../../../src/agent-v2/agent/types";
-import type { UIMessage } from "./agent-chat-react/types";
+import type { UIMessage } from "../../../src/agent-chat-react/types";
 
 export interface CliOptions {
   model: string;

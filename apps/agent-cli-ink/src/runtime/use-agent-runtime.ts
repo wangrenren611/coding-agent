@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Agent } from "../../../../src/agent-v2/agent/agent";
 import { operatorPrompt } from "../../../../src/agent-v2/prompts/operator";
-import { useAgentChat } from "../agent-chat-react";
-import type { UIMessage } from "../agent-chat-react/types";
+import { useAgentChat } from "../../../src/agent-chat-react";
+import type { UIMessage } from "../../../src/agent-chat-react/types";
 import { ProviderRegistry } from "../../../../src/providers/registry";
 import { buildHelpText, parseSlashCommand } from "../commands/router";
 import type { CliOptions, LocalTimelineEntry, RuntimeSnapshot, TimelineEntry } from "../types";

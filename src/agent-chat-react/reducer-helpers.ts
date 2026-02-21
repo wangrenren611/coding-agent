@@ -112,7 +112,8 @@ export function withToolCallUpdate(state: AgentChatState, options: ToolCallUpdat
   if (assistant.kind !== "assistant") return workingState;
 
   const nextToolCalls = assistant.toolCalls.slice();
-  if (targetToolIndex === undefined) {
+  // 增强的 targetToolIndex 检查，避免 undefined/NaN 问题
+  if (targetToolIndex === undefined || !Number.isInteger(targetToolIndex) || targetToolIndex < 0) {
     targetToolIndex = nextToolCalls.findIndex((item) => item.callId === options.callId);
   }
 
@@ -127,7 +128,14 @@ export function withToolCallUpdate(state: AgentChatState, options: ToolCallUpdat
     });
   }
 
-  const currentTool = nextToolCalls[targetToolIndex];
+  // 防御性获取 currentTool，避免 undefined 问题
+  const currentTool = nextToolCalls[targetToolIndex] ?? {
+    callId: options.callId,
+    toolName: options.toolName || "",
+    args: options.args || "",
+    streamLogs: [],
+    result: null,
+  };
   const mergedTool: UIToolCall = {
     ...currentTool,
     toolName: options.toolName || currentTool.toolName,
@@ -152,6 +160,9 @@ export function withToolCallUpdate(state: AgentChatState, options: ToolCallUpdat
   };
 }
 
+// 用于生成唯一 ID 的计数器
+let messageCounter = 0;
+
 export function resolveMessageId(
   state: AgentChatState,
   msgId: string | undefined,
@@ -159,16 +170,25 @@ export function resolveMessageId(
   timestamp: number
 ): string {
   if (msgId) return msgId;
-  return `${prefix}-${timestamp}-${state.messages.length}`;
+  // 使用 timestamp + counter + messages.length 确保唯一性
+  messageCounter += 1;
+  return `${prefix}-${timestamp}-${messageCounter}-${state.messages.length}`;
 }
 
 export function normalizeResultOutput(result: unknown): string | null {
   if (result == null) return null;
   if (typeof result === "string") return result;
   try {
-    return JSON.stringify(result);
+    const serialized = JSON.stringify(result);
+    if (serialized !== undefined) return serialized;
   } catch {
+    // Fall through to String() fallback.
+  }
+
+  try {
     return String(result);
+  } catch {
+    return "[unserializable result]";
   }
 }
 

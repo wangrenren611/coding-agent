@@ -2,7 +2,7 @@
 import React from "react";
 import { render } from "ink";
 import dotenv from "dotenv";
-import { AgentChatProvider } from "./agent-chat-react";
+import { AgentChatProvider } from "../../../src/agent-chat-react";
 import { App } from "./app";
 import type { CliOptions } from "./types";
 
