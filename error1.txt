@@ -1,0 +1,13 @@
+❌ 状态: failed - An unexpected error occurred. Please try again.
+
+❌ demo1 执行失败: TypeError: Cannot read properties of undefined (reading 'map')
+    at Compaction.contentToText (D:\work\coding-agent\src\agent-v2\session\compaction.ts:417:20)
+    at <anonymous> (D:\work\coding-agent\src\agent-v2\session\compaction.ts:401:28)
+    at Array.map (<anonymous>)
+    at Compaction.serializeMessages (D:\work\coding-agent\src\agent-v2\session\compaction.ts:399:21)
+    at Compaction.generateSummary (D:\work\coding-agent\src\agent-v2\session\compaction.ts:318:30)
+    at Compaction.compact (D:\work\coding-agent\src\agent-v2\session\compaction.ts:144:39)
+    at Session.compactBeforeLLMCall (D:\work\coding-agent\src\agent-v2\session\index.ts:208:42)
+    at async Agent.executeLLMCall (D:\work\coding-agent\src\agent-v2\agent\agent.ts:439:9)
+    at async Agent.runLoop (D:\work\coding-agent\src\agent-v2\agent\agent.ts:382:17)
+    at async Agent.execute (D:\work\coding-agent\src\agent-v2\agent\agent.ts:191:13)

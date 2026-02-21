@@ -415,8 +415,13 @@ export class Compaction {
     if (typeof content === 'string') {
       return content;
     }
+
+    // 额外检查：确保是数组类型
+    if (!Array.isArray(content)) {
+      return '';
+    }
  
-    return content.map(this.stringifyContentPart).filter(Boolean).join('\n');
+    return content.map(part => this.stringifyContentPart(part)).filter(Boolean).join('\n');
   }
 
   private stringifyContentPart(part: InputContentPart): string {
