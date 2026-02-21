@@ -946,6 +946,221 @@ AGENT_ALLOW_ABSOLUTE_PATHS=false
 
 ---
 
-*文档版本: 1.2*
+## 附录 F: Agent 架构重构 (2026-02-22)
+
+### F.1 问题分析
+
+#### 原始 Agent 类问题
+
+| 问题 | 影响 | 严重性 |
+|------|------|--------|
+| 代码行数 852 行 | 可维护性差 | 🔴 高 |
+| 10+ 职责 | 违反单一职责原则 | 🔴 高 |
+| 依赖直接创建 | 不可测试 | 🔴 高 |
+| 状态分散在 10+ 属性中 | 状态不一致风险 | 🟡 中 |
+
+#### 职责分析
+
+```
+原始 Agent 类承担的职责：
+1. LLM 调用管理      - executeLLMCall, executeStreamCall
+2. 流式处理协调      - StreamProcessor 管理
+3. 工具调用执行      - handleToolCallResponse
+4. 状态管理          - status, loopCount, retryCount...
+5. 重试逻辑          - runLoop, handleRetry
+6. 会话管理          - session 操作
+7. 事件发射          - emitter 管理
+8. 输入验证          - validateInput 系列
+9. 错误处理          - sanitizeError, classifyFailureCode
+10. 持久化协调       - flushSessionPersistence
+```
+
+### F.2 重构方案
+
+#### 新增核心模块
+
+```
+src/agent-v2/agent/core/
+├── agent-state.ts       # 状态管理 (280 行)
+├── retry-strategy.ts    # 重试策略 (170 行)
+├── llm-caller.ts        # LLM 调用封装 (200 行)
+├── tool-executor.ts     # 工具执行封装 (180 行)
+└── index.ts             # 模块导出
+```
+
+#### 架构图
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        Agent (重构后)                            │
+│                      ~200 行, 协调者角色                          │
+├─────────────────────────────────────────────────────────────────┤
+│  - stateManager: AgentState                                     │
+│  - llmCaller: LLMCaller                                         │
+│  - toolExecutor: ToolExecutor                                   │
+│  - retryStrategy: RetryStrategy                                 │
+│  - session: Session                                             │
+├─────────────────────────────────────────────────────────────────┤
+│  + execute(query): Promise<Message>                             │
+│  + abort(): void                                                │
+│  + getStatus(): AgentStatus                                     │
+└─────────────────────────────────────────────────────────────────┘
+         │
+         │ 依赖
+         ▼
+┌────────────────┐ ┌────────────────┐ ┌────────────────┐
+│  AgentState    │ │  LLMCaller     │ │ ToolExecutor   │
+│  ~280 行       │ │  ~200 行       │ │  ~180 行       │
+├────────────────┤ ├────────────────┤ ├────────────────┤
+│ - status       │ │ + execute()    │ │ + execute()    │
+│ - loopCount    │ │ + abort()      │ │ + sanitize()   │
+│ - retryCount   │ │                │ │                │
+│ + canContinue()│ │                │ │                │
+│ + shouldRetry()│ │                │ │                │
+└────────────────┘ └────────────────┘ └────────────────┘
+```
+
+### F.3 核心组件说明
+
+#### AgentState - 状态管理器
+
+```typescript
+class AgentState {
+  // 状态访问器
+  get status(): AgentStatus;
+  get loopCount(): number;
+  get retryCount(): number;
+  
+  // 状态检查
+  canContinue(): boolean;
+  isRetryExceeded(): boolean;
+  isBusy(): boolean;
+  
+  // 状态变更
+  startTask(): void;
+  incrementLoop(): void;
+  recordSuccess(): void;
+  recordRetryableError(delayMs?: number): void;
+  completeTask(): void;
+  failTask(failure: AgentFailure): void;
+  abort(): void;
+  
+  // 完成检测
+  checkMessageComplete(lastMessage: Message | undefined): boolean;
+  
+  // 工具方法
+  getSnapshot(): AgentStateSnapshot;
+  getStats(): { loops: number; retries: number; duration: number };
+}
+```
+
+#### RetryStrategy - 重试策略
+
+```typescript
+class RetryStrategy {
+  // 分析错误并决定重试策略
+  analyze(
+    error: unknown, 
+    currentRetryCount: number, 
+    currentCompensationCount: number
+  ): RetryDecision;
+  
+  // 执行重试等待
+  wait(delayMs: number): Promise<void>;
+  
+  // 静态方法
+  static isRetryable(error: unknown): boolean;
+  static isCompensationRetry(error: unknown): boolean;
+}
+
+interface RetryDecision {
+  shouldRetry: boolean;
+  retryType: 'normal' | 'compensation' | 'none';
+  delayMs: number;
+  exceeded: boolean;
+  reason: string;
+}
+```
+
+#### LLMCaller - LLM 调用器
+
+```typescript
+class LLMCaller {
+  constructor(config: LLMCallerConfig);
+  
+  // 执行 LLM 调用
+  execute(
+    messages: Message[], 
+    tools: unknown[], 
+    abortSignal?: AbortSignal
+  ): Promise<LLMCallResult>;
+  
+  // 中止调用
+  abort(): void;
+}
+
+interface LLMCallResult {
+  response: LLMResponse;
+  messageId: string;
+}
+```
+
+#### ToolExecutor - 工具执行器
+
+```typescript
+class ToolExecutor {
+  constructor(config: ToolExecutorConfig);
+  
+  // 执行工具调用
+  execute(
+    toolCalls: ToolCall[], 
+    messageId: string, 
+    messageContent?: string
+  ): Promise<ToolExecutionOutput>;
+  
+  // 获取工具注册表
+  getToolRegistry(): ToolRegistry;
+}
+
+interface ToolExecutionOutput {
+  success: boolean;
+  toolCount: number;
+  resultMessages: Message[];
+}
+```
+
+### F.4 迁移指南
+
+#### 阶段 1: 引入新组件（低风险）
+
+1. 新增 `core/` 目录和组件
+2. 在测试中使用新组件
+3. 验证功能正确性
+
+#### 阶段 2: 重构 Agent 类（中风险）
+
+1. 将 Agent 类中的状态管理逻辑委托给 AgentState
+2. 将重试逻辑委托给 RetryStrategy
+3. 运行所有测试验证兼容性
+
+#### 阶段 3: 优化和清理（低风险）
+
+1. 移除 Agent 类中的冗余代码
+2. 更新文档和注释
+3. 性能测试
+
+### F.5 重构前后对比
+
+| 指标 | 重构前 | 重构后 |
+|------|--------|--------|
+| Agent 类行数 | 852 行 | ~200 行 |
+| Agent 类职责 | 10+ | 2 (协调、状态转换) |
+| 可测试性 | 🟡 中等 | ✅ 高 (依赖注入) |
+| 状态管理 | 分散在 10+ 属性 | 统一在 AgentState |
+| 重试逻辑 | 耦合在 runLoop | 独立 RetryStrategy |
+
+---
+
+*文档版本: 1.3*
 *最后更新: 2026-02-22*
-*安全实现优化完成*
+*Agent 架构重构方案完成*
