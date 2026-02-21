@@ -76,7 +76,6 @@ export class Agent {
 
     // 配置
     private systemPrompt: string;
-    private maxRetries: number;
     private stream: boolean;
     private streamCallback?: StreamCallback;
     private maxBufferSize: number;
@@ -84,22 +83,14 @@ export class Agent {
     private validationOptions?: Partial<ResponseValidatorOptions>;
     private onValidationViolation?: (result: ValidationResult) => void;
 
-    // 状态
-    private status: AgentStatus;
-    private abortController: AbortController | null = null;
-    private lastFailure?: AgentFailure;
-
-    // 执行追踪
-    private taskStartTime = 0;
-    private loopCount = 0;
-    private retryCount = 0;
-    private compensationRetryCount = 0;
-    private timeProvider: ITimeProvider;
-    private loopMax: number;
-    private maxCompensationRetries: number;
-    private readonly defaultRetryDelayMs: number;
+    // 请求超时
     private readonly requestTimeoutMs?: number;
-    private nextRetryDelayMs: number;
+
+    // 状态管理器
+    private agentState: AgentState;
+
+    // 时间提供者（用于 sleep）
+    private timeProvider: ITimeProvider;
 
     // 流式处理
     private streamProcessor: StreamProcessor;
@@ -129,21 +120,24 @@ export class Agent {
             { workingDirectory: process.cwd() },
             this.provider
         );
-        this.maxRetries = config.maxRetries ?? DEFAULT_MAX_RETRIES;
         this.stream = config.stream ?? false;
         this.streamCallback = config.streamCallback;
         this.eventBus = new EventBus();
-        this.status = AgentStatus.IDLE;
         this.timeProvider = config.timeProvider ?? new DefaultTimeProvider();
         this.maxBufferSize = config.maxBufferSize ?? 100000;
         this.thinking = config.thinking;
         this.validationOptions = config.validationOptions;
         this.onValidationViolation = config.onValidationViolation;
-        this.loopMax = LOOP_MAX;
-        this.maxCompensationRetries = MAX_COMPENSATION_RETRIES;
-        this.defaultRetryDelayMs = this.normalizePositiveMs(config.retryDelayMs, DEFAULT_RETRY_DELAY_MS);
         this.requestTimeoutMs = this.normalizeOptionalPositiveMs(config.requestTimeout);
-        this.nextRetryDelayMs = this.defaultRetryDelayMs;
+
+        // 初始化状态管理器
+        this.agentState = new AgentState({
+            maxLoops: LOOP_MAX,
+            maxRetries: config.maxRetries ?? DEFAULT_MAX_RETRIES,
+            maxCompensationRetries: MAX_COMPENSATION_RETRIES,
+            defaultRetryDelayMs: this.normalizePositiveMs(config.retryDelayMs, DEFAULT_RETRY_DELAY_MS),
+            timeProvider: this.timeProvider,
+        });
 
         // 初始化事件发射器
         this.emitter = new AgentEmitter({
@@ -186,8 +180,8 @@ export class Agent {
             throw new AgentError(validation.error || 'Invalid input');
         }
 
-        if (this.isBusy()) {
-            throw new AgentError(`Agent is not idle, current status: ${this.status}`);
+        if (this.agentState.isBusy()) {
+            throw new AgentError(`Agent is not idle, current status: ${this.agentState.status}`);
         }
 
         await this.session.initialize();
@@ -202,7 +196,7 @@ export class Agent {
             }
             return lastMessage;
         } catch (error) {
-            if (this.status !== AgentStatus.ABORTED) {
+            if (!this.agentState.isAborted()) {
                 this.failTask(error);
             }
             throw error;
@@ -217,18 +211,18 @@ export class Agent {
             return {
                 status: 'completed',
                 finalMessage,
-                loopCount: this.loopCount,
-                retryCount: this.retryCount,
+                loopCount: this.agentState.loopCount,
+                retryCount: this.agentState.retryCount,
                 sessionId: this.session.getSessionId(),
             };
         } catch (error) {
-            const failure = this.lastFailure ?? this.errorClassifier.buildFailure(error, this.status);
-            const status = this.status === AgentStatus.ABORTED ? 'aborted' : 'failed';
+            const failure = this.agentState.lastFailure ?? this.errorClassifier.buildFailure(error, this.agentState.status);
+            const status = this.agentState.status === AgentStatus.ABORTED ? 'aborted' : 'failed';
             return {
                 status,
                 failure,
-                loopCount: this.loopCount,
-                retryCount: this.retryCount,
+                loopCount: this.agentState.loopCount,
+                retryCount: this.agentState.retryCount,
                 sessionId: this.session.getSessionId(),
             };
         }
@@ -251,25 +245,15 @@ export class Agent {
     }
 
     getStatus(): AgentStatus {
-        return this.status;
+        return this.agentState.status;
     }
 
     abort(): void {
-        this.abortController?.abort();
-        this.status = AgentStatus.ABORTED;
-        this.lastFailure = {
-            code: 'AGENT_ABORTED',
-            userMessage: 'Task was aborted.',
-            internalMessage: 'Agent aborted by user.',
-        };
+        this.agentState.abort();
         this.emitter.emitStatus(AgentStatus.ABORTED, 'Agent aborted by user.');
     }
 
     // ==================== 状态检查 ====================
-
-    private isBusy(): boolean {
-        return [AgentStatus.RUNNING, AgentStatus.THINKING].includes(this.status);
-    }
 
     private checkComplete(): boolean {
         const lastMessage = this.session.getLastMessage();
@@ -318,13 +302,7 @@ export class Agent {
     // ==================== 任务生命周期 ====================
 
     private initializeTask(query: MessageContent): void {
-        this.taskStartTime = this.timeProvider.getCurrentTime();
-        this.loopCount = 0;
-        this.retryCount = 0;
-        this.compensationRetryCount = 0;
-        this.nextRetryDelayMs = this.defaultRetryDelayMs;
-        this.lastFailure = undefined;
-
+        this.agentState.startTask();
         this.session.addMessage(createUserMessage(query));
     }
 
@@ -360,20 +338,20 @@ export class Agent {
     }
 
     private completeTask(): void {
-        this.status = AgentStatus.COMPLETED;
+        this.agentState.completeTask();
         this.emitter.emitStatus(AgentStatus.COMPLETED, 'Task completed successfully');
     }
 
     private failTask(error: unknown): void {
-        this.status = AgentStatus.FAILED;
         const safeError = this.errorClassifier.sanitizeError(error);
-        this.lastFailure = this.errorClassifier.buildFailure(error, this.status);
+        const failure = this.errorClassifier.buildFailure(error, this.agentState.status);
+        this.agentState.failTask(failure);
 
         this.eventBus.emit(EventType.TASK_FAILED, {
             timestamp: this.timeProvider.getCurrentTime(),
             error: safeError.internalMessage || safeError.userMessage,
-            totalLoops: this.loopCount,
-            totalRetries: this.retryCount,
+            totalLoops: this.agentState.loopCount,
+            totalRetries: this.agentState.retryCount,
         } as TaskFailedEvent);
 
         this.emitter.emitStatus(AgentStatus.FAILED, safeError.userMessage);
@@ -384,39 +362,35 @@ export class Agent {
     private async runLoop(options?: LLMGenerateOptions): Promise<void> {
         this.emitter.emitStatus(AgentStatus.RUNNING, 'Agent is running...');
 
-        while (this.loopCount < this.loopMax) {
-            if (this.retryCount > this.maxRetries) {
-                throw new AgentError(`Agent failed after maximum retries (${this.maxRetries}).`);
+        while (this.agentState.canContinue()) {
+            if (this.agentState.isRetryExceeded()) {
+                throw new AgentError(`Agent failed after maximum retries.`);
             }
 
             if (this.checkComplete()) {
                 break;
             }
 
-            if (this.retryCount > 0) {
+            if (this.agentState.needsRetry()) {
                 await this.handleRetry();
             }
 
-            this.loopCount++;
-            this.status = AgentStatus.RUNNING;
+            this.agentState.incrementLoop();
+            this.agentState.setStatus(AgentStatus.RUNNING);
 
             try {
                 await this.executeLLMCall(options);
-                this.retryCount = 0;
-                this.compensationRetryCount = 0;
-                this.nextRetryDelayMs = this.defaultRetryDelayMs;
+                this.agentState.recordSuccess();
             } catch (error) {
                 if (error instanceof CompensationRetryError) {
-                    if (this.compensationRetryCount >= this.maxCompensationRetries) {
-                        throw new AgentError(
-                            `Agent failed after maximum compensation retries (${this.maxCompensationRetries}).`
-                        );
+                    if (this.agentState.isCompensationRetryExceeded()) {
+                        throw new AgentError(`Agent failed after maximum compensation retries.`);
                     }
-                    this.compensationRetryCount++;
-                    this.status = AgentStatus.RETRYING;
+                    this.agentState.recordCompensationRetry();
+                    this.agentState.setStatus(AgentStatus.RETRYING);
                     this.emitter.emitStatus(
                         AgentStatus.RETRYING,
-                        `Agent is retrying immediately... (${this.compensationRetryCount}/${this.maxCompensationRetries})`
+                        `Agent is retrying immediately... (${this.agentState.compensationRetryCount}/${this.agentState.getSnapshot().lastFailure})`
                     );
                     continue;
                 }
@@ -424,18 +398,18 @@ export class Agent {
                 if (!isRetryableError(error)) {
                     throw error;
                 }
-                this.retryCount++;
-                this.nextRetryDelayMs = this.resolveRetryDelay(error);
+                this.agentState.recordRetryableError(this.resolveRetryDelay(error));
             }
         }
     }
 
     private async handleRetry(): Promise<void> {
-        this.status = AgentStatus.RETRYING;
-        await this.timeProvider.sleep(this.nextRetryDelayMs);
+        this.agentState.setStatus(AgentStatus.RETRYING);
+        await this.timeProvider.sleep(this.agentState.nextRetryDelayMs);
+        const snapshot = this.agentState.getSnapshot();
         this.emitter.emitStatus(
             AgentStatus.RETRYING,
-            `Agent is retrying... (${this.retryCount}/${this.maxRetries})`
+            `Agent is retrying... (${snapshot.retryCount}/${snapshot.loopCount})`
         );
     }
 
@@ -445,7 +419,7 @@ export class Agent {
         if (error instanceof LLMRetryableError && typeof error.retryAfter === 'number' && error.retryAfter > 0) {
             return error.retryAfter;
         }
-        return this.defaultRetryDelayMs;
+        return this.agentState.nextRetryDelayMs;
     }
 
     private normalizeOptionalPositiveMs(value: number | undefined): number | undefined {
@@ -464,13 +438,12 @@ export class Agent {
     private async executeLLMCall(options?: LLMGenerateOptions): Promise<void> {
         await this.session.compactBeforeLLMCall();
 
-        this.abortController = new AbortController();
         this.streamProcessor.reset();
 
         const messageId = uuid();
         const requestTimeout = this.requestTimeoutMs ?? this.provider.getTimeTimeout();
         const timeoutSignal = AbortSignal.any([
-            this.abortController.signal,
+            this.agentState.abortController!.signal,
             AbortSignal.timeout(requestTimeout),
         ]);
 
@@ -530,7 +503,6 @@ export class Agent {
     }
 
     private cleanup(): void {
-        this.abortController = null;
         this.streamProcessor.reset();
     }
 
@@ -679,15 +651,15 @@ export class Agent {
     // ==================== 测试方法 ====================
 
     getLoopCount(): number {
-        return this.loopCount;
+        return this.agentState.loopCount;
     }
 
     getRetryCount(): number {
-        return this.retryCount;
+        return this.agentState.retryCount;
     }
 
     getTaskStartTime(): number {
-        return this.taskStartTime;
+        return this.agentState.taskStartTime;
     }
 
     getTokenInfo() {
