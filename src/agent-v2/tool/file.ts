@@ -15,41 +15,218 @@ export class PathTraversalError extends Error {
 }
 
 /**
- * 解析并验证路径，防止目录遍历攻击
- * 
- * @param filePath 用户提供的文件路径
- * @param baseDir 基础目录（默认为 process.cwd()）
- * @returns 解析后的绝对路径
- * @throws PathTraversalError 如果路径尝试逃逸基础目录
+ * 路径安全策略
  */
-export function resolveAndValidatePath(filePath: string, baseDir: string = process.cwd()): string {
-  // 规范化路径分隔符
-  const normalizedPath = filePath.replace(/\\/g, '/');
-  
-  // 解析为绝对路径
-  const resolvedPath = path.resolve(baseDir, normalizedPath);
-  
-  // 规范化基础目录用于比较
-  const normalizedBaseDir = path.resolve(baseDir);
-  
-  // 路径遍历检测策略：
-  // 1. 如果输入是绝对路径，允许访问（用户明确指定了目标）
-  // 2. 如果输入是相对路径且包含 ..，检查是否逃逸工作目录
-  const isAbsoluteInput = path.isAbsolute(normalizedPath);
-  
-  if (!isAbsoluteInput) {
-    // 对于相对路径，检查是否逃逸了工作目录
-    const relative = path.relative(normalizedBaseDir, resolvedPath);
-    
-    // 如果相对路径以 .. 开头，说明路径逃逸了基础目录
-    if (relative.startsWith('..')) {
-      throw new PathTraversalError(
-        `Path traversal detected: "${filePath}" attempts to escape the allowed directory`
-      );
+interface PathSecurityPolicy {
+  /** 允许的根目录列表（白名单） */
+  allowedRoots?: string[];
+  /** 禁止访问的路径模式（黑名单） */
+  deniedPatterns?: RegExp[];
+  /** 是否允许访问工作目录外的绝对路径 */
+  allowAbsolutePaths?: boolean;
+  /** 是否解析符号链接（防止符号链接攻击） */
+  resolveSymlinks?: boolean;
+  /** 敏感目录黑名单（默认启用） */
+  enableSensitiveDirProtection?: boolean;
+  /** 审计日志回调 */
+  onAccess?: (path: string, allowed: boolean, reason?: string) => void;
+}
+
+/**
+ * 默认敏感目录黑名单（跨平台）
+ */
+const DEFAULT_DENIED_PATTERNS: RegExp[] = [
+  // Unix 系统敏感目录
+  /^\/etc\//i,
+  /^\/root\//i,
+  /^\/var\/log\//i,
+  /^\/proc\//i,
+  /^\/sys\//i,
+  // SSH 密钥
+  /\/\.ssh\//i,
+  /\/\.ssh$/i,
+  // 云服务凭证
+  /\/\.aws\//i,
+  /\/\.azure\//i,
+  /\/\.gcp\//i,
+  /\/\.config\/gcloud\//i,
+  // 环境变量文件
+  /\/\.env$/i,
+  /\/\.env\./i,
+  // 私钥文件
+  /\.pem$/i,
+  /\.key$/i,
+  /\.p12$/i,
+  /\.pfx$/i,
+  // Windows 敏感目录
+  /^\/[a-zA-Z]:\/(Windows|Program Files|Program Files \(x86\))\//i,
+  // Git 配置
+  /\/\.gitconfig$/i,
+  /\/\.git-credentials$/i,
+];
+
+/**
+ * 安全的 realpath 同步版本
+ */
+function safeRealpathSync(p: string): string {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return p;
+  }
+}
+
+/**
+ * 检查路径是否匹配黑名单
+ */
+function isDeniedPath(
+  normalizedPath: string, 
+  patterns: RegExp[]
+): { denied: boolean; pattern?: string } {
+  for (const pattern of patterns) {
+    if (pattern.test(normalizedPath)) {
+      return { denied: true, pattern: pattern.source };
     }
   }
+  return { denied: false };
+}
+
+/**
+ * 安全解析并验证路径
+ * 
+ * 安全策略（多层防护）：
+ * 1. 输入规范化（URL 解码、路径分隔符统一）
+ * 2. 注入检测（空字节等）
+ * 3. 黑名单检查（敏感目录和文件）
+ * 4. 符号链接解析（防止符号链接攻击）
+ * 5. 白名单验证（路径必须在允许的根目录内）
+ * 6. 审计日志（记录所有访问）
+ * 
+ * @param filePath 用户提供的文件路径
+ * @param policy 安全策略配置
+ * @returns 解析后的安全绝对路径
+ * @throws PathTraversalError 如果路径不安全
+ */
+export function resolveAndValidatePath(
+  filePath: string, 
+  policy: PathSecurityPolicy = {}
+): string {
+  // 从环境变量读取安全配置
+  const envAllowAbsolute = process.env.AGENT_ALLOW_ABSOLUTE_PATHS;
+  const envDisableSensitiveProtection = process.env.AGENT_DISABLE_SENSITIVE_DIR_PROTECTION;
   
-  return resolvedPath;
+  const {
+    allowedRoots = [process.cwd()],
+    deniedPatterns = [],
+    // AI 编码助手默认允许绝对路径（需要访问项目外的文件）
+    // 但敏感目录保护仍然启用
+    allowAbsolutePaths = envAllowAbsolute !== 'false',  // 默认允许，除非显式禁用
+    resolveSymlinks = true,
+    // 敏感目录保护默认启用（关键安全防护）
+    enableSensitiveDirProtection = envDisableSensitiveProtection !== 'true',
+    onAccess,
+  } = policy;
+
+  // 合并黑名单
+  const allDeniedPatterns = enableSensitiveDirProtection 
+    ? [...DEFAULT_DENIED_PATTERNS, ...deniedPatterns]
+    : deniedPatterns;
+
+  // 1. 解码 URL 编码（防止编码绕过）
+  let decodedPath = filePath;
+  try {
+    // 处理双重编码
+    let decoded = decodeURIComponent(filePath);
+    while (decoded !== filePath) {
+      filePath = decoded;
+      decoded = decodeURIComponent(filePath);
+    }
+    decodedPath = decoded;
+  } catch {
+    // 解码失败时使用原始路径
+  }
+
+  // 2. 规范化路径分隔符
+  const normalizedInput = decodedPath.replace(/\\/g, '/');
+  
+  // 3. 检查空字节注入
+  if (normalizedInput.includes('\0')) {
+    onAccess?.(filePath, false, 'Null byte injection');
+    throw new PathTraversalError('Invalid path: contains null bytes');
+  }
+
+  // 4. 黑名单检查（在解析前检查，防止绕过）
+  const denialCheck = isDeniedPath(normalizedInput, allDeniedPatterns);
+  if (denialCheck.denied) {
+    onAccess?.(filePath, false, `Matched denial pattern: ${denialCheck.pattern}`);
+    throw new PathTraversalError(
+      `Access denied: path matches restricted pattern`
+    );
+  }
+
+  // 5. 解析为绝对路径
+  const resolvedPath = path.resolve(process.cwd(), normalizedInput);
+  
+  // 6. 解析符号链接（防止符号链接攻击）
+  let finalPath = resolvedPath;
+  if (resolveSymlinks) {
+    try {
+      finalPath = fs.realpathSync(resolvedPath);
+    } catch {
+      // 文件不存在时，检查父目录
+      const parentDir = path.dirname(resolvedPath);
+      try {
+        const resolvedParent = fs.realpathSync(parentDir);
+        finalPath = path.join(resolvedParent, path.basename(resolvedPath));
+      } catch {
+        finalPath = resolvedPath;
+      }
+    }
+  }
+
+  // 7. 再次检查解析后的路径（符号链接可能指向敏感位置）
+  const finalNormalized = finalPath.replace(/\\/g, '/');
+  const finalDenialCheck = isDeniedPath(finalNormalized, allDeniedPatterns);
+  if (finalDenialCheck.denied) {
+    onAccess?.(filePath, false, `Resolved path matched denial pattern: ${finalDenialCheck.pattern}`);
+    throw new PathTraversalError(
+      `Access denied: resolved path points to restricted location`
+    );
+  }
+
+  // 8. 规范化允许的根目录
+  const normalizedRoots = allowedRoots.map(root => {
+    const normalized = path.resolve(root);
+    return resolveSymlinks ? safeRealpathSync(normalized) : normalized;
+  });
+
+  // 9. 验证路径是否在允许的根目录内（大小写不敏感，Windows 兼容）
+  const isAllowed = normalizedRoots.some(root => {
+    const rootWithSep = root.endsWith(path.sep) ? root : root + path.sep;
+    return (
+      finalPath.toLowerCase() === root.toLowerCase() ||
+      finalPath.toLowerCase().startsWith(rootWithSep.toLowerCase())
+    );
+  });
+
+  // 10. 处理不在白名单内的路径
+  if (!isAllowed) {
+    if (allowAbsolutePaths && path.isAbsolute(normalizedInput)) {
+      // 允许绝对路径但记录审计日志
+      onAccess?.(filePath, true, 'Absolute path outside workspace (allowed by policy)');
+      console.warn(`[Security] External path access: ${finalPath}`);
+      return finalPath;
+    }
+    
+    onAccess?.(filePath, false, 'Path outside allowed directories');
+    throw new PathTraversalError(
+      `Path traversal detected: "${filePath}" resolves outside allowed directories`
+    );
+  }
+
+  // 11. 记录成功访问
+  onAccess?.(filePath, true);
+  return finalPath;
 }
 
 const readFileSchema = z.object({
