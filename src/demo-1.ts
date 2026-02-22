@@ -231,9 +231,6 @@ async function demo1() {
         console.log(`会话 ID: ${agent.getSessionId()}`);
         console.log(`消息数: ${agent.getMessages().length}`);
 
-        // 保存消息历史
-        fs.writeFileSync('./demo-1.json', JSON.stringify(agent.getMessages(), null, 2));
-        console.log('消息历史已保存到: ./demo-1.json');
 
     } catch (error) {
         console.error('\n❌ demo1 执行失败:', error);
