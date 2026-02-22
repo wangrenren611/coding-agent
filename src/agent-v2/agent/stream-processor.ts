@@ -28,11 +28,6 @@ import {
     hasToolCalls,
 } from './types-internal';
 import {
-    ProcessorState as State,
-    ContentType,
-    canTransition,
-} from './processor-state';
-import {
     ResponseValidator,
     ResponseValidatorOptions,
     ValidationResult,
@@ -58,8 +53,6 @@ interface InternalProcessorState {
     reasoningCompleted: boolean;
     /** 普通文本是否已完成 */
     textCompleted: boolean;
-    /** 当前状态机状态 */
-    currentState: State;
 }
 
 /**
@@ -284,7 +277,6 @@ export class StreamProcessor {
             toolCallsStarted: false,
             reasoningCompleted: false,
             textCompleted: false,
-            currentState: State.IDLE,
         };
     }
 
@@ -311,15 +303,7 @@ export class StreamProcessor {
             return;
         }
 
-        // 增量验证 - 检测幻觉
-        const validationResult = this.validator.validateIncremental(content);
-        if (!validationResult.valid) {
-            this.handleValidationViolation(validationResult);
-            if (validationResult.action === 'abort') {
-                this.state.aborted = true;
-                return;
-            }
-        }
+       
 
         // 触发开始事件
         if (!this.state.reasoningStarted) {
@@ -353,15 +337,6 @@ export class StreamProcessor {
             return;
         }
 
-        // 增量验证 - 检测幻觉
-        const validationResult = this.validator.validateIncremental(content);
-        if (!validationResult.valid) {
-            this.handleValidationViolation(validationResult);
-            if (validationResult.action === 'abort') {
-                this.state.aborted = true;
-                return;
-            }
-        }
 
         // 触发开始事件
         if (!this.state.textStarted) {
@@ -560,31 +535,7 @@ export class StreamProcessor {
 
     }
 
-    // ==================== 验证相关方法 ====================
-
-    /**
-     * 处理验证违规
-     */
-    private handleValidationViolation(result: ValidationResult): void {
-        // 调用外部回调（如果有）
-        this.options.onValidationViolation?.(result);
-
-        // 记录日志
-        console.warn('[StreamProcessor] Response validation violation detected:', {
-            type: result.violationType,
-            details: result.details,
-            action: result.action,
-            patterns: result.detectedPatterns,
-        });
-    }
-
-    /**
-     * 获取验证器检测到的问题
-     */
-    getValidationIssues(): string[] {
-        return this.validator.getDetectedIssues();
-    }
-
+  
     /**
      * 对当前缓冲区内容进行完整验证
      */

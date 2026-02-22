@@ -7,7 +7,7 @@
 /**
  * Provider 厂商类型
  */
-export type ProviderType = 'kimi' | 'deepseek' | 'glm' | 'minimax' | 'openai';
+export type ProviderType = 'kimi' | 'deepseek' | 'glm' | 'minimax' | 'openai' | 'qwen';
 
 /**
  * 模型唯一标识
@@ -22,7 +22,9 @@ export type ModelId =
     // DeepSeek 系列
     | 'deepseek-chat'
     // GLM 5.0 系列
-    | 'glm-5';
+    | 'glm-5'
+    // Qwen 系列
+    | 'qwen3.5-plus';
 
 /**
  * 模型配置

@@ -82,4 +82,18 @@ export const MODEL_DEFINITIONS: Record<ModelId, Omit<ModelConfig, 'apiKey'>> = {
         LLMMAX_TOKENS: 128 * 1000,
         features: ['streaming', 'function-calling'],
     },
+    // Qwen 系列
+    "qwen3.5-plus": {
+        id: "qwen3.5-plus",
+        provider: "qwen",
+        name: "Qwen 3.5 Plus",
+        baseURL: "https://coding.dashscope.aliyuncs.com/v1",
+        endpointPath: "/chat/completions",
+        envApiKey: "QEPSEEK_API_KEY",
+        envBaseURL: "QEPSEEK_API_BASE",
+        model: "qwen3.5-plus",
+        max_tokens: 8000,
+        LLMMAX_TOKENS: 128 * 1000,
+        features: ["streaming", "function-calling"],
+    },
 };

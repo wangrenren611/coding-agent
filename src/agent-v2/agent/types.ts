@@ -84,4 +84,8 @@ export interface AgentOptions{
     validationOptions?: Partial<ResponseValidatorOptions>;
     /** 验证失败回调 */
     onValidationViolation?: (result: ValidationResult) => void;
+    /** 最大循环次数（默认 3000） */
+    maxLoops?: number;
+    /** 最大补偿重试次数（默认 1） */
+    maxCompensationRetries?: number;
 }

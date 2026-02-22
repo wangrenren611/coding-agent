@@ -78,16 +78,15 @@ export class Session {
    * 使用 initializePromise 防止并发初始化导致的竞态条件
    */
   async initialize(): Promise<void> {
+    // 先检查是否有初始化进行中（防止竞态条件）
+    if (this.initializePromise) {
+      return this.initializePromise;
+    }
     // 已初始化则直接返回
     if (this.initialized) return;
     if (!this.memoryManager) {
       this.initialized = true;
       return;
-    }
-
-    // 如果已有初始化进行中，等待其完成（防止竞态条件）
-    if (this.initializePromise) {
-      return this.initializePromise;
     }
 
     // 创建初始化 Promise 并立即赋值，防止后续调用重复初始化
@@ -178,6 +177,28 @@ export class Session {
     const systemMessage = this.messages.find(m => m.role === 'system');
     this.messages = systemMessage ? [systemMessage] : [];
     this.memoryManager?.clearContext(this.sessionId).catch(console.error);
+  }
+
+  /**
+   * 移除最后一条消息
+   * 用于补偿重试时移除空响应消息
+   * 注意：此方法只在内存中移除，不会更新持久化存储
+   * @returns 被移除的消息，如果没有消息则返回 undefined
+   */
+  removeLastMessage(): Message | undefined {
+    // 不移除系统消息
+    const lastMessage = this.getLastMessage();
+    if (!lastMessage || lastMessage.role === 'system') {
+      return undefined;
+    }
+    return this.messages.pop();
+  }
+
+  /**
+   * 根据 messageId 查找消息
+   */
+  getMessageById(messageId: string): Message | undefined {
+    return this.messages.find(m => m.messageId === messageId);
   }
 
   // ==================== 压缩功能 ====================

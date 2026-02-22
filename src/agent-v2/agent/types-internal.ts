@@ -37,11 +37,27 @@ export function hasContentDelta(chunk: Chunk): boolean {
 }
 
 /**
+ * ChunkDelta 类型守卫 - 检查是否包含 reasoning_content
+ */
+interface ChunkDeltaWithReasoning {
+    content?: string | null;
+    reasoning_content?: string | null;
+    tool_calls?: unknown[];
+}
+
+function hasReasoningContent(delta: unknown): delta is ChunkDeltaWithReasoning {
+    return delta !== null &&
+        typeof delta === 'object' &&
+        'reasoning_content' in delta;
+}
+
+/**
  * 检查 chunk 是否包含推理内容增量 (reasoning_content)
  */
 export function hasReasoningDelta(chunk: Chunk): boolean {
     const delta = chunk.choices?.[0]?.delta;
-    return !!delta && typeof (delta as any).reasoning_content === 'string' && (delta as any).reasoning_content !== '';
+    if (!delta || !hasReasoningContent(delta)) return false;
+    return typeof delta.reasoning_content === 'string' && delta.reasoning_content !== '';
 }
 
 /**
@@ -78,7 +94,8 @@ export function getChunkContent(chunk: Chunk): string {
  */
 export function getChunkReasoningContent(chunk: Chunk): string {
     const delta = chunk.choices?.[0]?.delta;
-    const reasoningContent = (delta as any)?.reasoning_content;
+    if (!delta || !hasReasoningContent(delta)) return '';
+    const reasoningContent = delta.reasoning_content;
     if (!reasoningContent) return '';
     return typeof reasoningContent === 'string' ? reasoningContent : '';
 }
@@ -158,4 +175,15 @@ export function isToolCallCreatedMessage(message: AgentMessage): message is Agen
     payload: { tool_calls: unknown[]; content?: string };
 } {
     return message.type === AgentMessageType.TOOL_CALL_CREATED;
+}
+
+// ==================== 流类型守卫 ====================
+
+/**
+ * 检查是否为 AsyncGenerator<Chunk> 类型
+ */
+export function isChunkStream(result: unknown): result is AsyncGenerator<Chunk, unknown, unknown> {
+    return result !== null &&
+        typeof result === 'object' &&
+        Symbol.asyncIterator in result;
 }

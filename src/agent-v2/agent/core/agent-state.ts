@@ -13,7 +13,6 @@
 import { AgentStatus, AgentFailure } from '../types';
 import type { ITimeProvider } from '../core-types';
 import { DefaultTimeProvider } from '../time-provider';
-import type { Message } from '../../session/types';
 
 /**
  * 状态管理器配置
@@ -237,67 +236,6 @@ export class AgentState {
             userMessage: 'Task was aborted.',
             internalMessage: 'Agent aborted by user.',
         };
-    }
-
-    // ==================== 完成检测 ====================
-
-    /**
-     * 检查消息是否表示任务完成
-     */
-    checkMessageComplete(lastMessage: Message | undefined): boolean {
-        if (!lastMessage) return false;
-
-        // 用户消息：未开始处理
-        if (lastMessage.role === 'user') return false;
-
-        // 助手消息：检查是否有完成标记
-        if (lastMessage.role === 'assistant') {
-            // 有 finish_reason 表示响应完成
-            if (lastMessage.finish_reason) {
-                // 如果是工具调用，需要继续获取最终响应
-                if (lastMessage.finish_reason === 'tool_calls' || lastMessage.tool_calls) {
-                    return false;
-                }
-                // 检查是否为空响应补偿重试候选
-                if (this.isCompensationRetryCandidate(lastMessage)) {
-                    return false;
-                }
-                return true;
-            }
-            // 文本消息但没有工具调用，且有内容，也视为完成
-            if (
-                lastMessage.type === 'text' &&
-                this.hasMessageContent(lastMessage.content) &&
-                !lastMessage.tool_calls
-            ) {
-                return true;
-            }
-        }
-
-        // 工具消息：需要等待助手响应
-        if (lastMessage.role === 'tool') return false;
-
-        return false;
-    }
-
-    /**
-     * 检查是否为补偿重试候选（空响应）
-     */
-    private isCompensationRetryCandidate(message: Message): boolean {
-        if (message.role !== 'assistant') return false;
-        if (message.finish_reason !== 'stop') return false;
-        if (Array.isArray(message.tool_calls) && message.tool_calls.length > 0) return false;
-        return !this.hasMessageContent(message.content);
-    }
-
-    /**
-     * 检查消息内容是否存在
-     */
-    private hasMessageContent(content: unknown): boolean {
-        if (typeof content === 'string') {
-            return content.length > 0;
-        }
-        return Array.isArray(content) && content.length > 0;
     }
 
     // ==================== 工具方法 ====================

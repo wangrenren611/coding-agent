@@ -180,15 +180,15 @@ async function demo1() {
     let agent: Agent | undefined;
     try {
         agent = new Agent({
-            provider: ProviderRegistry.createFromEnv('glm-5',{
-                timeout: 1000*60*3,
+            provider: ProviderRegistry.createFromEnv('qwen3.5-plus',{
+                timeout: 1000*60*5,
             }),
             systemPrompt: operatorPrompt({
                 directory: process.cwd(),
                 language: 'Chinese',
             }),
             // 如需恢复会话，请取消注释并填入有效 sessionId
-           sessionId: 'agent-2',
+           sessionId: 'agent-3',
             stream: true,
             thinking: true,  // 启用 thinking 模式，支持推理内容
             enableCompaction: true,  // 启用上下文压缩
