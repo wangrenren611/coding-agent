@@ -132,8 +132,13 @@ export interface LLMRequestMessage extends BaseLLMMessage {
 
 /**
  * 完成原因
+ * - stop: 正常完成
+ * - length: 达到 token 限制
+ * - content_filter: 内容过滤
+ * - tool_calls: 工具调用
+ * - abort: 请求被中断
  */
-export type FinishReason = 'stop' | 'length' | 'content_filter' | 'tool_calls' | null;
+export type FinishReason = 'stop' | 'length' | 'content_filter' | 'tool_calls' | 'abort' | null;
 
 /**
  * LLM 响应

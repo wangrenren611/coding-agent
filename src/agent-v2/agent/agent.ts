@@ -266,6 +266,15 @@ export class Agent {
         if (lastMessage.role === 'assistant') {
             // 有 finish_reason 表示响应完成
             if (lastMessage.finish_reason) {
+                // abort 表示请求被中断，不应视为完成，需要重试或报错
+                if (lastMessage.finish_reason === 'abort') {
+                    return false;
+                }
+                // length 表示达到 token 限制，不应视为正常完成
+                if (lastMessage.finish_reason === 'length') {
+                    // 有内容的情况下可以视为完成，否则需要继续
+                    return hasContent(lastMessage.content);
+                }
                 // 如果是工具调用，需要继续获取最终响应
                 if (lastMessage.finish_reason === 'tool_calls' || lastMessage.tool_calls) {
                     return false;
@@ -273,6 +282,7 @@ export class Agent {
                 if (this.isCompensationRetryCandidate(lastMessage)) {
                     return false;
                 }
+                // stop 或其他正常完成原因
                 return true;
             }
             // 文本消息但没有工具调用，且有内容，也视为完成
@@ -524,6 +534,16 @@ export class Agent {
 
         if (!choice) {
             throw new AgentError('LLM response missing choices');
+        }
+
+        // 检查 finish_reason 是否为 abort，如果是则触发重试
+        const finishReason = getResponseFinishReason(response);
+        if (finishReason === 'abort') {
+            throw new LLMRetryableError(
+                'LLM request was aborted, retrying...',
+                5000,  // 5秒后重试
+                'LLM_ABORT'
+            );
         }
 
         if (responseHasToolCalls(response)) {
