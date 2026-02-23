@@ -550,12 +550,11 @@ export class Agent {
             this.session.addMessage(message);
         }
 
-        // 触发工具调用事件
+        // 获取消息内容，传递给 ToolExecutor（内部会触发 onToolCallCreated 回调）
         const currentMessage = this.session.getMessageById(messageId);
         const content = currentMessage ? contentToText(currentMessage.content) : '';
-        this.emitter.emitToolCallCreated(toolCalls, messageId, content);
 
-        // 委托给 ToolExecutor 执行工具，并验证执行结果
+        // 委托给 ToolExecutor 执行工具
         const executionResult = await this.toolExecutor.execute(toolCalls, messageId, content);
         
         // 检查工具执行结果

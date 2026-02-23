@@ -5,7 +5,9 @@
       "Edit",
       "Bash(npx:*)",
       "Bash(npx tsc:*)",
-      "Bash(npx vitest run:*)"
+      "Bash(npx vitest run:*)",
+      "Bash(timeout:*)",
+      "Bash(git checkout:*)"
     ]
   },
   "enableAllProjectMcpServers": true,

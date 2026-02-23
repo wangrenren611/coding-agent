@@ -93,7 +93,7 @@ export const MODEL_DEFINITIONS: Record<ModelId, Omit<ModelConfig, 'apiKey'>> = {
         envBaseURL: "QEPSEEK_API_BASE",
         model: "qwen3.5-plus",
         max_tokens: 8000,
-        LLMMAX_TOKENS: 128 * 1000,
+        LLMMAX_TOKENS: 1024 * 1000,
         features: ["streaming", "function-calling"],
     },
 };

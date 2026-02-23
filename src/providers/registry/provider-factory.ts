@@ -43,7 +43,7 @@ export class ProviderFactory {
             model: modelConfig.model,
             temperature: modelConfig.temperature||0.3,
             max_tokens: modelConfig.max_tokens,
-            maxOutputTokens: modelConfig.LLMMAX_TOKENS,
+            LLMMAX_TOKENS: modelConfig.LLMMAX_TOKENS,
             thinking: modelConfig.thinking,
         };
 
@@ -54,7 +54,7 @@ export class ProviderFactory {
             apiKey: overrides?.apiKey ?? apiKey,
             baseURL: overrides?.baseURL ?? baseURL,
             max_tokens: modelConfig.max_tokens,
-            maxOutputTokens: modelConfig.LLMMAX_TOKENS,
+            LLMMAX_TOKENS: modelConfig.LLMMAX_TOKENS,
         };
 
         const adapter = ProviderFactory.createAdapter(modelId);
