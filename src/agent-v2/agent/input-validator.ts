@@ -44,6 +44,11 @@ export class InputValidator {
             return { valid: false, error: 'Query cannot be empty' };
         }
 
+        // 检查纯空白字符
+        if (query.trim().length === 0) {
+            return { valid: false, error: 'Query cannot be whitespace only' };
+        }
+
         if (query.length > MAX_QUERY_LENGTH) {
             return { valid: false, error: 'Query exceeds maximum length' };
         }

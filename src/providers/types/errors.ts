@@ -36,8 +36,8 @@ export class LLMRetryableError extends LLMError {
 }
 
 export class LLMRateLimitError extends LLMRetryableError {
-    constructor(message: string) {
-        super(message);
+    constructor(message: string, retryAfter?: number) {
+        super(message, retryAfter, 'RATE_LIMIT');
         this.name = 'LLMRateLimitError';
     }
 }

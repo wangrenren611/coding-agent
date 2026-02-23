@@ -175,7 +175,8 @@ export class AgentState {
      */
     recordSuccess(): void {
         this._retryCount = 0;
-        this._compensationRetryCount = 0;
+        // 注意：不重置 compensationRetryCount
+        // 补偿重试次数在整个任务期间累计，防止 LLM 持续返回空响应
         this._nextRetryDelayMs = this.config.defaultRetryDelayMs;
     }
 

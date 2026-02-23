@@ -188,7 +188,7 @@ async function demo1() {
                 language: 'Chinese',
             }),
             // 如需恢复会话，请取消注释并填入有效 sessionId
-           sessionId: 'agent-3',
+           sessionId: 'agent-4',
             stream: true,
             thinking: true,  // 启用 thinking 模式，支持推理内容
             enableCompaction: true,  // 启用上下文压缩

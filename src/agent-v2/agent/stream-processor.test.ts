@@ -445,9 +445,10 @@ describe('StreamProcessor', () => {
                 choices: [{ index: 0, delta: { content: 'test' } }],
             };
 
+            processor.setMessageId('test-msg-id');
             processor.processChunk(chunk);
 
-            expect(onUsageUpdate).toHaveBeenCalledWith(usage);
+            expect(onUsageUpdate).toHaveBeenCalledWith(usage, 'test-msg-id');
             expect(processor.getMetadata().usage).toEqual(usage);
         });
     });

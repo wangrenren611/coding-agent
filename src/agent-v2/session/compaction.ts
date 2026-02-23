@@ -192,6 +192,8 @@ export class Compaction {
 
   /**
    * 分离消息区域
+   * 
+   * 确保保留最后一条 user 消息，因为某些 LLM API（如 GLM-5）要求消息列表必须包含 user 消息
    */
   private splitMessages(messages: Message[]): {
     systemMessage: Message | undefined;
@@ -201,10 +203,31 @@ export class Compaction {
     const systemMessage = messages.find(m => m.role === 'system');
     const nonSystemMessages = messages.filter(m => m.role !== 'system');
 
+    // 找到最后一条 user 消息的索引
+    let lastUserIndex = -1;
+    for (let i = nonSystemMessages.length - 1; i >= 0; i--) {
+      if (nonSystemMessages[i].role === 'user') {
+        lastUserIndex = i;
+        break;
+      }
+    }
+
+    // 默认的切分点
+    let splitPoint = nonSystemMessages.length - this.keepMessagesNum;
+    
+    // 如果最后一条 user 消息在 pending 区域，需要调整切分点
+    if (lastUserIndex !== -1 && lastUserIndex < splitPoint) {
+      // 将切分点移动到包含最后一条 user 消息的位置
+      splitPoint = lastUserIndex;
+    }
+
+    // 确保 splitPoint 不为负
+    splitPoint = Math.max(0, splitPoint);
+
     return {
       systemMessage,
-      pending: nonSystemMessages.slice(0, -this.keepMessagesNum),
-      active: nonSystemMessages.slice(-this.keepMessagesNum),
+      pending: nonSystemMessages.slice(0, splitPoint),
+      active: nonSystemMessages.slice(splitPoint),
     };
   }
 

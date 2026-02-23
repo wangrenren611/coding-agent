@@ -1,27 +1,31 @@
 /**
- * Agent 核心 类
+ * Agent 核心 类 (重构版)
  *
  * 职责：
- * 1. 协调 LLM 调用和工具执行
+ * 1. 协调各组件工作（协调器模式）
  * 2. 管理对话会话状态
- * 3. 处理流式/非流式响应
- * 4. 错误处理和重试机制
+ * 3. 处理错误和重试机制
+ *
+ * 组件委托：
+ * - LLM调用 -> LLMCaller
+ * - 工具执行 -> ToolExecutor
+ * - 状态管理 -> AgentState
+ * - 事件发射 -> AgentEmitter
  */
 
 import { v4 as uuid } from "uuid";
 
 import {
-    Chunk,
     FinishReason,
     LLMGenerateOptions,
     LLMResponse,
     LLMRetryableError,
     isRetryableError,
     MessageContent,
+    Usage,
 } from "../../providers";
 import { Session } from "../session";
 import { ToolRegistry } from "../tool/registry";
-import { ToolContext } from "../tool/base";
 import { EventBus, EventType } from "../eventbus";
 import { Message } from "../session/types";
 import { createDefaultToolRegistry } from "../tool";
@@ -35,18 +39,16 @@ import {
     StreamCallback,
 } from "./types";
 import { AgentState } from "./core/agent-state";
+import { LLMCaller } from "./core/llm-caller";
+import { ToolExecutor } from "./core/tool-executor";
 import { DefaultTimeProvider } from "./time-provider";
 import { InputValidator } from "./input-validator";
 import { ErrorClassifier } from "./error-classifier";
-import { StreamProcessor } from "./stream-processor";
-import { MessageBuilder, createToolResultMessage, createUserMessage } from "./message-builder";
 import { AgentEmitter } from "./agent-emitter";
-import { safeToolResultToString } from "../util";
 import type { ResponseValidatorOptions } from "./response-validator";
 import {
     ITimeProvider,
     TaskFailedEvent,
-    ToolExecutionResult,
     ValidationResult,
     contentToText,
     hasContent,
@@ -55,14 +57,12 @@ import {
     getResponseFinishReason,
     getResponseToolCalls,
     responseHasToolCalls,
-    isChunkStream,
 } from "./types-internal";
 
 // ==================== 常量 ====================
 
 /**
  * Agent 默认配置
- * 可通过 AgentOptions 覆盖
  */
 const AGENT_DEFAULTS = {
     /** 最大循环次数 */
@@ -78,16 +78,6 @@ const AGENT_DEFAULTS = {
     /** 默认流式缓冲区大小（字节） */
     BUFFER_SIZE: 100000,
 } as const;
-
-/**
- * 敏感字段列表（用于脱敏）
- */
-const SENSITIVE_KEYS = [
-    'password', 'token', 'secret', 'apiKey', 'api_key', 'authorization',
-    'credential', 'private_key', 'privateKey', 'access_token', 'accessToken',
-    'refresh_token', 'refreshToken', 'session_key', 'sessionKey',
-    'api_secret', 'apiSecret', 'secret_key', 'secretKey',
-] as const;
 
 // ==================== Agent 类 ====================
 
@@ -109,7 +99,8 @@ export class Agent {
     // 内部组件
     private readonly agentState: AgentState;
     private readonly timeProvider: ITimeProvider;
-    private readonly streamProcessor: StreamProcessor;
+    private readonly llmCaller: LLMCaller;
+    private readonly toolExecutor: ToolExecutor;
     private readonly emitter: AgentEmitter;
     private readonly inputValidator: InputValidator;
     private readonly errorClassifier: ErrorClassifier;
@@ -156,19 +147,40 @@ export class Agent {
             getTimestamp: () => this.timeProvider.getCurrentTime(),
         });
 
-        this.streamProcessor = new StreamProcessor({
+        // 创建 LLM 调用器
+        this.llmCaller = new LLMCaller({
+            provider: this.provider,
+            stream: this.stream,
             maxBufferSize: config.maxBufferSize ?? AGENT_DEFAULTS.BUFFER_SIZE,
+            requestTimeoutMs: this.requestTimeoutMs,
+            thinking: this.thinking,
+            timeProvider: this.timeProvider,
+            // 流式处理回调
             onMessageCreate: (msg) => this.session.addMessage(msg as Message),
             onMessageUpdate: (msg) => this.session.addMessage(msg as Message),
-            onTextDelta: (content, msgId) => this.emitter.emitTextDelta(content, msgId),
             onTextStart: (msgId) => this.emitter.emitTextStart(msgId),
+            onTextDelta: (content, msgId) => this.emitter.emitTextDelta(content, msgId),
             onTextComplete: (msgId) => this.emitter.emitTextComplete(msgId),
-            onReasoningDelta: (content, msgId) => this.emitter.emitReasoningDelta(content, msgId),
             onReasoningStart: (msgId) => this.emitter.emitReasoningStart(msgId),
+            onReasoningDelta: (content, msgId) => this.emitter.emitReasoningDelta(content, msgId),
             onReasoningComplete: (msgId) => this.emitter.emitReasoningComplete(msgId),
-            onUsageUpdate: (usage) => this.emitter.emitUsageUpdate(usage),
-            validatorOptions: this.validationOptions,
-            onValidationViolation: this.onValidationViolation,
+            onUsageUpdate: (usage, msgId) => {
+                this.emitter.emitUsageUpdate(usage);
+                this.updateMessageUsage(msgId, usage);
+            },
+            onStatusChange: (status, message, msgId) => this.emitter.emitStatus(status, message, msgId),
+        });
+
+        // 创建工具执行器
+        this.toolExecutor = new ToolExecutor({
+            toolRegistry: this.toolRegistry,
+            sessionId: this.session.getSessionId(),
+            memoryManager: this.session.getMemoryManager(),
+            onToolCallCreated: (toolCalls, messageId, content) => 
+                this.emitter.emitToolCallCreated(toolCalls, messageId, content),
+            onToolCallResult: (toolCallId, result, status, resultMessageId) =>
+                this.emitter.emitToolCallResult(toolCallId, result, status, resultMessageId),
+            onMessageAdd: (msg) => this.session.addMessage(msg),
         });
     }
 
@@ -180,7 +192,7 @@ export class Agent {
 
         await this.session.initialize();
         this.agentState.startTask();
-        this.session.addMessage(createUserMessage(query));
+        this.session.addMessage({ messageId: uuid(), role: 'user', content: query });
 
         try {
             await this.runLoop(options);
@@ -224,6 +236,7 @@ export class Agent {
 
     abort(): void {
         this.agentState.abort();
+        this.llmCaller.abort();
         this.emitter.emitStatus(AgentStatus.ABORTED, 'Agent aborted by user.');
     }
 
@@ -362,44 +375,40 @@ export class Agent {
         switch (lastMessage.role) {
             case 'user':
                 return false;
-
             case 'tool':
                 return false;
-
             case 'assistant':
                 return this.checkAssistantComplete(lastMessage);
-
             default:
                 return false;
         }
     }
 
     private checkAssistantComplete(message: Message): boolean {
-        // 有 finish_reason 时根据原因判断
         if (message.finish_reason) {
             switch (message.finish_reason) {
                 case 'abort':
-                    return false; // 需要重试
-                case 'length':
-                    return hasContent(message.content); // 有内容则完成
+                    return false;
+                case 'length': {
+                    // finish_reason=length 时，检查是否有未完成的内容或工具调用
+                    const hasTools = Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
+                    return hasContent(message.content) && !hasTools;
+                }
                 case 'tool_calls':
-                    return false; // 需要执行工具
+                    return false;
             }
 
-            // 检查工具调用
             if (Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
                 return false;
             }
 
-            // 检查空响应（补偿重试候选）
             if (this.isEmptyResponse(message)) {
                 return false;
             }
 
-            return true; // stop 或其他正常原因
+            return true;
         }
 
-        // 无 finish_reason：检查是否为有内容的文本消息
         const hasToolCalls = Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
         return message.type === 'text'
             && hasContent(message.content)
@@ -414,29 +423,30 @@ export class Agent {
             && !hasContent(message.content);
     }
 
-    // ==================== 内部方法：LLM 调用 ====================
+    // ==================== 内部方法：LLM 调用（委托给 LLMCaller） ====================
 
     private async executeLLMCall(options?: LLMGenerateOptions): Promise<void> {
         await this.session.compactBeforeLLMCall();
         this.agentState.prepareLLMCall();
-        this.streamProcessor.reset();
-
-        const messageId = uuid();
-        const timeout = this.requestTimeoutMs ?? this.provider.getTimeTimeout();
-        const abortSignal = this.createAbortSignal(timeout);
 
         const messages = this.getMessagesForLLM();
-        const llmOptions: LLMGenerateOptions = {
-            tools: this.toolRegistry.toLLMTools(),
-            abortSignal,
-            thinking: this.thinking,
-            ...options,
-        };
+        
+        // 验证消息列表有效性
+        if (messages.length === 0 || messages.every(m => m.role === 'system')) {
+            throw new AgentError('No valid messages to send to LLM');
+        }
+        
+        const tools = this.toolRegistry.toLLMTools();
+        const abortSignal = this.createAbortSignal();
 
         try {
-            const response = this.stream
-                ? await this.executeStreamCall(messages, llmOptions, messageId)
-                : await this.executeNormalCall(messages, llmOptions);
+            // 传递 options 给 llmCaller，允许动态覆盖配置
+            const { response, messageId } = await this.llmCaller.execute(
+                messages,
+                tools,
+                abortSignal,
+                options
+            );
 
             if (!response) {
                 throw new AgentError('LLM returned no response');
@@ -444,53 +454,31 @@ export class Agent {
 
             await this.handleResponse(response, messageId);
 
-            // 检查是否需要补偿重试
-            if (this.isEmptyResponse(this.session.getLastMessage()!)) {
+            // 检查是否为空响应（在 session 添加消息后检查）
+            const lastMessage = this.session.getLastMessage();
+            if (lastMessage && this.isEmptyResponse(lastMessage)) {
                 throw new CompensationRetryError('Empty response');
             }
         } finally {
-            this.streamProcessor.reset();
+            // LLMCaller 内部已清理
         }
     }
 
-    private createAbortSignal(timeoutMs: number): AbortSignal {
+    private createAbortSignal(): AbortSignal {
         const controller = this.agentState.abortController;
-        if (!controller) {
-            return AbortSignal.timeout(timeoutMs);
-        }
-        return AbortSignal.any([controller.signal, AbortSignal.timeout(timeoutMs)]);
-    }
-
-    private async executeStreamCall(
-        messages: Message[],
-        options: LLMGenerateOptions,
-        messageId: string
-    ): Promise<LLMResponse> {
-        this.emitter.emitStatus(AgentStatus.THINKING, 'Agent is thinking...', messageId);
-        this.streamProcessor.setMessageId(messageId);
-
-        options.stream = true;
-        const streamResult = await this.provider.generate(messages, options);
+        const timeout = this.requestTimeoutMs ?? this.provider.getTimeTimeout();
         
-        // 使用类型守卫替代不安全断言
-        if (!isChunkStream(streamResult)) {
-            throw new AgentError('Provider returned non-stream result for stream request');
+        if (!controller) {
+            return AbortSignal.timeout(timeout);
         }
-        const stream = streamResult;
-
-        for await (const chunk of stream) {
-            this.streamProcessor.processChunk(chunk);
-        }
-
-        this.updateMessageUsage(messageId);
-        return this.streamProcessor.buildResponse();
+        return AbortSignal.any([controller.signal, AbortSignal.timeout(timeout)]);
     }
 
-    private async executeNormalCall(
-        messages: Message[],
-        options: LLMGenerateOptions
-    ): Promise<LLMResponse> {
-        return this.provider.generate(messages, options);
+    private updateMessageUsage(messageId: string, usage: Usage): void {
+        const message = this.session.getMessageById(messageId);
+        if (message && !message.usage) {
+            this.session.addMessage({ ...message, usage });
+        }
     }
 
     // ==================== 内部方法：响应处理 ====================
@@ -513,32 +501,52 @@ export class Agent {
         }
 
         if (responseHasToolCalls(response)) {
-            await this.handleToolCallResponse(response, messageId);
+            await this.handleToolCallResponse(response, messageId, response.usage);
         } else {
-            this.handleTextResponse(response, messageId);
+            this.handleTextResponse(response, messageId, response.usage);
         }
     }
 
-    private handleTextResponse(response: LLMResponse, messageId: string): void {
+    private handleTextResponse(response: LLMResponse, messageId: string, usage?: Usage): void {
         if (this.stream) {
+            // 流式模式下消息已通过 onMessageUpdate 更新
             this.updateMessageFinishReason(messageId, getResponseFinishReason(response));
             return;
         }
-        const message = MessageBuilder.fromLLMResponse(response, messageId);
+        // 非流式模式需要手动创建消息
+        const message: Message = {
+            messageId,
+            role: 'assistant',
+            content: response.choices?.[0]?.message?.content || '',
+            finish_reason: getResponseFinishReason(response),
+            type: 'text',
+            ...(usage && { usage }),
+        };
         this.session.addMessage(message);
     }
 
     private async handleToolCallResponse(
         response: LLMResponse,
-        messageId: string
+        messageId: string,
+        usage?: Usage
     ): Promise<void> {
         const toolCalls = getResponseToolCalls(response);
         const finishReason = getResponseFinishReason(response);
 
         if (this.stream) {
+            // 流式模式下消息已通过 onMessageCreate 创建
             this.updateMessageToolCalls(messageId, toolCalls, finishReason);
         } else {
-            const message = MessageBuilder.fromLLMResponse(response, messageId);
+            // 非流式模式需要手动创建消息
+            const message: Message = {
+                messageId,
+                role: 'assistant',
+                content: response.choices?.[0]?.message?.content || '',
+                tool_calls: toolCalls,
+                finish_reason: finishReason || 'tool_calls',
+                type: 'tool-call',
+                ...(usage && { usage }),
+            };
             this.session.addMessage(message);
         }
 
@@ -547,39 +555,12 @@ export class Agent {
         const content = currentMessage ? contentToText(currentMessage.content) : '';
         this.emitter.emitToolCallCreated(toolCalls, messageId, content);
 
-        // 执行工具
-        const context = this.createToolContext();
-        const results = await this.toolRegistry.execute(toolCalls, context as ToolContext);
-        this.recordToolResults(results);
-    }
-
-    private createToolContext(): { sessionId: string; memoryManager?: unknown } {
-        const memoryManager = this.session.getMemoryManager();
-        return {
-            sessionId: this.session.getSessionId(),
-            ...(memoryManager && { memoryManager }),
-        };
-    }
-
-    private recordToolResults(results: ToolExecutionResult[]): void {
-        for (const result of results) {
-            const messageId = uuid();
-            const sanitized = this.sanitizeResult(result);
-
-            this.emitter.emitToolCallResult(
-                result.tool_call_id,
-                sanitized,
-                result.result?.success ? 'success' : 'error',
-                messageId
-            );
-
-            this.session.addMessage(
-                createToolResultMessage(
-                    result.tool_call_id,
-                    safeToolResultToString(sanitized),
-                    messageId
-                )
-            );
+        // 委托给 ToolExecutor 执行工具，并验证执行结果
+        const executionResult = await this.toolExecutor.execute(toolCalls, messageId, content);
+        
+        // 检查工具执行结果
+        if (!executionResult.success) {
+            console.warn(`[Agent] Tool execution partially or fully failed: ${executionResult.toolCount} tools executed`);
         }
     }
 
@@ -628,29 +609,7 @@ export class Agent {
         }
     }
 
-    private updateMessageUsage(messageId: string): void {
-        const metadata = this.streamProcessor.getMetadata();
-        if (!metadata.usage) return;
-
-        const message = this.session.getMessageById(messageId);
-        if (message && !message.usage) {
-            this.session.addMessage({ ...message, usage: metadata.usage });
-        }
-    }
-
-    // ==================== 内部方法：工具函数 ====================
-
-    private sanitizeResult(result: ToolExecutionResult): unknown {
-        if (!result.result) return result;
-
-        const sanitized = { ...result.result };
-        for (const key of SENSITIVE_KEYS) {
-            if (key in sanitized) {
-                sanitized[key] = '[REDACTED]';
-            }
-        }
-        return sanitized;
-    }
+    // ==================== 内部方法：任务状态 ====================
 
     private completeTask(): void {
         this.agentState.completeTask();

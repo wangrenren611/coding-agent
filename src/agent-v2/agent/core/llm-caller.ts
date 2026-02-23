@@ -10,13 +10,13 @@
  */
 
 import { v4 as uuid } from 'uuid';
-import type { LLMProvider, LLMGenerateOptions, LLMResponse, Chunk } from '../../../providers';
+import type { LLMProvider, LLMGenerateOptions, LLMResponse, Tool, Usage } from '../../../providers';
 import type { Message } from '../../session/types';
 import { StreamProcessor } from '../stream-processor';
 import { AgentStatus } from '../types';
 import type { ITimeProvider } from '../core-types';
 import { DefaultTimeProvider } from '../time-provider';
-import { AgentError } from '../errors';
+import type { ResponseValidatorOptions, ValidationResult } from '../response-validator';
 
 /**
  * LLM 调用器配置
@@ -34,6 +34,12 @@ export interface LLMCallerConfig {
     thinking?: boolean;
     /** 时间提供者 */
     timeProvider?: ITimeProvider;
+    
+    // 响应验证选项
+    /** 响应验证器配置 */
+    validatorOptions?: Partial<ResponseValidatorOptions>;
+    /** 验证失败回调 */
+    onValidationViolation?: (result: ValidationResult) => void;
 
     // 流式处理回调
     /** 消息创建回调 */
@@ -53,7 +59,7 @@ export interface LLMCallerConfig {
     /** 推理完成回调 */
     onReasoningComplete?: (messageId: string) => void;
     /** Token 使用量更新回调 */
-    onUsageUpdate?: (usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number }) => void;
+    onUsageUpdate?: (usage: Usage, messageId: string) => void;
     /** 状态变更回调 */
     onStatusChange?: (status: AgentStatus, message: string, messageId?: string) => void;
 }
@@ -88,8 +94,9 @@ export class LLMCaller {
      */
     async execute(
         messages: Message[],
-        tools: unknown[],
-        abortSignal?: AbortSignal
+        tools: Tool[],
+        abortSignal?: AbortSignal,
+        options?: LLMGenerateOptions
     ): Promise<LLMCallResult> {
         const messageId = uuid();
         this.abortController = new AbortController();
@@ -104,16 +111,19 @@ export class LLMCaller {
             ...(abortSignal ? [abortSignal] : []),
         ]);
 
+        // 合并配置和传入的 options
         const llmOptions: LLMGenerateOptions = {
             tools,
             abortSignal: timeoutSignal,
             thinking: this.config.thinking,
             stream: this.config.stream,
+            // 允许传入的 options 覆盖配置
+            ...options,
         };
 
         let response: LLMResponse;
 
-        if (this.config.stream) {
+        if (llmOptions.stream ?? this.config.stream) {
             response = await this.executeStream(messages, llmOptions, messageId);
         } else {
             response = await this.executeNormal(messages, llmOptions);
@@ -135,10 +145,17 @@ export class LLMCaller {
 
         options.stream = true;
         const streamResult = await this.config.provider.generate(messages, options);
-        const streamGenerator = streamResult as unknown as AsyncGenerator<Chunk>;
+        
+        // 检查是否为流式结果
+        if (!streamResult || typeof (streamResult as AsyncIterable<unknown>)[Symbol.asyncIterator] !== 'function') {
+            // 非流式结果，直接返回
+            return streamResult as LLMResponse;
+        }
+        
+        const stream = streamResult as AsyncIterable<unknown>;
 
-        for await (const chunk of streamGenerator) {
-            this.streamProcessor.processChunk(chunk);
+        for await (const chunk of stream) {
+            this.streamProcessor.processChunk(chunk as Parameters<typeof this.streamProcessor.processChunk>[0]);
         }
 
         return this.streamProcessor.buildResponse();
@@ -185,7 +202,9 @@ export class LLMCaller {
             onReasoningStart: (msgId) => this.config.onReasoningStart?.(msgId),
             onReasoningDelta: (content, msgId) => this.config.onReasoningDelta?.(content, msgId),
             onReasoningComplete: (msgId) => this.config.onReasoningComplete?.(msgId),
-            onUsageUpdate: (usage) => this.config.onUsageUpdate?.(usage),
+            onUsageUpdate: (usage, msgId) => this.config.onUsageUpdate?.(usage, msgId),
+            validatorOptions: this.config.validatorOptions,
+            onValidationViolation: this.config.onValidationViolation,
         });
     }
 

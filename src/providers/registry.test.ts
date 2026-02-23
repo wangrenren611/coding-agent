@@ -21,7 +21,7 @@ describe('ProviderRegistry', () => {
 
   describe('MODEL_CONFIGS', () => {
     it('should have all model configurations', () => {
-      const modelIds: ModelId[] = ['glm-4.7', 'minimax-2.1', 'kimi-k2.5', 'deepseek-chat'];
+      const modelIds: ModelId[] = ['glm-4.7', 'glm-5', 'minimax-2.5', 'kimi-k2.5', 'deepseek-chat', 'qwen3.5-plus'];
 
       modelIds.forEach((id) => {
         expect(MODEL_CONFIGS[id]).toBeDefined();
@@ -47,7 +47,7 @@ describe('ProviderRegistry', () => {
     });
 
     it('should have valid provider types', () => {
-      const validProviders = ['kimi', 'deepseek', 'glm', 'minimax', 'openai'];
+      const validProviders = ['kimi', 'deepseek', 'glm', 'minimax', 'openai', 'qwen'];
 
       Object.values(MODEL_CONFIGS).forEach((config) => {
         expect(validProviders).toContain(config.provider);
@@ -65,10 +65,10 @@ describe('ProviderRegistry', () => {
       expect(provider.config.apiKey).toBe('test-glm-key');
     });
 
-    it('should create provider for minimax-2.1', () => {
+    it('should create provider for minimax-2.5', () => {
       process.env.MINIMAX_API_KEY = 'test-minimax-key';
 
-      const provider = ProviderRegistry.createFromEnv('minimax-2.1');
+      const provider = ProviderRegistry.createFromEnv('minimax-2.5');
 
       expect(provider).toBeInstanceOf(OpenAICompatibleProvider);
       expect(provider.config.apiKey).toBe('test-minimax-key');
@@ -182,7 +182,7 @@ describe('ProviderRegistry', () => {
     it('should return all model configs', () => {
       const models = ProviderRegistry.listModels();
 
-      expect(models).toHaveLength(4);
+      expect(models).toHaveLength(6);
       expect(models.every((m) => m.id in MODEL_CONFIGS)).toBe(true);
     });
 
@@ -202,8 +202,9 @@ describe('ProviderRegistry', () => {
     it('should return models for glm provider', () => {
       const models = ProviderRegistry.listModelsByProvider('glm');
 
-      expect(models).toHaveLength(1);
-      expect(models[0].id).toBe('glm-4.7');
+      expect(models).toHaveLength(2);
+      expect(models.map(m => m.id)).toContain('glm-4.7');
+      expect(models.map(m => m.id)).toContain('glm-5');
     });
 
     it('should return models for deepseek provider', () => {
@@ -224,7 +225,7 @@ describe('ProviderRegistry', () => {
       const models = ProviderRegistry.listModelsByProvider('minimax');
 
       expect(models).toHaveLength(1);
-      expect(models[0].id).toBe('minimax-2.1');
+      expect(models[0].id).toBe('minimax-2.5');
     });
 
     it('should return empty array for provider with no models', () => {
@@ -238,7 +239,7 @@ describe('ProviderRegistry', () => {
     it('should return all model IDs', () => {
       const ids = ProviderRegistry.getModelIds();
 
-      expect(ids).toEqual(['glm-4.7', 'minimax-2.1', 'kimi-k2.5', 'deepseek-chat']);
+      expect(ids).toEqual(['glm-4.7', 'glm-5', 'minimax-2.5', 'kimi-k2.5', 'deepseek-chat', 'qwen3.5-plus']);
     });
 
     it('should return type ModelId[]', () => {
@@ -278,9 +279,9 @@ describe('ProviderRegistry', () => {
       expect(name).toBe('GLM-4.7');
     });
 
-    it('should return display name for minimax-2.1', () => {
-      const name = ProviderRegistry.getModelName('minimax-2.1');
-      expect(name).toBe('MiniMax-2.1');
+    it('should return display name for minimax-2.5', () => {
+      const name = ProviderRegistry.getModelName('minimax-2.5');
+      expect(name).toBe('MiniMax-2.5');
     });
 
     it('should return display name for kimi-k2.5', () => {
@@ -322,9 +323,9 @@ describe('ProviderRegistry', () => {
       expect(Models.glm47.apiKey).toBeUndefined();
     });
 
-    it('should have minimax21 accessor', () => {
-      expect(Models.minimax21).toEqual(MODEL_CONFIGS['minimax-2.1']);
-      expect(Models.minimax21.apiKey).toBeUndefined();
+    it('should have minimax25 accessor', () => {
+      expect(Models.minimax25).toEqual(MODEL_CONFIGS['minimax-2.5']);
+      expect(Models.minimax25.apiKey).toBeUndefined();
     });
 
     it('should have kimiK25 accessor', () => {

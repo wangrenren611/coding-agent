@@ -107,13 +107,17 @@ export class ProviderRegistry {
 export const Models = {
     // GLM
     get glm47(): ModelConfig { return { ...MODEL_DEFINITIONS['glm-4.7'], apiKey: undefined }; },
+    get glm5(): ModelConfig { return { ...MODEL_DEFINITIONS['glm-5'], apiKey: undefined }; },
 
     // MiniMax
-    get minimax21(): ModelConfig { return { ...MODEL_DEFINITIONS['minimax-2.1'], apiKey: undefined }; },
+    get minimax25(): ModelConfig { return { ...MODEL_DEFINITIONS['minimax-2.5'], apiKey: undefined }; },
 
     // Kimi
     get kimiK25(): ModelConfig { return { ...MODEL_DEFINITIONS['kimi-k2.5'], apiKey: undefined }; },
 
     // DeepSeek
     get deepseekChat(): ModelConfig { return { ...MODEL_DEFINITIONS['deepseek-chat'], apiKey: undefined }; },
+
+    // Qwen
+    get qwen35Plus(): ModelConfig { return { ...MODEL_DEFINITIONS['qwen3.5-plus'], apiKey: undefined }; },
 };

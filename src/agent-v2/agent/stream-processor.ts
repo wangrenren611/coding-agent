@@ -102,7 +102,7 @@ export interface StreamProcessorOptions {
     // ==================== Token 使用量回调 ====================
 
     /** Token 使用量更新回调 */
-    onUsageUpdate?: (usage: Usage) => void;
+    onUsageUpdate?: (usage: Usage, messageId: string) => void;
 
     // ==================== 响应验证选项 ====================
 
@@ -210,7 +210,7 @@ export class StreamProcessor {
 
         if (chunk.usage) {
             this.metadata.usage = chunk.usage;
-            this.options.onUsageUpdate?.(chunk.usage);
+            this.options.onUsageUpdate?.(chunk.usage, this.currentMessageId);
         }
     }
 

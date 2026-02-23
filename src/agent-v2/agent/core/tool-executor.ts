@@ -15,6 +15,7 @@ import type { ToolContext } from '../../tool/base';
 import type { ToolCall, ToolExecutionResult } from '../core-types';
 import type { Message } from '../../session/types';
 import { createToolResultMessage } from '../message-builder';
+import { sanitizeToolResult as sanitizeToolResultUtil, toolResultToString } from '../../security';
 
 /**
  * 工具执行器配置
@@ -139,50 +140,17 @@ export class ToolExecutor {
     }
 
     /**
-     * 脱敏工具结果
+     * 脱敏工具结果（使用统一的安全模块）
      */
     private sanitizeToolResult(result: ToolExecutionResult): unknown {
-        if (!result.result) return result;
-
-        const sanitized = { ...result.result };
-        const sensitiveKeys = ['password', 'token', 'secret', 'apiKey', 'api_key', 'authorization'];
-
-        for (const key of sensitiveKeys) {
-            if (key in sanitized) {
-                (sanitized as Record<string, unknown>)[key] = '[REDACTED]';
-            }
-        }
-
-        return sanitized;
+        return sanitizeToolResultUtil(result);
     }
 
     /**
-     * 安全地将工具结果转换为字符串
+     * 安全地将工具结果转换为字符串（使用统一的安全模块）
      */
     private safeToolResultToString(result: unknown): string {
-        if (typeof result === 'string') {
-            return result;
-        }
-
-        if (result && typeof result === 'object') {
-            // 如果有 output 字段，优先使用
-            if ('output' in result && typeof (result as { output: unknown }).output === 'string') {
-                return (result as { output: string }).output;
-            }
-
-            // 如果有 error 字段
-            if ('error' in result && typeof (result as { error: unknown }).error === 'string') {
-                return (result as { error: string }).error;
-            }
-
-            try {
-                return JSON.stringify(result, null, 2);
-            } catch {
-                return '[Object]';
-            }
-        }
-
-        return String(result);
+        return toolResultToString(result);
     }
 
     /**
