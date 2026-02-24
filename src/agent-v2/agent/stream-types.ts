@@ -30,7 +30,10 @@ export enum AgentMessageType {
 
   // 状态流
   STATUS = 'status',             // 任务状态切换（loading, error, finished）
-  ERROR = 'error'                // 系统级异常
+  ERROR = 'error',               // 系统级异常
+
+  // 子 Agent 事件冒泡
+  SUBAGENT_EVENT = 'subagent_event', // 子 Agent 事件冒泡到父会话
 }
 
 /**
@@ -194,9 +197,9 @@ export interface UsageUpdateMessage extends BaseAgentMessage {
 }
 
 /**
- * 统一联合类型
+ * 基础事件联合类型（不包含子 Agent 事件）
  */
-export type AgentMessage =
+export type BaseAgentEvent =
   | TextStartMessage
   | ThoughtMessage
   | TextMessage
@@ -210,3 +213,28 @@ export type AgentMessage =
   | UsageUpdateMessage
   | StatusMessage
   | ErrorMessage;
+
+/**
+ * 子 Agent 事件冒泡消息
+ * 
+ * 将子 Agent 的事件转发到父会话，实现实时进度可见
+ */
+export interface SubagentEventMessage extends BaseAgentMessage {
+  type: AgentMessageType.SUBAGENT_EVENT;
+  payload: {
+    /** 子任务 ID */
+    task_id: string;
+    /** 子 Agent 类型 */
+    subagent_type: string;
+    /** 子会话 ID */
+    child_session_id: string;
+    /** 原始事件（来自子 Agent） */
+    event: BaseAgentEvent;
+  };
+  msgId?: string;
+}
+
+/**
+ * 统一联合类型
+ */
+export type AgentMessage = BaseAgentEvent | SubagentEventMessage;

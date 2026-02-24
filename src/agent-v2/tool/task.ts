@@ -13,6 +13,7 @@ import { BaseTool, ToolContext, ToolResult } from './base';
 import { ToolRegistry } from './registry';
 import type { ToolRegistryConfig } from './registry';
 import type { IMemoryManager } from '../memory/types';
+import { AgentMessageType } from '../agent/stream-types';
 import { AGENT_CONFIGS, SubagentTypeSchema } from './task/subagent-config';
 import {
   BackgroundExecution,
@@ -114,6 +115,9 @@ export class TaskTool extends BaseTool<typeof taskRunSchema> {
       subagent = this.createSubagent(subagent_type, max_turns, {
         memoryManager,
         childSessionId,
+        parentStreamCallback: context?.streamCallback,
+        taskId,
+        subagentType: subagent_type,
       });
 
       await saveSubTaskRunRecord(memoryManager, buildSubTaskRunData({
@@ -254,7 +258,16 @@ export class TaskTool extends BaseTool<typeof taskRunSchema> {
   private createSubagent(
     agentType: SubagentType,
     maxTurns: number | undefined,
-    options: { memoryManager?: IMemoryManager; childSessionId: string },
+    options: { 
+      memoryManager?: IMemoryManager; 
+      childSessionId: string;
+      /** 父会话的 streamCallback（用于事件冒泡） */
+      parentStreamCallback?: ToolContext['streamCallback'];
+      /** 任务 ID（用于事件冒泡） */
+      taskId: string;
+      /** 子 Agent 类型（用于事件冒泡） */
+      subagentType: string;
+    },
   ): Agent {
     const config = AGENT_CONFIGS[agentType];
     const registryConfig: ToolRegistryConfig = {
@@ -263,13 +276,33 @@ export class TaskTool extends BaseTool<typeof taskRunSchema> {
     const registry = new ToolRegistry(registryConfig);
     registry.register(config.tools.map((ToolClass) => new ToolClass()));
 
+    // 创建事件冒泡的 streamCallback
+    const bubblingStreamCallback = options.parentStreamCallback
+      ? (msg: any) => {
+          // 将子 Agent 事件包装为 SUBAGENT_EVENT，冒泡到父会话
+          options.parentStreamCallback!({
+            type: AgentMessageType.SUBAGENT_EVENT,
+            payload: {
+              task_id: options.taskId,
+              subagent_type: options.subagentType,
+              child_session_id: options.childSessionId,
+              event: msg,
+            },
+            sessionId: options.childSessionId,
+            timestamp: Date.now(),
+          });
+        }
+      : undefined;
+
     return new Agent({
       provider: this.provider,
       systemPrompt: this.buildSubagentSystemPrompt(config.systemPrompt),
       toolRegistry: registry,
       // Note: Agent currently uses this field for retry control, so this is best-effort.
       maxRetries: maxTurns || config.maxRetries || 10,
-      stream: false,
+      // 只有在需要事件冒泡时才启用流式输出
+      stream: !!bubblingStreamCallback,
+      streamCallback: bubblingStreamCallback,
       memoryManager: options.memoryManager,
       sessionId: options.childSessionId,
     });
