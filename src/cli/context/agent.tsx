@@ -44,10 +44,12 @@ export interface MessagePart {
   content: string;
   toolName?: string;
   toolArgs?: string;
+  toolCallId?: string;
   toolResult?: string;
   patchPath?: string;
   patchLanguage?: string;
   status?: "pending" | "success" | "error" | "running" | "completed";
+  subagentStatus?: "running" | "completed" | "error";
   /** 子 Agent 信息 */
   subagent?: SubagentInfo;
   /** 子 Agent 的消息部分（嵌套） */
@@ -175,108 +177,125 @@ function agentMessageToPart(msg: AgentMessage): MessagePart | null {
  */
 function handleSubagentEvent(parts: MessagePart[], subagentMsg: SubagentEventMessage) {
   const { task_id, subagent_type, child_session_id, event } = subagentMsg.payload;
-  
-  // 查找是否已存在该子 Agent 的消息部分
-  const existingSubagentIndex = parts.findIndex(
-    (p) => p.type === "subagent" && p.subagent?.taskId === task_id
-  );
+
+  const ensureSubagentHost = (): number => {
+    const linkedTaskToolIndex = parts.findIndex(
+      (p) => p.type === "tool-call" && p.subagent?.taskId === task_id
+    );
+    if (linkedTaskToolIndex !== -1) {
+      return linkedTaskToolIndex;
+    }
+
+    const firstUnlinkedTaskToolIndex = parts.findIndex(
+      (p) => p.type === "tool-call" && p.toolName === "task" && !p.subagent
+    );
+    if (firstUnlinkedTaskToolIndex !== -1) {
+      parts[firstUnlinkedTaskToolIndex] = {
+        ...parts[firstUnlinkedTaskToolIndex],
+        subagent: {
+          taskId: task_id,
+          subagentType: subagent_type,
+          childSessionId: child_session_id,
+        },
+        subagentParts: parts[firstUnlinkedTaskToolIndex].subagentParts || [],
+      };
+      return firstUnlinkedTaskToolIndex;
+    }
+
+    const standaloneIndex = parts.findIndex(
+      (p) => p.type === "subagent" && p.subagent?.taskId === task_id
+    );
+    if (standaloneIndex !== -1) {
+      return standaloneIndex;
+    }
+
+    parts.push({
+      id: `subagent-${task_id}`,
+      type: "subagent",
+      content: "",
+      subagentStatus: "running",
+      subagent: {
+        taskId: task_id,
+        subagentType: subagent_type,
+        childSessionId: child_session_id,
+      },
+      subagentParts: [],
+    });
+    return parts.length - 1;
+  };
+
+  const hostIndex = ensureSubagentHost();
+  const host = parts[hostIndex];
 
   if (event.type === AgentMessageType.STATUS) {
-    const state = (event as any).payload.state;
-    
-    if (state === "running" || state === "thinking") {
-      // 子 Agent 开始运行
-      if (existingSubagentIndex === -1) {
-        parts.push({
-          id: `subagent-${task_id}`,
-          type: "subagent",
-          content: "",
-          status: "running",
-          subagent: {
-            taskId: task_id,
-            subagentType: subagent_type,
-            childSessionId: child_session_id,
-          },
-          subagentParts: [],
-        });
-      }
-    } else if (state === "completed") {
-      // 子 Agent 完成
-      if (existingSubagentIndex !== -1) {
-        parts[existingSubagentIndex] = {
-          ...parts[existingSubagentIndex],
-          status: "completed",
-        };
-      }
-    } else if (state === "failed") {
-      // 子 Agent 失败
-      if (existingSubagentIndex !== -1) {
-        parts[existingSubagentIndex] = {
-          ...parts[existingSubagentIndex],
-          status: "error",
-        };
-      }
-    }
-    return;
-  }
+    const state = (event as any).payload.state as AgentStatus;
+    const nextSubagentStatus =
+      state === AgentStatus.COMPLETED
+        ? "completed"
+        : state === AgentStatus.FAILED || state === AgentStatus.ABORTED
+          ? "error"
+          : "running";
 
-  // 处理嵌套的子 Agent 事件
-  if (event.type === AgentMessageType.SUBAGENT_EVENT) {
-    // 递归处理嵌套子 Agent
-    const nestedSubagent = event as SubagentEventMessage;
-    if (existingSubagentIndex !== -1) {
-      const subagentParts = parts[existingSubagentIndex].subagentParts || [];
-      handleSubagentEvent(subagentParts, nestedSubagent);
-      parts[existingSubagentIndex] = {
-        ...parts[existingSubagentIndex],
-        subagentParts: [...subagentParts],
-      };
-    }
-    return;
-  }
-
-  // 将子 Agent 的事件转换为 MessagePart 并添加到 subagentParts
-  const part = agentMessageToPart(event);
-  if (part && existingSubagentIndex !== -1) {
-    const subagentParts = parts[existingSubagentIndex].subagentParts || [];
-    
-    // 对于增量内容，尝试合并到现有部分
-    if (event.type === AgentMessageType.TEXT_DELTA || event.type === AgentMessageType.REASONING_DELTA) {
-      const existingPartIndex = subagentParts.findIndex((p) => p.id === part.id);
-      if (existingPartIndex !== -1) {
-        subagentParts[existingPartIndex] = {
-          ...subagentParts[existingPartIndex],
-          content: subagentParts[existingPartIndex].content + (event as any).payload.content,
-        };
-      } else {
-        subagentParts.push(part);
-      }
-    } else if (event.type === AgentMessageType.TOOL_CALL_STREAM) {
-      // 工具流式输出合并
-      const existingPartIndex = subagentParts.findIndex((p) => p.id === part.id);
-      if (existingPartIndex !== -1) {
-        subagentParts[existingPartIndex] = {
-          ...subagentParts[existingPartIndex],
-          toolResult: (subagentParts[existingPartIndex].toolResult || "") + (event as any).payload.output,
-        };
-      } else {
-        subagentParts.push(part);
-      }
-    } else {
-      subagentParts.push(part);
-    }
-    
-    parts[existingSubagentIndex] = {
-      ...parts[existingSubagentIndex],
-      subagentParts: [...subagentParts],
+    parts[hostIndex] = {
+      ...host,
+      subagentStatus: nextSubagentStatus,
     };
+    return;
   }
+
+  const hostSubagentParts = host.subagentParts ? [...host.subagentParts] : [];
+
+  if (event.type === AgentMessageType.SUBAGENT_EVENT) {
+    handleSubagentEvent(hostSubagentParts, event as SubagentEventMessage);
+    parts[hostIndex] = {
+      ...host,
+      subagentParts: hostSubagentParts,
+    };
+    return;
+  }
+
+  const part = agentMessageToPart(event);
+  if (!part) {
+    return;
+  }
+
+  if (
+    event.type === AgentMessageType.TEXT_DELTA
+    || event.type === AgentMessageType.REASONING_DELTA
+  ) {
+    const existingPartIndex = hostSubagentParts.findIndex((p) => p.id === part.id);
+    if (existingPartIndex !== -1) {
+      hostSubagentParts[existingPartIndex] = {
+        ...hostSubagentParts[existingPartIndex],
+        content: hostSubagentParts[existingPartIndex].content + (event as any).payload.content,
+      };
+    } else {
+      hostSubagentParts.push(part);
+    }
+  } else if (event.type === AgentMessageType.TOOL_CALL_STREAM) {
+    const existingPartIndex = hostSubagentParts.findIndex((p) => p.id === part.id);
+    if (existingPartIndex !== -1) {
+      hostSubagentParts[existingPartIndex] = {
+        ...hostSubagentParts[existingPartIndex],
+        toolResult: (hostSubagentParts[existingPartIndex].toolResult || "") + (event as any).payload.output,
+      };
+    } else {
+      hostSubagentParts.push(part);
+    }
+  } else {
+    hostSubagentParts.push(part);
+  }
+
+  parts[hostIndex] = {
+    ...host,
+    subagentParts: hostSubagentParts,
+  };
 }
 
 export const { Provider: AgentProvider, use: useAgent } =
   createSimpleContext<AgentContextValue>("Agent", () => {
     const [config, setConfigState] = useState<AgentConfig>({
-      modelId:  "qwen-kimi-k2.5",
+      modelId:  "qwen3.5-plus",
       thinking: true,
     });
     const [initialized, setInitialized] = useState(false);
@@ -297,10 +316,10 @@ export const { Provider: AgentProvider, use: useAgent } =
 
       try {
         // 1. 创建工具注册表
-        toolRegistryRef.current = new ToolRegistry({
-          workingDirectory: process.cwd(),
-        });
-        toolRegistryRef.current.register([new BashTool()]);
+        // toolRegistryRef.current = new ToolRegistry({
+        //   workingDirectory: process.cwd(),
+        // });
+        // toolRegistryRef.current.register([new BashTool()]);
 
         // 2. 创建内存管理器
         const memoryPath = "./data/cli/agent-memory";
@@ -392,6 +411,7 @@ export const { Provider: AgentProvider, use: useAgent } =
                   content: "",
                   toolName: tc.toolName,
                   toolArgs: tc.args,
+                  toolCallId: tc.callId,
                   status: "pending",
                 });
               });
@@ -515,10 +535,10 @@ export const { Provider: AgentProvider, use: useAgent } =
           await init();
         }
 
-        if (!memoryManagerRef.current || !toolRegistryRef.current) {
-          setState((s) => ({ ...s, error: "Agent not initialized" }));
-          return;
-        }
+        // if (!memoryManagerRef.current || !toolRegistryRef.current) {
+        //   setState((s) => ({ ...s, error: "Agent not initialized" }));
+        //   return;
+        // }
 
         // 添加用户消息
         const userMessage: ChatMessage = {
@@ -561,7 +581,7 @@ export const { Provider: AgentProvider, use: useAgent } =
           agentRef.current = new Agent({
             provider,
             systemPrompt,
-            toolRegistry: toolRegistryRef.current,
+            // toolRegistry: toolRegistryRef.current,
             requestTimeout: CLI_REQUEST_TIMEOUT_MS,
             maxRetries: CLI_MAX_RETRIES,
             retryDelayMs: CLI_RETRY_DELAY_MS,
@@ -575,7 +595,7 @@ export const { Provider: AgentProvider, use: useAgent } =
               keepMessagesNum: 40,
               triggerRatio: 0.9,
             },
-            memoryManager: memoryManagerRef.current,
+            memoryManager: memoryManagerRef.current ?? undefined,
             streamCallback: (msg: AgentMessage) => {
               handleStreamMessage(msg, assistantMessage.id);
             },

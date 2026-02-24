@@ -41,6 +41,8 @@ export interface ToolExecutorConfig {
     sessionId: string;
     /** 记忆管理器（可选） */
     memoryManager?: ToolContext['memoryManager'];
+    /** 流式输出回调（用于子 Agent 事件冒泡） */
+    streamCallback?: ToolContext['streamCallback'];
 
     // 回调
     /** 工具调用创建回调 */
@@ -123,13 +125,20 @@ export class ToolExecutor {
     /**
      * 构建工具上下文
      */
-    private buildToolContext(): { sessionId: string; memoryManager?: ToolContext['memoryManager'] } {
-        const context: { sessionId: string; memoryManager?: ToolContext['memoryManager'] } = {
+    private buildToolContext(): ToolContext {
+        const context: ToolContext = {
             sessionId: this.config.sessionId,
+            environment: process.env.NODE_ENV || 'development',
+            platform: process.platform,
+            time: new Date().toISOString(),
         };
 
         if (this.config.memoryManager) {
             context.memoryManager = this.config.memoryManager;
+        }
+
+        if (this.config.streamCallback) {
+            context.streamCallback = this.config.streamCallback;
         }
 
         return context;

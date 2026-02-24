@@ -13,12 +13,28 @@ import {
   TaskCreateTool,
   TaskGetTool,
   TaskListTool,
-  TaskOutputTool,
   TaskStopTool,
   TaskTool,
   TaskUpdateTool,
   clearTaskState,
 } from '../task';
+
+async function waitForSubTaskRunStatus(
+  memoryManager: IMemoryManager,
+  runId: string,
+  expectedStatuses: Array<'completed' | 'failed' | 'cancelled'>,
+  timeoutMs = 3000
+) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const run = await memoryManager.getSubTaskRun(runId);
+    if (run && expectedStatuses.includes(run.status as 'completed' | 'failed' | 'cancelled')) {
+      return run;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return memoryManager.getSubTaskRun(runId);
+}
 
 class MockProvider extends LLMProvider {
   private readonly text: string;
@@ -385,9 +401,8 @@ describe('Task tools', () => {
     expect(stored.messageCount).toBeGreaterThan(0);
   });
 
-  it('should run background task and retrieve output', async () => {
+  it('should run background task and persist output metadata', async () => {
     const taskTool = withContext(new TaskTool(new MockProvider('background done')));
-    const outputTool = withContext(new TaskOutputTool());
 
     const started = await taskTool.execute({
       description: 'Explore codebase',
@@ -401,18 +416,9 @@ describe('Task tools', () => {
     expect(started.metadata?.status).toBe('queued');
     expect(started.metadata?.storage).toBe('memory_manager');
 
-    const output = await outputTool.execute({
-      task_id: taskId,
-      block: true,
-    });
-    expect(output.success).toBe(true);
-    expect(output.metadata?.status).toBe('completed');
-    expect(output.metadata?.block_requested).toBe(true);
-    expect(output.metadata?.progress?.message_count).toBeGreaterThan(0);
-    expect(output.output).toContain('background done');
-    expect(output.metadata?.message_count).toBeGreaterThan(0);
-    const run = await memoryManager.getSubTaskRun(taskId);
+    const run = await waitForSubTaskRunStatus(memoryManager, taskId, ['completed']);
     expect(run?.status).toBe('completed');
+    expect(run?.output).toContain('background done');
     expect(run?.messageCount).toBeGreaterThan(0);
     expect(run?.messages).toBeUndefined();
 
@@ -423,7 +429,6 @@ describe('Task tools', () => {
   it('should stop a running background task', async () => {
     const taskTool = withContext(new TaskTool(new MockProvider('late result', 1000)));
     const stopTool = withContext(new TaskStopTool());
-    const outputTool = withContext(new TaskOutputTool());
 
     const started = await taskTool.execute({
       description: 'Long task',
@@ -437,21 +442,14 @@ describe('Task tools', () => {
     expect(stopped.success).toBe(true);
     expect(['cancelling', 'cancelled', 'completed']).toContain(stopped.metadata?.status);
 
-    const output = await outputTool.execute({
-      task_id: taskId,
-      block: false,
-    });
-    expect(output.success).toBe(true);
-    expect(['cancelled', 'completed']).toContain(output.metadata?.status);
-    const run = await memoryManager.getSubTaskRun(taskId);
+    const run = await waitForSubTaskRunStatus(memoryManager, taskId, ['cancelled', 'completed']);
     expect(['cancelled', 'completed']).toContain(run?.status);
     expect(run?.messageCount).toBeGreaterThanOrEqual(0);
     expect(run?.messages).toBeUndefined();
   });
 
-  it('should wait for task completion with block=true', async () => {
+  it('should observe background task completion via persisted run state', async () => {
     const taskTool = withContext(new TaskTool(new MockProvider('slow done', 50)));
-    const outputTool = withContext(new TaskOutputTool());
 
     const started = await taskTool.execute({
       description: 'Slow background task',
@@ -461,16 +459,10 @@ describe('Task tools', () => {
     });
 
     const taskId = started.metadata?.task_id as string;
-    
-    // block=true 会等待任务完成，依赖 Agent 内部的超时机制
-    const result = await outputTool.execute({
-      task_id: taskId,
-      block: true,
-    });
-    expect(result.success).toBe(true);
-    expect(result.metadata?.status).toBe('completed');
-    expect(result.metadata?.block_requested).toBe(true);
-    expect(result.output).toContain('slow done');
+
+    const run = await waitForSubTaskRunStatus(memoryManager, taskId, ['completed']);
+    expect(run?.status).toBe('completed');
+    expect(run?.output).toContain('slow done');
   });
 
   it('should not apply ToolRegistry timeout to task tool execution', async () => {

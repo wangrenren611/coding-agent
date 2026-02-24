@@ -7,7 +7,7 @@ import { WebSearchTool } from "./web-search";
 import { WebFetchTool } from "./web-fetch";
 import { BatchReplaceTool } from "./batch-replace";
 import { LspTool } from "./lsp";
-import { TaskCreateTool, TaskGetTool, TaskListTool, TaskOutputTool, TaskStopTool, TaskTool, TaskUpdateTool } from "./task";
+import { TaskCreateTool, TaskGetTool, TaskListTool, TaskStopTool, TaskTool, TaskUpdateTool } from "./task";
 import { ToolRegistry } from "./registry";
 import type { ToolRegistryConfig } from "./registry";
 import type { BaseTool } from "./base";
@@ -38,7 +38,6 @@ export function getDefaultTools(
         new TaskGetTool(),
         new TaskListTool(),
         new TaskUpdateTool(),
-        new TaskOutputTool(),
         new TaskStopTool(),
         new BatchReplaceTool(),
         new LspTool(),
@@ -83,7 +82,6 @@ export {
     TaskGetTool,
     TaskListTool,
     TaskUpdateTool,
-    TaskOutputTool,
     TaskStopTool,
     SubagentType,
 } from "./task";

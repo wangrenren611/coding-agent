@@ -13,6 +13,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Agent } from './agent';
 import { AgentStatus } from './types';
+import { AgentMessageType } from './stream-types';
 import { AgentState } from './core/agent-state';
 import { LLMCaller } from './core/llm-caller';
 import { ToolExecutor } from './core/tool-executor';
@@ -401,6 +402,35 @@ describe('Agent 完成条件判断测试', () => {
             // 空响应会触发补偿重试，最多重试 1 次后会失败
             const result = await agent.executeWithResult('Hello');
             expect(['completed', 'failed']).toContain(result.status);
+        }, 10000);
+
+        it('stream 模式空内容应触发补偿重试，避免仅 thinking 空转', async () => {
+            let callCount = 0;
+            mockProvider.generate = async () => {
+                callCount++;
+                return {
+                    id: `stream-empty-${callCount}`,
+                    choices: [{
+                        index: 0,
+                        message: { role: 'assistant', content: '' },
+                        finish_reason: 'length',
+                    }],
+                } as LLMResponse;
+            };
+
+            const agent = new Agent({
+                provider: mockProvider as any,
+                systemPrompt: 'Test',
+                stream: true,
+                memoryManager,
+                maxLoops: 20,
+                maxCompensationRetries: 1,
+            });
+
+            const result = await agent.executeWithResult('Hello');
+            expect(result.status).toBe('failed');
+            expect(callCount).toBe(2);
+            expect(agent.getLoopCount()).toBe(2);
         }, 10000);
     });
 
@@ -1051,6 +1081,105 @@ describe('消息处理测试', () => {
 
             expect(countAfterSecond).toBeGreaterThan(countAfterFirst);
         });
+    });
+});
+
+describe('Task 子 Agent 事件透传', () => {
+    let memoryManager: ReturnType<typeof createMemoryManager>;
+
+    beforeEach(async () => {
+        memoryManager = createMemoryManager({
+            type: 'file',
+            connectionString: './test-memory/subagent-event-' + Date.now(),
+        });
+        await memoryManager.initialize();
+    });
+
+    afterEach(async () => {
+        await memoryManager.close();
+    });
+
+    it('Agent 执行 task 工具时应触发 SUBAGENT_EVENT', async () => {
+        let callCount = 0;
+        const events: any[] = [];
+
+        const provider = new MockProvider();
+        provider.generate = async () => {
+            callCount++;
+
+            // 父 Agent 第一轮：触发 task 工具调用
+            if (callCount === 1) {
+                return {
+                    id: 'parent-task-call',
+                    object: 'chat.completion',
+                    created: Date.now(),
+                    model: 'test-model',
+                    choices: [{
+                        index: 0,
+                        message: {
+                            role: 'assistant',
+                            content: 'Use task tool',
+                            tool_calls: [{
+                                id: 'call-task-1',
+                                type: 'function',
+                                function: {
+                                    name: 'task',
+                                    arguments: JSON.stringify({
+                                        description: 'subagent check',
+                                        prompt: 'just answer done',
+                                        subagent_type: 'explore',
+                                    }),
+                                },
+                            }],
+                        },
+                        finish_reason: 'tool_calls',
+                    }],
+                } as LLMResponse;
+            }
+
+            // 子 Agent：直接返回文本，不再触发工具
+            if (callCount === 2) {
+                return {
+                    id: 'subagent-text',
+                    object: 'chat.completion',
+                    created: Date.now(),
+                    model: 'test-model',
+                    choices: [{
+                        index: 0,
+                        message: { role: 'assistant', content: 'subagent done' },
+                        finish_reason: 'stop',
+                    }],
+                } as LLMResponse;
+            }
+
+            // 父 Agent 第二轮：汇总最终回答
+            return {
+                id: 'parent-final',
+                object: 'chat.completion',
+                created: Date.now(),
+                model: 'test-model',
+                choices: [{
+                    index: 0,
+                    message: { role: 'assistant', content: 'final answer' },
+                    finish_reason: 'stop',
+                }],
+            } as LLMResponse;
+        };
+
+        const agent = new Agent({
+            provider: provider as any,
+            systemPrompt: 'Test',
+            stream: true,
+            memoryManager,
+            streamCallback: (msg) => events.push(msg),
+        });
+
+        const result = await agent.execute('run task');
+        expect(result.content).toContain('final answer');
+
+        const subagentEvents = events.filter((e) => e.type === AgentMessageType.SUBAGENT_EVENT);
+        expect(subagentEvents.length).toBeGreaterThan(0);
+        expect(subagentEvents[0].payload?.event).toBeDefined();
     });
 });
 

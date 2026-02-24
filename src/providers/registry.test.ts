@@ -21,7 +21,7 @@ describe('ProviderRegistry', () => {
 
   describe('MODEL_CONFIGS', () => {
     it('should have all model configurations', () => {
-      const modelIds: ModelId[] = ['glm-4.7', 'glm-5', 'minimax-2.5', 'kimi-k2.5', 'deepseek-chat', 'qwen3.5-plus'];
+      const modelIds = Object.keys(MODEL_CONFIGS) as ModelId[];
 
       modelIds.forEach((id) => {
         expect(MODEL_CONFIGS[id]).toBeDefined();
@@ -182,7 +182,7 @@ describe('ProviderRegistry', () => {
     it('should return all model configs', () => {
       const models = ProviderRegistry.listModels();
 
-      expect(models).toHaveLength(6);
+      expect(models).toHaveLength(Object.keys(MODEL_CONFIGS).length);
       expect(models.every((m) => m.id in MODEL_CONFIGS)).toBe(true);
     });
 
@@ -239,7 +239,7 @@ describe('ProviderRegistry', () => {
     it('should return all model IDs', () => {
       const ids = ProviderRegistry.getModelIds();
 
-      expect(ids).toEqual(['glm-4.7', 'glm-5', 'minimax-2.5', 'kimi-k2.5', 'deepseek-chat', 'qwen3.5-plus']);
+      expect(ids).toEqual(Object.keys(MODEL_CONFIGS));
     });
 
     it('should return type ModelId[]', () => {

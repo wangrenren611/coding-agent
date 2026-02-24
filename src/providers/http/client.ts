@@ -14,6 +14,7 @@ import {
     LLMRetryableError,
     createErrorFromStatus,
 } from '../types';
+import fs from 'fs';
 
 export interface HttpClientOptions {
     /** 请求超时时间（毫秒） */
@@ -79,7 +80,7 @@ export class HTTPClient {
             if (this.debug) {
                 console.log(`[HTTPClient] Sending request: ${options.method || 'GET'} ${url}`);
             }
-
+            fs.writeFileSync('./request.json', JSON.stringify(options, null, 2));
             const response = await fetch(url, {
                 ...options,
                 signal: combinedSignal,

@@ -1,9 +1,6 @@
 import dotenv from 'dotenv';
 import { Agent } from './agent-v2/agent/agent';
-import { ToolRegistry } from './agent-v2/tool/registry';
-import BashTool from './agent-v2/tool/bash';
 import { ProviderRegistry } from './providers';
-import { EventType } from './agent-v2/eventbus';
 
 import fs from 'fs';
 import { AgentMessage, AgentMessageType, BaseAgentEvent, SubagentEventMessage } from './agent-v2/agent/stream-types';
@@ -29,6 +26,12 @@ let isTexting = false;
 
 // 子 Agent 缩进前缀
 const SUBAGENT_PREFIX = '  ';  // 2 空格缩进
+
+// 子 Agent 渲染状态：按 task_id 聚合打印
+const pendingTaskCallIds: string[] = [];
+const taskIdToCallId = new Map<string, string>();
+const openedSubagentTasks = new Set<string>();
+const closedSubagentTasks = new Set<string>();
 
 /**
  * 处理单个事件消息
@@ -76,16 +79,21 @@ function handleSingleMessage(message: BaseAgentEvent, indent: string = '') {
             const tools = message.payload.tool_calls.map((call) => 
                 `${call.toolName}(${call.args.slice(0, 50)}${call.args.length > 50 ? '...' : ''})`
             );
+            for (const call of message.payload.tool_calls) {
+                if (call.toolName === 'task') {
+                    pendingTaskCallIds.push(call.callId);
+                }
+            }
             process.stdout.write('\n');
             console.log(`${indent}${YELLOW}🔧 工具调用:${RESET}`, tools.join(', '));
             break;
 
-        case AgentMessageType.TOOL_CALL_STREAM:
-            // 工具执行中的流式输出（如终端输出）
-            if (message.payload.output) {
-                process.stdout.write(`${indent}${GRAY}${message.payload.output}${RESET}`);
-            }
-            break;
+        // case AgentMessageType.TOOL_CALL_STREAM:
+        //     // 工具执行中的流式输出（如终端输出）
+        //     if (message.payload.output) {
+        //         process.stdout.write(`${indent}${GRAY}${message.payload.output}${RESET}`);
+        //     }
+        //     break;
 
         case AgentMessageType.TOOL_CALL_RESULT:
             const status = message.payload.status === 'success' ? '✅' : '❌';
@@ -152,13 +160,27 @@ function handleSingleMessage(message: BaseAgentEvent, indent: string = '') {
  */
 function handleSubagentEvent(message: SubagentEventMessage, indent: string = '') {
     const { task_id, subagent_type, child_session_id, event } = message.payload;
-    
-    // 打印子 Agent 事件头
-    console.log(`\n${indent}${BLUE}┌─────────────────────────────────────────${RESET}`);
-    console.log(`${indent}${BLUE}│ 🔄 子 Agent 事件 [${subagent_type}]${RESET}`);
-    console.log(`${indent}${BLUE}│ Task ID: ${task_id}${RESET}`);
-    console.log(`${indent}${BLUE}├─────────────────────────────────────────${RESET}`);
-    
+
+    if (!taskIdToCallId.has(task_id) && pendingTaskCallIds.length > 0) {
+        const matchedCallId = pendingTaskCallIds.shift();
+        if (matchedCallId) {
+            taskIdToCallId.set(task_id, matchedCallId);
+        }
+    }
+
+    if (!openedSubagentTasks.has(task_id)) {
+        const linkedCallId = taskIdToCallId.get(task_id);
+        process.stdout.write('\n');
+        console.log(`${indent}${BLUE}┌─ 🔄 子 Agent [${subagent_type}]${RESET}`);
+        console.log(`${indent}${BLUE}│ task_id: ${task_id}${RESET}`);
+        if (linkedCallId) {
+            console.log(`${indent}${BLUE}│ tool_call: ${linkedCallId}${RESET}`);
+        }
+        console.log(`${indent}${BLUE}│ child_session: ${child_session_id}${RESET}`);
+        console.log(`${indent}${BLUE}├─────────────────────────────────────────${RESET}`);
+        openedSubagentTasks.add(task_id);
+    }
+
     const childIndent = indent + SUBAGENT_PREFIX;
     
     // 处理内部事件
@@ -169,9 +191,14 @@ function handleSubagentEvent(message: SubagentEventMessage, indent: string = '')
         // 普通事件，带缩进处理
         handleSingleMessage(event as BaseAgentEvent, childIndent);
         
-        // 子 Agent 事件尾（在状态为 completed 时打印）
-        if (event.type === AgentMessageType.STATUS && (event as any).payload.state === 'completed') {
+        // 子 Agent 事件尾（在终态时打印）
+        if (
+            event.type === AgentMessageType.STATUS
+            && !closedSubagentTasks.has(task_id)
+            && ['completed', 'failed', 'aborted'].includes((event as any).payload.state)
+        ) {
             console.log(`${indent}${BLUE}└─────────────────────────────────────────${RESET}`);
+            closedSubagentTasks.add(task_id);
         }
     }
 }
@@ -199,13 +226,7 @@ async function demo1() {
     console.log('='.repeat(60));
     console.log();
 
-    const toolRegistry = new ToolRegistry({
-        workingDirectory: process.cwd(),
-    });
-
-    toolRegistry.register([
-        new BashTool(),
-    ]);
+  
 
     const preferredMemoryPath = './data/agent-memory';
     const fallbackMemoryPath = '.memory/agent-memory';
@@ -230,8 +251,9 @@ async function demo1() {
     let agent: Agent | undefined;
     try {
         agent = new Agent({
-            provider: ProviderRegistry.createFromEnv('glm-5',{
+            provider: ProviderRegistry.createFromEnv('qwen3.5-plus',{
                 timeout: 1000*60*5,
+                temperature: 0.3,
             }),
             systemPrompt: operatorPrompt({
                 directory: process.cwd(),
@@ -240,7 +262,7 @@ async function demo1() {
             // 如需恢复会话，请取消注释并填入有效 sessionId
         //    sessionId: 'agent-7',
             // sessionId: 'agent-8',
-            sessionId: 'agent-9',
+            sessionId: 'agent-22',
                 //   sessionId:'18a09614-bb1e-4f06-b685-d040ff08c3aa',
 
             stream: true,

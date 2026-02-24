@@ -10,6 +10,7 @@ const DEFAULT_TOOL_TIMEOUT = 300000; // 5分钟
 interface ExecutionContext {
     sessionId?: string;
     memoryManager?: ToolContext['memoryManager'];
+    streamCallback?: ToolContext['streamCallback'];
     onToolStream?: (toolCallId: string, toolName: string, output: string) => void;
 }
 
@@ -58,6 +59,7 @@ export class ToolRegistry {
             time: new Date().toISOString(),
             sessionId: ctx?.sessionId,
             memoryManager: ctx?.memoryManager,
+            streamCallback: ctx?.streamCallback,
         };
     }
 
@@ -66,19 +68,6 @@ export class ToolRegistry {
      */
     setEventCallbacks(callbacks: ToolEventCallbacks): void {
         this.eventCallbacks = callbacks;
-    }
-
-    register(tools: BaseTool<z.ZodType>[]): void {
-        tools.forEach(tool => {
-            if (this.tools.has(tool.name)) {
-                throw new Error(`Tool "${tool.name}" is already registered`);
-            }
-
-            // 验证工具定义
-            this.validateTool(tool);
-
-            this.tools.set(tool.name, tool);
-        });
     }
 
     /**
@@ -104,6 +93,19 @@ export class ToolRegistry {
                     clearTimeout(timeoutId);
                     reject(error);
                 });
+        });
+    }
+
+    register(tools: BaseTool<z.ZodType>[]): void {
+        tools.forEach(tool => {
+            if (this.tools.has(tool.name)) {
+                throw new Error(`Tool "${tool.name}" is already registered`);
+            }
+
+            // 验证工具定义
+            this.validateTool(tool);
+
+            this.tools.set(tool.name, tool);
         });
     }
 
@@ -168,7 +170,7 @@ export class ToolRegistry {
             };
         }
 
-          // 执行工具（带超时控制）
+          // 执行工具（task 工具可通过 executionTimeoutMs=null 显式关闭超时）
         const startTime = Date.now();
         this.eventCallbacks?.onToolStart?.(name, paramsStr || '');
         
@@ -177,15 +179,13 @@ export class ToolRegistry {
             ? this.toolTimeout
             : tool.executionTimeoutMs;
           
-          // 使用带清理的超时执行，防止内存泄漏
           const result = timeoutMs === null || timeoutMs <= 0
-            ? await tool.execute(resultSchema.data, {
+            ? await Promise.resolve(tool.execute(resultSchema.data, {
                 ...toolContext,
                 emitOutput: (chunk: string) => context?.onToolStream?.(toolCall.id, name, chunk),
-              })
+              }))
             : await this.executeWithTimeout(
                 name,
-                // 使用 Promise.resolve 包装，因为 execute 可能返回同步值
                 () => Promise.resolve(tool.execute(resultSchema.data, {
                   ...toolContext,
                   emitOutput: (chunk: string) => context?.onToolStream?.(toolCall.id, name, chunk),

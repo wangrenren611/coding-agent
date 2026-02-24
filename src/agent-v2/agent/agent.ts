@@ -129,7 +129,7 @@ export class Agent {
             { workingDirectory: process.cwd() },
             this.provider
         );
-
+      
         this.agentState = new AgentState({
             maxLoops: config.maxLoops ?? AGENT_DEFAULTS.LOOP_MAX,
             maxRetries: config.maxRetries ?? AGENT_DEFAULTS.MAX_RETRIES,
@@ -173,6 +173,7 @@ export class Agent {
             toolRegistry: this.toolRegistry,
             sessionId: this.session.getSessionId(),
             memoryManager: this.session.getMemoryManager(),
+            streamCallback: this.streamCallback,
             onToolCallCreated: (toolCalls, messageId, content) => 
                 this.emitter.emitToolCallCreated(toolCalls, messageId, content),
             onToolCallStream: (toolCallId, output, messageId) =>
@@ -495,7 +496,6 @@ export class Agent {
     private isEmptyResponse(message: Message): boolean {
         const hasToolCalls = Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
         return message.role === 'assistant'
-            && message.finish_reason === 'stop'
             && !hasToolCalls
             && !hasContent(message.content);
     }
@@ -515,7 +515,7 @@ export class Agent {
         
         const tools = this.toolRegistry.toLLMTools();
         const abortSignal = this.createAbortSignal();
-
+  
         try {
             // 传递 options 给 llmCaller，允许动态覆盖配置
             const { response, messageId } = await this.llmCaller.execute(
@@ -602,15 +602,15 @@ export class Agent {
                 this.emitter.emitTextStart(messageId);
                 this.emitter.emitTextDelta(contentToText(content), messageId);
                 this.emitter.emitTextComplete(messageId);
-                this.session.addMessage({
-                    messageId,
-                    role: 'assistant',
-                    content,
-                    finish_reason: finishReason,
-                    type: 'text',
-                    ...(usage && { usage }),
-                });
             }
+            this.session.addMessage({
+                messageId,
+                role: 'assistant',
+                content,
+                finish_reason: finishReason,
+                type: 'text',
+                ...(usage && { usage }),
+            });
             return;
         }
         // 非流式模式需要手动创建消息

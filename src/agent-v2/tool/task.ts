@@ -25,7 +25,6 @@ import {
   TASK_CREATE_DESCRIPTION,
   TASK_GET_DESCRIPTION,
   TASK_LIST_DESCRIPTION,
-  TASK_OUTPUT_DESCRIPTION,
   TASK_STOP_DESCRIPTION,
   TASK_TOOL_DESCRIPTION,
   TASK_UPDATE_DESCRIPTION,
@@ -41,7 +40,6 @@ import {
   normalizeMessagesForStorage,
   nowIso,
   pickLastToolName,
-  toIso,
   unique,
 } from './task/shared';
 import {
@@ -672,89 +670,6 @@ export class TaskUpdateTool extends BaseTool<typeof taskUpdateSchema> {
       success: true,
       metadata: updated as any,
       output: `Updated task ${taskId}`,
-    });
-  }
-}
-
-const taskOutputSchema = z.object({
-  task_id: z.string().min(1),
-  block: z.boolean().default(true),
-}).strict();
-
-export class TaskOutputTool extends BaseTool<typeof taskOutputSchema> {
-  name = 'task_output';
-  description = TASK_OUTPUT_DESCRIPTION;
-  schema = taskOutputSchema;
-
-  async execute(args: z.infer<typeof this.schema>, context?: ToolContext): Promise<ToolResult> {
-    const { task_id, block } = args;
-    const execution = getBackgroundExecution(task_id);
-    const runRecord = await getSubTaskRunRecord(context?.memoryManager, task_id);
-    if (!execution && !runRecord) {
-      return this.result({
-        success: false,
-        metadata: { error: 'TASK_NOT_FOUND' } as any,
-        output: `Task not found: ${task_id}`,
-      });
-    }
-
-    if (execution) {
-      await refreshExecutionProgress(execution, true);
-    }
-
-    // block=true 时直接等待任务完成，依赖 Agent 内部的超时/错误机制
-    if (block && execution && (execution.status === 'queued' || execution.status === 'running' || execution.status === 'cancelling') && execution.promise) {
-      await execution.promise;
-      await refreshExecutionProgress(execution, true);
-    }
-
-    const latestRun = execution
-      ? await getSubTaskRunRecord(execution.memoryManager || context?.memoryManager, task_id)
-      : runRecord;
-    const status = execution?.status || latestRun?.status || 'failed';
-    const messageCount = latestRun?.messageCount ?? latestRun?.messages?.length ?? execution?.messages?.length ?? 0;
-    const lastActivityAt = execution?.lastActivityAt
-      || toIso(latestRun?.lastActivityAt)
-      || (latestRun?.updatedAt ? toIso(latestRun.updatedAt) : undefined);
-    const lastToolName = execution?.lastToolName || latestRun?.lastToolName;
-    const storage =
-      execution?.storage ||
-      (context?.memoryManager ? 'memory_manager' : 'memory_fallback');
-
-    let output = execution?.output || latestRun?.output;
-    if (!output) {
-      if (status === 'queued' || status === 'running' || status === 'cancelling') {
-        output = `Task is currently ${status}. Use task_output(block=false) to poll progress.`;
-      } else if (status === 'cancelled') {
-        output = 'Task cancelled by user.';
-      } else {
-        output = latestRun?.error || 'Task finished with no output.';
-      }
-    }
-
-    return this.result({
-      success: true,
-      metadata: {
-        task_id: task_id,
-        parent_session_id: execution?.parentSessionId || latestRun?.parentSessionId,
-        child_session_id: execution?.childSessionId || latestRun?.childSessionId,
-        status,
-        turns: execution?.turns || latestRun?.turns,
-        toolsUsed: execution?.toolsUsed || latestRun?.toolsUsed || [],
-        error: execution?.error || latestRun?.error,
-        storage,
-        message_count: messageCount,
-        progress: {
-          message_count: messageCount,
-          last_activity_at: lastActivityAt,
-          last_tool_name: lastToolName,
-        },
-        block_requested: block,
-        createdAt: execution?.createdAt || (latestRun ? new Date(latestRun.createdAt).toISOString() : undefined),
-        startedAt: execution?.startedAt || (latestRun ? new Date(latestRun.startedAt).toISOString() : undefined),
-        finishedAt: execution?.finishedAt || (latestRun?.finishedAt ? new Date(latestRun.finishedAt).toISOString() : undefined),
-      } as any,
-      output,
     });
   }
 }

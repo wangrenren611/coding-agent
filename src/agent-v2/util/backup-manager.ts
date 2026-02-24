@@ -7,6 +7,7 @@
  */
 
 import * as fs from 'fs/promises';
+import * as fsSync from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 
@@ -55,6 +56,26 @@ export class BackupManager {
         this.enabled = config.enabled ?? true;
     }
 
+    isCompatibleConfig(config: BackupManagerConfig): boolean {
+        const expectedBackupDir = config.backupDir || path.join(process.cwd(), '.claude', 'backups');
+        const expectedMaxBackups = config.maxBackups ?? 5;
+        const expectedEnabled = config.enabled ?? true;
+        return (
+            this.backupDir === expectedBackupDir &&
+            this.maxBackups === expectedMaxBackups &&
+            this.enabled === expectedEnabled
+        );
+    }
+
+    private normalizePathKey(filePath: string): string {
+        const absolutePath = path.resolve(filePath);
+        try {
+            return fsSync.realpathSync(absolutePath);
+        } catch {
+            return absolutePath;
+        }
+    }
+
     /**
      * 初始化备份管理器（创建备份目录）
      */
@@ -82,17 +103,19 @@ export class BackupManager {
         }
 
         try {
+            const normalizedPath = this.normalizePathKey(filePath);
+
             // 检查文件是否存在
-            const stats = await fs.stat(filePath).catch(() => null);
+            const stats = await fs.stat(normalizedPath).catch(() => null);
             if (!stats || !stats.isFile()) {
                 return null;
             }
 
             // 读取文件内容
-            const content = await fs.readFile(filePath, 'utf-8');
+            const content = await fs.readFile(normalizedPath, 'utf-8');
 
             // 生成唯一备份 ID
-            const backupId = this.generateBackupId(filePath);
+            const backupId = this.generateBackupId(normalizedPath);
             const backupPath = path.join(this.backupDir, `${backupId}.backup`);
 
             // 写入备份文件
@@ -101,17 +124,17 @@ export class BackupManager {
             // 创建备份信息
             const backupInfo: BackupInfo = {
                 id: backupId,
-                originalPath: filePath,
+                originalPath: normalizedPath,
                 backupPath,
                 createdAt: Date.now(),
                 size: stats.size,
             };
 
             // 添加到索引
-            this.addToIndex(filePath, backupInfo);
+            this.addToIndex(normalizedPath, backupInfo);
 
             // 清理旧备份
-            await this.cleanOldBackups(filePath);
+            await this.cleanOldBackups(normalizedPath);
 
             return backupId;
 
@@ -133,8 +156,10 @@ export class BackupManager {
         }
 
         try {
+            const normalizedPath = this.normalizePathKey(filePath);
+
             // 查找备份信息
-            const backups = this.backupIndex.get(filePath);
+            const backups = this.backupIndex.get(normalizedPath);
             if (!backups) {
                 return false;
             }
@@ -148,7 +173,7 @@ export class BackupManager {
             const content = await fs.readFile(backupInfo.backupPath, 'utf-8');
 
             // 写入原始文件
-            await fs.writeFile(filePath, content, 'utf-8');
+            await fs.writeFile(normalizedPath, content, 'utf-8');
 
             return true;
 
@@ -164,7 +189,8 @@ export class BackupManager {
      * @returns 备份信息列表（按创建时间降序）
      */
     getBackups(filePath: string): BackupInfo[] {
-        const backups = this.backupIndex.get(filePath);
+        const normalizedPath = this.normalizePathKey(filePath);
+        const backups = this.backupIndex.get(normalizedPath);
         return backups
             ? [...backups].sort((a, b) => b.createdAt - a.createdAt)
             : [];
@@ -177,13 +203,14 @@ export class BackupManager {
      * @param backupId 备份 ID
      */
     async deleteBackup(filePath: string, backupId: string): Promise<void> {
-        const backups = this.backupIndex.get(filePath);
+        const normalizedPath = this.normalizePathKey(filePath);
+        const backups = this.backupIndex.get(normalizedPath);
         if (!backups) return;
 
         const backupInfo = backups.find(b => b.id === backupId);
         if (backupInfo) {
             await fs.unlink(backupInfo.backupPath).catch(() => {});
-            this.removeFromIndex(filePath, backupId);
+            this.removeFromIndex(normalizedPath, backupId);
         }
     }
 
@@ -191,14 +218,15 @@ export class BackupManager {
      * 清理文件的所有旧备份
      */
     async clean(filePath: string): Promise<void> {
-        const backups = this.backupIndex.get(filePath);
+        const normalizedPath = this.normalizePathKey(filePath);
+        const backups = this.backupIndex.get(normalizedPath);
         if (!backups) return;
 
         for (const backup of backups) {
             await fs.unlink(backup.backupPath).catch(() => {});
         }
 
-        this.backupIndex.delete(filePath);
+        this.backupIndex.delete(normalizedPath);
     }
 
     /**
@@ -270,6 +298,8 @@ let backupManagerInstance: BackupManager | null = null;
  */
 export function getBackupManager(config?: BackupManagerConfig): BackupManager {
     if (!backupManagerInstance) {
+        backupManagerInstance = new BackupManager(config);
+    } else if (config && !backupManagerInstance.isCompatibleConfig(config)) {
         backupManagerInstance = new BackupManager(config);
     }
     return backupManagerInstance;

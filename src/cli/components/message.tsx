@@ -81,8 +81,6 @@ export function Message({ message }: MessageProps) {
 }
 
 function MessagePartComponent({ part }: { part: MessagePart }) {
-  const { theme } = useTheme();
-
   switch (part.type) {
     case "text":
       return <TextPart content={part.content} />;
@@ -94,6 +92,8 @@ function MessagePartComponent({ part }: { part: MessagePart }) {
       return <ToolResultPart part={part} />;
     case "code-patch":
       return <CodePatchPart part={part} />;
+    case "subagent":
+      return <SubagentPart part={part} />;
     default:
       return null;
   }
@@ -162,12 +162,70 @@ function ToolCallPart({ part }: { part: MessagePart }) {
   };
 
   const toolText = `${statusIcon()} ${part.toolName}${part.toolArgs ? ` ${truncateText(part.toolArgs, 100)}` : ""}`;
+  const hasSubagent = !!part.subagent;
+  const subagentStatusText =
+    part.subagentStatus === "completed"
+      ? "completed"
+      : part.subagentStatus === "error"
+        ? "failed"
+        : "running";
 
   return (
-    <box marginTop={1} flexDirection="row" width="100%">
-      <text fg={statusColor()}>
-        {toolText}
+    <box marginTop={1} flexDirection="column" width="100%">
+      <text fg={statusColor()}>{toolText}</text>
+      {hasSubagent && (
+        <box
+          marginTop={1}
+          border={["left"]}
+          borderColor={theme.primary}
+          paddingLeft={1}
+          flexDirection="column"
+          backgroundColor={theme.backgroundElement}
+        >
+          <text fg={theme.primary}>
+            ↳ subagent {part.subagent!.subagentType} ({subagentStatusText})
+          </text>
+          <text fg={theme.textMuted}>
+            task: {part.subagent!.taskId.slice(0, 12)}... | session: {part.subagent!.childSessionId.slice(-8)}
+          </text>
+          {(part.subagentParts || []).map((subPart, index) => (
+            <MessagePartComponent key={`${part.id}-sub-${subPart.id}-${index}`} part={subPart} />
+          ))}
+        </box>
+      )}
+    </box>
+  );
+}
+
+function SubagentPart({ part }: { part: MessagePart }) {
+  const { theme } = useTheme();
+  if (!part.subagent) return null;
+
+  const statusText =
+    part.subagentStatus === "completed"
+      ? "completed"
+      : part.subagentStatus === "error"
+        ? "failed"
+        : "running";
+
+  return (
+    <box
+      marginTop={1}
+      border={["left"]}
+      borderColor={theme.primary}
+      paddingLeft={1}
+      flexDirection="column"
+      backgroundColor={theme.backgroundElement}
+    >
+      <text fg={theme.primary}>
+        ↳ subagent {part.subagent.subagentType} ({statusText})
       </text>
+      <text fg={theme.textMuted}>
+        task: {part.subagent.taskId.slice(0, 12)}... | session: {part.subagent.childSessionId.slice(-8)}
+      </text>
+      {(part.subagentParts || []).map((subPart, index) => (
+        <MessagePartComponent key={`${part.id}-fallback-${subPart.id}-${index}`} part={subPart} />
+      ))}
     </box>
   );
 }
