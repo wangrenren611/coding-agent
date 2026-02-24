@@ -20,22 +20,38 @@ import {
   createMemoryManager,
   IMemoryManager,
   EventType,
+  SubagentEventMessage,
 } from "../../agent-v2";
 import { ProviderRegistry } from "../../providers";
 import { operatorPrompt } from "../../agent-v2/prompts/operator";
 import BashTool from "../../agent-v2/tool/bash";
 import type { LLMProvider, ModelId } from "../../providers";
 
+const CLI_REQUEST_TIMEOUT_MS = 90 * 1000;
+const CLI_MAX_RETRIES = 2;
+const CLI_RETRY_DELAY_MS = 1500;
+const CLI_MAX_LOOPS = 80;
+
+export interface SubagentInfo {
+  taskId: string;
+  subagentType: string;
+  childSessionId: string;
+}
+
 export interface MessagePart {
   id: string;
-  type: "text" | "tool-call" | "tool-result" | "reasoning" | "code-patch";
+  type: "text" | "tool-call" | "tool-result" | "reasoning" | "code-patch" | "subagent";
   content: string;
   toolName?: string;
   toolArgs?: string;
   toolResult?: string;
   patchPath?: string;
   patchLanguage?: string;
-  status?: "pending" | "success" | "error";
+  status?: "pending" | "success" | "error" | "running" | "completed";
+  /** 子 Agent 信息 */
+  subagent?: SubagentInfo;
+  /** 子 Agent 的消息部分（嵌套） */
+  subagentParts?: MessagePart[];
 }
 
 export interface ChatMessage {
@@ -79,10 +95,188 @@ interface AgentContextValue {
   initialized: boolean;
 }
 
+/**
+ * 将单个 AgentMessage 转换为 MessagePart
+ */
+function agentMessageToPart(msg: AgentMessage): MessagePart | null {
+  switch (msg.type) {
+    case AgentMessageType.TEXT_START:
+    case AgentMessageType.TEXT_DELTA:
+    case AgentMessageType.TEXT_COMPLETE:
+      return {
+        id: `text-${msg.msgId || msg.timestamp}`,
+        type: "text",
+        content: msg.type === AgentMessageType.TEXT_DELTA ? (msg as any).payload.content : "",
+      };
+    case AgentMessageType.REASONING_START:
+    case AgentMessageType.REASONING_DELTA:
+    case AgentMessageType.REASONING_COMPLETE:
+      return {
+        id: `reasoning-${msg.msgId || msg.timestamp}`,
+        type: "reasoning",
+        content: msg.type === AgentMessageType.REASONING_DELTA ? (msg as any).payload.content : "",
+      };
+    case AgentMessageType.TOOL_CALL_CREATED:
+      return {
+        id: `tool-created-${msg.msgId || msg.timestamp}`,
+        type: "tool-call",
+        content: "",
+        toolName: (msg as any).payload.tool_calls[0]?.toolName,
+        toolArgs: (msg as any).payload.tool_calls[0]?.args,
+        status: "pending",
+      };
+    case AgentMessageType.TOOL_CALL_RESULT:
+      return {
+        id: `tool-result-${(msg as any).payload.callId}`,
+        type: "tool-result",
+        content: "",
+        toolResult: typeof (msg as any).payload.result === "string" 
+          ? (msg as any).payload.result 
+          : JSON.stringify((msg as any).payload.result, null, 2),
+        status: (msg as any).payload.status,
+      };
+    case AgentMessageType.TOOL_CALL_STREAM:
+      return {
+        id: `tool-stream-${(msg as any).payload.callId}`,
+        type: "tool-result",
+        content: "",
+        toolResult: (msg as any).payload.output,
+        status: "running",
+      };
+    case AgentMessageType.CODE_PATCH:
+      return {
+        id: `patch-${msg.msgId || msg.timestamp}`,
+        type: "code-patch",
+        content: (msg as any).payload.diff,
+        patchPath: (msg as any).payload.path,
+        patchLanguage: (msg as any).payload.language,
+      };
+    case AgentMessageType.STATUS:
+      return {
+        id: `status-${msg.timestamp}`,
+        type: "text",
+        content: `状态: ${(msg as any).payload.state}${(msg as any).payload.message ? ` - ${(msg as any).payload.message}` : ""}`,
+      };
+    case AgentMessageType.ERROR:
+      return {
+        id: `error-${msg.timestamp}`,
+        type: "text",
+        content: `错误: ${(msg as any).payload.error}`,
+      };
+    case AgentMessageType.USAGE_UPDATE:
+      return null; // Usage 不显示为消息部分
+    default:
+      return null;
+  }
+}
+
+/**
+ * 处理子 Agent 事件冒泡
+ */
+function handleSubagentEvent(parts: MessagePart[], subagentMsg: SubagentEventMessage) {
+  const { task_id, subagent_type, child_session_id, event } = subagentMsg.payload;
+  
+  // 查找是否已存在该子 Agent 的消息部分
+  const existingSubagentIndex = parts.findIndex(
+    (p) => p.type === "subagent" && p.subagent?.taskId === task_id
+  );
+
+  if (event.type === AgentMessageType.STATUS) {
+    const state = (event as any).payload.state;
+    
+    if (state === "running" || state === "thinking") {
+      // 子 Agent 开始运行
+      if (existingSubagentIndex === -1) {
+        parts.push({
+          id: `subagent-${task_id}`,
+          type: "subagent",
+          content: "",
+          status: "running",
+          subagent: {
+            taskId: task_id,
+            subagentType: subagent_type,
+            childSessionId: child_session_id,
+          },
+          subagentParts: [],
+        });
+      }
+    } else if (state === "completed") {
+      // 子 Agent 完成
+      if (existingSubagentIndex !== -1) {
+        parts[existingSubagentIndex] = {
+          ...parts[existingSubagentIndex],
+          status: "completed",
+        };
+      }
+    } else if (state === "failed") {
+      // 子 Agent 失败
+      if (existingSubagentIndex !== -1) {
+        parts[existingSubagentIndex] = {
+          ...parts[existingSubagentIndex],
+          status: "error",
+        };
+      }
+    }
+    return;
+  }
+
+  // 处理嵌套的子 Agent 事件
+  if (event.type === AgentMessageType.SUBAGENT_EVENT) {
+    // 递归处理嵌套子 Agent
+    const nestedSubagent = event as SubagentEventMessage;
+    if (existingSubagentIndex !== -1) {
+      const subagentParts = parts[existingSubagentIndex].subagentParts || [];
+      handleSubagentEvent(subagentParts, nestedSubagent);
+      parts[existingSubagentIndex] = {
+        ...parts[existingSubagentIndex],
+        subagentParts: [...subagentParts],
+      };
+    }
+    return;
+  }
+
+  // 将子 Agent 的事件转换为 MessagePart 并添加到 subagentParts
+  const part = agentMessageToPart(event);
+  if (part && existingSubagentIndex !== -1) {
+    const subagentParts = parts[existingSubagentIndex].subagentParts || [];
+    
+    // 对于增量内容，尝试合并到现有部分
+    if (event.type === AgentMessageType.TEXT_DELTA || event.type === AgentMessageType.REASONING_DELTA) {
+      const existingPartIndex = subagentParts.findIndex((p) => p.id === part.id);
+      if (existingPartIndex !== -1) {
+        subagentParts[existingPartIndex] = {
+          ...subagentParts[existingPartIndex],
+          content: subagentParts[existingPartIndex].content + (event as any).payload.content,
+        };
+      } else {
+        subagentParts.push(part);
+      }
+    } else if (event.type === AgentMessageType.TOOL_CALL_STREAM) {
+      // 工具流式输出合并
+      const existingPartIndex = subagentParts.findIndex((p) => p.id === part.id);
+      if (existingPartIndex !== -1) {
+        subagentParts[existingPartIndex] = {
+          ...subagentParts[existingPartIndex],
+          toolResult: (subagentParts[existingPartIndex].toolResult || "") + (event as any).payload.output,
+        };
+      } else {
+        subagentParts.push(part);
+      }
+    } else {
+      subagentParts.push(part);
+    }
+    
+    parts[existingSubagentIndex] = {
+      ...parts[existingSubagentIndex],
+      subagentParts: [...subagentParts],
+    };
+  }
+}
+
 export const { Provider: AgentProvider, use: useAgent } =
   createSimpleContext<AgentContextValue>("Agent", () => {
     const [config, setConfigState] = useState<AgentConfig>({
-      modelId: (process.env.LLM_MODEL || "qwen3.5-plus") as ModelId,
+      modelId:  "qwen-kimi-k2.5",
       thinking: true,
     });
     const [initialized, setInitialized] = useState(false);
@@ -141,7 +335,7 @@ export const { Provider: AgentProvider, use: useAgent } =
 
           const messages = [...s.messages];
           const parts = [...messages[msgIndex].parts];
-
+     
           switch (msg.type) {
             case AgentMessageType.TEXT_START:
               parts.push({
@@ -295,6 +489,11 @@ export const { Provider: AgentProvider, use: useAgent } =
               });
               break;
 
+            case AgentMessageType.SUBAGENT_EVENT:
+              // 子 Agent 事件冒泡 - 处理子 Agent 事件
+              handleSubagentEvent(parts, msg as SubagentEventMessage);
+              break;
+
             default: {
               const _exhaustive: never = msg;
               void _exhaustive;
@@ -338,7 +537,7 @@ export const { Provider: AgentProvider, use: useAgent } =
           timestamp: Date.now(),
           status: AgentStatus.THINKING,
         };
-
+       
         setState((s) => ({
           ...s,
           status: AgentStatus.RUNNING,
@@ -350,7 +549,7 @@ export const { Provider: AgentProvider, use: useAgent } =
          
           // 创建 Provider
           const provider = ProviderRegistry.createFromEnv(config.modelId||'qwen3.5-plus', {
-            timeout: 1000 * 60 * 5,
+            timeout: CLI_REQUEST_TIMEOUT_MS,
           });
 
           // 生成系统提示
@@ -358,12 +557,15 @@ export const { Provider: AgentProvider, use: useAgent } =
             directory: process.cwd(),
             language: "Chinese",
           });
-
           // 创建 Agent 实例
           agentRef.current = new Agent({
             provider,
             systemPrompt,
             toolRegistry: toolRegistryRef.current,
+            requestTimeout: CLI_REQUEST_TIMEOUT_MS,
+            maxRetries: CLI_MAX_RETRIES,
+            retryDelayMs: CLI_RETRY_DELAY_MS,
+            maxLoops: CLI_MAX_LOOPS,
             // 恢复会话（如果配置了 sessionId）
             sessionId: config.sessionId || state.currentSessionId || undefined,
             stream: true,
@@ -377,7 +579,7 @@ export const { Provider: AgentProvider, use: useAgent } =
             streamCallback: (msg: AgentMessage) => {
               handleStreamMessage(msg, assistantMessage.id);
             },
-          });
+          }); 
 
           // 监听重试事件
           // agentRef.current.on(EventType.TASK_RETRY, (data) => {

@@ -216,7 +216,7 @@ export class TaskTool extends BaseTool<typeof taskRunSchema> {
       if (!run_in_background && subagent) {
         const finishedAt = nowIso();
         const rawMessages = subagent.getMessages();
-        const toolsUsed = extractToolsUsed(rawMessages);
+        const toolsUsed = extractToolsUsed(rawMessages as any);
         const output = `Agent execution failed: ${err.message}`;
         storage = await saveSubTaskRunRecord(memoryManager, buildSubTaskRunData({
           runId: taskId,
@@ -414,7 +414,7 @@ Execution context:
     const execution = await subagent.executeWithResult(prompt);
     const turns = subagent.getLoopCount();
     const rawMessages = subagent.getMessages();
-    const toolsUsed = extractToolsUsed(rawMessages);
+    const toolsUsed = extractToolsUsed(rawMessages as any);
     const normalizedMessages = normalizeMessagesForStorage(rawMessages);
     const failure = execution.failure;
 
@@ -804,7 +804,7 @@ export class TaskStopTool extends BaseTool<typeof taskStopSchema> {
 
     if (execution.promise) {
       const waitResult = await waitWithTimeout(execution.promise, 2000);
-      if (waitResult.timedOut && (execution.status === 'queued' || execution.status === 'running' || execution.status === 'cancelling')) {
+      if (waitResult.timedOut && execution.status === 'cancelling') {
         execution.status = 'cancelled';
         execution.finishedAt = nowIso();
         execution.error = 'TASK_CANCELLED';

@@ -228,8 +228,8 @@ export interface SubagentEventMessage extends BaseAgentMessage {
     subagent_type: string;
     /** 子会话 ID */
     child_session_id: string;
-    /** 原始事件（来自子 Agent） */
-    event: BaseAgentEvent;
+    /** 原始事件（来自子 Agent，可能是另一个 SubagentEventMessage 以支持嵌套） */
+    event: AgentMessage;
   };
   msgId?: string;
 }

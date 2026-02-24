@@ -46,11 +46,13 @@ export function Message({ message }: MessageProps) {
       borderColor={borderColor}
       paddingLeft={1}
       paddingRight={1}
-      paddingTop={0}
-      paddingBottom={0}
+      paddingTop={1}
+      paddingBottom={1}
       marginTop={0}
+      marginBottom={1}
       backgroundColor={isUser ? theme.backgroundElement : theme.backgroundPanel}
       flexDirection="column"
+      flexShrink={0}
     >
       {/* 角色标识 */}
       <text fg={roleColor}>
@@ -58,7 +60,7 @@ export function Message({ message }: MessageProps) {
       </text>
 
       {/* 消息内容 */}
-      <box flexDirection="column">
+      <box flexDirection="column" marginTop={1} width="100%">
         {hasVisibleParts ? (
           message.parts.map((part, index) => (
             <MessagePartComponent key={part.id || index} part={part} />
@@ -101,7 +103,7 @@ function TextPart({ content }: { content: string }) {
   const { theme } = useTheme();
 
   return (
-    <text fg={theme.text}>
+    <text fg={theme.text} width="100%" wrapMode="word">
       {content}
     </text>
   );
@@ -121,7 +123,7 @@ function ReasoningPart({ content }: { content: string }) {
       flexDirection="column"
       backgroundColor={theme.backgroundElement}
     >
-      <text fg={theme.textMuted}>
+      <text fg={theme.textMuted} width="100%" wrapMode="word">
         {"Thinking: " + content}
       </text>
     </box>
@@ -175,18 +177,22 @@ function ToolResultPart({ part }: { part: MessagePart }) {
   const [expanded, setExpanded] = useState(false);
 
   const resultText = useMemo(
-    () => stripAnsi(part.toolResult || ""),
+    () => formatToolResult(stripAnsi(part.toolResult || "")),
     [part.toolResult]
   );
-  const isLong = resultText.split("\n").length > 10;
+  const normalizedText = useMemo(
+    () => clampLongLines(resultText, 140),
+    [resultText]
+  );
+  const isLong = normalizedText.split("\n").length > 12;
 
   const displayText = useMemo(() => {
-    const lines = resultText.split("\n");
+    const lines = normalizedText.split("\n");
     if (expanded || !isLong) {
-      return resultText;
+      return normalizedText;
     }
-    return [...lines.slice(0, 10), "..."].join("\n");
-  }, [resultText, expanded, isLong]);
+    return [...lines.slice(0, 12), "..."].join("\n");
+  }, [normalizedText, expanded, isLong]);
 
   const borderColor = part.status === "error" ? theme.error : theme.border;
   const textColor = part.status === "error" ? theme.error : theme.textMuted;
@@ -200,7 +206,7 @@ function ToolResultPart({ part }: { part: MessagePart }) {
       flexDirection="column"
       backgroundColor={theme.backgroundElement}
     >
-      <text fg={textColor}>
+      <text fg={textColor} width="100%" wrapMode="word">
         {displayText}
       </text>
       {isLong && (
@@ -234,7 +240,7 @@ function CodePatchPart({ part }: { part: MessagePart }) {
       backgroundColor={theme.backgroundElement}
     >
       <text fg={theme.accent}>{header}</text>
-      <text fg={theme.textMuted}>{preview}</text>
+      <text fg={theme.textMuted} width="100%" wrapMode="word">{preview}</text>
     </box>
   );
 }
@@ -242,4 +248,55 @@ function CodePatchPart({ part }: { part: MessagePart }) {
 function truncateText(text: string, maxLength: number): string {
   if (text.length <= maxLength) return text;
   return text.slice(0, maxLength) + "...";
+}
+
+function formatToolResult(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
+    return raw;
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed) as {
+      result?: { output?: unknown; metadata?: { command?: unknown }; success?: unknown };
+      metadata?: { command?: unknown };
+      output?: unknown;
+    };
+
+    const output =
+      typeof parsed.result?.output === "string"
+        ? parsed.result.output
+        : typeof parsed.output === "string"
+          ? parsed.output
+          : null;
+
+    const command =
+      typeof parsed.result?.metadata?.command === "string"
+        ? parsed.result.metadata.command
+        : typeof parsed.metadata?.command === "string"
+          ? parsed.metadata.command
+          : null;
+
+    if (!output && !command) {
+      return raw;
+    }
+
+    if (command && output) {
+      return `$ ${command}\n${output}`;
+    }
+
+    return output || raw;
+  } catch {
+    return raw;
+  }
+}
+
+function clampLongLines(text: string, maxLineLength: number): string {
+  return text
+    .split("\n")
+    .map((line) => {
+      if (line.length <= maxLineLength) return line;
+      return `${line.slice(0, maxLineLength)}...`;
+    })
+    .join("\n");
 }

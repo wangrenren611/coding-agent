@@ -573,7 +573,7 @@ All operations require:
         const { line, character } = sourceFile.getLineAndCharacterOfPosition(item.textSpan.start);
         return {
           name: item.name,
-          kind: item.kind,
+          kind: item.kind as string,
           line: line + 1,
           character: character + 1,
         };

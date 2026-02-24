@@ -135,11 +135,11 @@ export function Home() {
           ) : (
             <box
               width="100%"
-              height="100%"
-              minHeight="100%"
+              minHeight={0}
               paddingLeft={0}
               paddingRight={0}
-              paddingBottom={0}
+              paddingTop={1}
+              paddingBottom={1}
               flexDirection="column"
             >
               {messages.map((message) => (
@@ -196,7 +196,7 @@ export function Home() {
       >
         <text fg={theme.textMuted}>cwd: {process.cwd()}</text>
         <text fg={theme.textMuted}>
-          session: {agent.state.currentSessionId?.slice(0, 8) ?? "new"}
+          session: {agent.state.currentSessionId?.slice(-1, 8) ?? "new"}
         </text>
       </box>
     </box>

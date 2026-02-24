@@ -4,7 +4,7 @@
  * 统一管理所有 Agent 消息事件的发射逻辑，消除重复代码
  */
 
-import { AgentMessageType } from './stream-types';
+import { AgentMessageType, AgentMessage } from './stream-types';
 import { AgentStatus } from './types';
 import type { StreamCallback } from './types';
 import type { Usage } from '../../providers';
@@ -31,6 +31,16 @@ export interface AgentEmitterConfig {
     /** 时间戳提供函数 */
     getTimestamp: () => number;
 }
+
+/**
+ * emit 方法使用的消息类型（不包含 sessionId 和 timestamp，由 emit 方法自动添加）
+ * 使用索引签名来支持各种消息类型
+ */
+type EmitMessage = {
+    type: AgentMessageType;
+    payload: unknown;
+    msgId?: string;
+};
 
 /**
  * Agent 事件发射器
@@ -240,11 +250,11 @@ export class AgentEmitter {
 
     // ==================== 私有方法 ====================
 
-    private emit(message: Parameters<NonNullable<StreamCallback>>[0]): void {
+    private emit(message: EmitMessage): void {
         this.config.streamCallback?.({
             ...message,
             sessionId: this.config.sessionId,
             timestamp: this.config.getTimestamp(),
-        } as Parameters<StreamCallback>[0]);
+        } as AgentMessage);
     }
 }

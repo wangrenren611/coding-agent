@@ -25,6 +25,8 @@ export {
 export { AgentMessageType } from './agent/stream-types';
 export type {
   AgentMessage,
+  SubagentEventMessage,
+  BaseAgentEvent,
 } from './agent/stream-types';
 
 // 事件总线

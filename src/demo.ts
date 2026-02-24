@@ -6,8 +6,63 @@
 
 // =============================================================================
 // Provider 模块导出
+// 注意：排除 StreamCallback，使用 agent-v2 中的 StreamCallback
 // =============================================================================
-export * from './providers';
+export {
+  // Registry
+  Models,
+  MODEL_CONFIGS,
+  ProviderRegistry,
+  type ProviderType,
+  type ModelId,
+  // Provider
+  LLMProvider,
+  type BaseProviderConfig,
+  // OpenAI Compatible
+  OpenAICompatibleProvider,
+  type OpenAICompatibleConfig,
+  // Adapters
+  BaseAPIAdapter,
+  StandardAdapter,
+  // HTTP
+  HTTPClient,
+  StreamParser,
+  // Errors
+  LLMError,
+  LLMRetryableError,
+  LLMRateLimitError,
+  LLMPermanentError,
+  LLMAuthError,
+  LLMNotFoundError,
+  LLMBadRequestError,
+  LLMAbortedError,
+  createErrorFromStatus,
+  isRetryableError,
+  isPermanentError,
+  isAbortedError,
+  // Types (excluding StreamCallback)
+  type ToolCall,
+  type Role,
+  type TextContentPart,
+  type ImageUrlContentPart,
+  type InputAudioContentPart,
+  type InputVideoContentPart,
+  type FileContentPart,
+  type InputContentPart,
+  type MessageContent,
+  type Usage,
+  type StreamOptions,
+  type BaseLLMMessage,
+  type LLMRequestMessage,
+  type FinishReason,
+  type LLMResponse,
+  type Chunk,
+  type Tool,
+  type LLMGenerateOptions,
+  type LLMRequest,
+  // StreamCallback with alias to avoid conflict
+  type StreamCallback as LLMStreamCallback,
+} from './providers';
 
 // =============================================================================
 // Agent-v2 模块导出

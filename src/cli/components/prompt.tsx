@@ -11,6 +11,7 @@ import React, {
   forwardRef,
 } from "react";
 import { useKeyboard } from "@opentui/react";
+import type { TextareaRenderable } from "@opentui/core";
 import { useTheme } from "../context/theme";
 import { useAgent } from "../context/agent";
 import { AgentStatus } from "../../agent-v2";
@@ -31,12 +32,12 @@ export interface PromptProps {
   placeholder?: string;
 }
 
-interface PromptTextareaRef {
-  plainText?: string;
-  clear?: () => void;
-  focus?: () => void;
-  blur?: () => void;
-}
+const PROMPT_TEXTAREA_KEYBINDINGS = [
+  { name: "return", action: "submit" as const },
+  { name: "linefeed", action: "submit" as const },
+  { name: "return", shift: true, action: "newline" as const },
+  { name: "linefeed", shift: true, action: "newline" as const },
+];
 
 export const Prompt = forwardRef<PromptRef, PromptProps>(
   (props: PromptProps, ref) => {
@@ -45,7 +46,7 @@ export const Prompt = forwardRef<PromptRef, PromptProps>(
     const [input, setInput] = useState("");
     const [textareaKey, setTextareaKey] = useState(0);
     const [focused, setFocused] = useState(true);
-    const textareaRef = useRef<PromptTextareaRef | null>(null);
+    const textareaRef = useRef<TextareaRenderable | null>(null);
     const submittingRef = useRef(false);
 
     const isRunning = () =>
@@ -74,8 +75,8 @@ export const Prompt = forwardRef<PromptRef, PromptProps>(
 
     const handleSubmit = async () => {
       if (submittingRef.current) return;
-      const value = getInputValue().trim();
-      if (!value || isRunning()) return;
+      const value = getInputValue().replace(/\r?\n$/, "").trim();
+      if (!value) return;
 
       submittingRef.current = true;
       // Clear immediately after submit so UI reflects "message sent" right away.
@@ -92,8 +93,8 @@ export const Prompt = forwardRef<PromptRef, PromptProps>(
     useKeyboard((e) => {
       if (props.disabled) return;
 
-      if (e.name === "return" && !e.shift) {
-        handleSubmit();
+      if ((e.name === "return" || e.name === "linefeed") && !e.shift) {
+        void handleSubmit();
         return;
       }
 
@@ -177,6 +178,7 @@ export const Prompt = forwardRef<PromptRef, PromptProps>(
           ref={textareaRef}
           width="100%"
           initialValue={input}
+          keyBindings={PROMPT_TEXTAREA_KEYBINDINGS}
           onContentChange={handleContentChange}
           onSubmit={handleSubmit}
           placeholder={

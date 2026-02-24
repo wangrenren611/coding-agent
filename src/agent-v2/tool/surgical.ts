@@ -119,22 +119,42 @@ export class SurgicalEditTool extends BaseTool<any> {
 
   description = `Performs exact string replacements in files.
 
-CRITICAL REQUIREMENTS:
-1. You MUST read the file with read_file BEFORE using this tool
-2. oldText MUST match the file content EXACTLY:
-   - Include ALL leading spaces and tabs (indentation)
-   - Include ALL trailing spaces
-   - DO NOT add or remove any characters
-   - DO NOT guess the content - copy it exactly from read_file output
-3. The line number MUST match where the content appears in read_file output
+=============================================================================
+CRITICAL WORKFLOW (MUST FOLLOW TO AVOID FAILURES):
 
-COMMON MISTAKES (will cause failure):
+STEP 1: ALWAYS read file BEFORE using precise_replace
+  - Call read_file to get the CURRENT file content
+  - File content may have changed from previous modifications
+  - NEVER guess or assume the content - always read first
+
+STEP 2: Copy oldText EXACTLY from read_file output
+  - Include ALL leading spaces/tabs (indentation)
+  - Include ALL trailing spaces  
+  - Copy character-for-character from read_file output
+  - Verify line number matches read_file range output
+
+STEP 3: For MULTIPLE modifications to SAME file:
+  - PREFERRED: Use batch_replace (single call, all changes based on same snapshot)
+  - AVOID: Multiple precise_replace calls (each re-reads file, may fail due to content changes)
+
+=============================================================================
+COMMON FAILURE CAUSES:
 - Missing indentation: "key": "value" vs "    \"key\": \"value\""
-- Wrong line number: verify against read_file range
+- Wrong line number: verify against read_file range output
+- Stale content: file was modified by previous tool call - re-read first
 - Extra/missing characters: copy-paste carefully from read_file
 
-When this tool fails, it shows the actual content at the specified line.
-Use that content EXACTLY (copy it verbatim) for your retry.`;
+WHEN precise_replace FAILS:
+1. The error shows actual content at the specified line
+2. Call read_file again to get updated content
+3. Copy the EXACT actual content for your retry
+4. Better: Use batch_replace for multiple changes
+
+TOOL SELECTION GUIDE:
+- Single small change + read file first → precise_replace
+- Multiple changes to same file → batch_replace (PREFERRED, 0% failure rate)
+- Large refactoring → write_file
+`;
 
   schema = z.object({
     filePath: z.string().describe("The absolute or relative path to the file"),

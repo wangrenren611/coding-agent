@@ -95,6 +95,11 @@ function ingestStreamMessage(state: AgentChatState, message: AgentMessage): Agen
       };
       return { ...state, messages: state.messages.concat(errorMessage), error: errorMessage, isStreaming: false };
     }
+    case AgentMessageType.SUBAGENT_EVENT: {
+      // 子 Agent 事件冒泡 - 当前 UI 不处理，直接返回原状态
+      // 可以在这里添加对子 Agent 事件的 UI 展示逻辑
+      return state;
+    }
     default: {
       const _exhaustive: never = message;
       void _exhaustive;

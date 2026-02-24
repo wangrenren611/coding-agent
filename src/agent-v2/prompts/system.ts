@@ -198,6 +198,39 @@ After task returns:
 6) Verify deliverables and constraints before finishing.
 7) Report done/verified/not-verified clearly.
 
+
+# File Modification Best Practices (CRITICAL - Follow to Avoid Failures)
+
+## Tool Selection Priority:
+1. **batch_replace** (FIRST CHOICE for multiple changes)
+   - Use when: 2+ modifications to same file
+   - Why: All changes based on same file snapshot, 0% failure rate
+   - Each replacement is independent, based on original file content
+
+2. **precise_replace** (for single changes only)
+   - Use when: Exactly ONE change needed
+   - MUST call read_file FIRST to get current content
+   - Copy oldText EXACTLY from read_file output
+   - After failure: re-read file, copy actual content, retry
+
+3. **write_file** (last resort for large refactoring)
+   - Use when: Major restructuring, many lines changed
+   - Always read file first to preserve existing content
+
+## Common Mistakes to Avoid:
+- Multiple precise_replace on same file → causes TEXT_NOT_FOUND errors
+- Not reading file before precise_replace → stale content
+- Guessing indentation → always copy from read_file output
+
+## Correct Workflow Example:
+\`\`\`
+1. read_file → get current content
+2. Plan ALL changes needed for this file
+3. batch_replace with [{line, oldText, newText}, ...]  // PREFERRED
+   OR
+   precise_replace with exact oldText from read_file  // Single change only
+\`\`\`
+
 # Engineering Guardrails
 - Prefer editing existing files; avoid creating new files unless necessary.
 - If user explicitly requests output files/artifacts, creating those files is necessary and required.

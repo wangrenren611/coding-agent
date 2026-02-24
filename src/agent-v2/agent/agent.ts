@@ -93,8 +93,6 @@ export class Agent {
     private readonly streamCallback?: StreamCallback;
     private readonly thinking?: boolean;
     private readonly requestTimeoutMs?: number;
-    private readonly validationOptions?: Partial<ResponseValidatorOptions>;
-    private readonly onValidationViolation?: (result: ValidationResult) => void;
     private pendingRetryReason: string | null = null;
 
     // 内部组件
@@ -112,8 +110,6 @@ export class Agent {
         this.streamCallback = config.streamCallback;
         this.thinking = config.thinking;
         this.requestTimeoutMs = this.normalizeMs(config.requestTimeout);
-        this.validationOptions = config.validationOptions;
-        this.onValidationViolation = config.onValidationViolation;
 
         this.timeProvider = config.timeProvider ?? new DefaultTimeProvider();
         this.eventBus = new EventBus();
@@ -590,8 +586,31 @@ export class Agent {
 
     private handleTextResponse(response: LLMResponse, messageId: string, usage?: Usage): void {
         if (this.stream) {
-            // 流式模式下消息已通过 onMessageUpdate 更新
-            this.updateMessageFinishReason(messageId, getResponseFinishReason(response));
+            const finishReason = getResponseFinishReason(response);
+            const existing = this.session.getMessageById(messageId);
+
+            // 标准流式路径：消息已通过 onMessageUpdate 更新
+            if (existing) {
+                this.updateMessageFinishReason(messageId, finishReason);
+                return;
+            }
+
+            // 兜底路径：某些 provider 在 stream=true 时直接返回完整响应（非增量）。
+            // 这种情况下需要主动发出文本事件并落库，否则 UI 会只显示 completed 而无正文。
+            const content = response.choices?.[0]?.message?.content || '';
+            if (hasContent(content)) {
+                this.emitter.emitTextStart(messageId);
+                this.emitter.emitTextDelta(contentToText(content), messageId);
+                this.emitter.emitTextComplete(messageId);
+                this.session.addMessage({
+                    messageId,
+                    role: 'assistant',
+                    content,
+                    finish_reason: finishReason,
+                    type: 'text',
+                    ...(usage && { usage }),
+                });
+            }
             return;
         }
         // 非流式模式需要手动创建消息
@@ -640,7 +659,10 @@ export class Agent {
         
         // 检查工具执行结果
         if (!executionResult.success) {
-            console.warn(`[Agent] Tool execution partially or fully failed: ${executionResult.toolCount} tools executed`);
+            this.emitter.emitStatus(
+                AgentStatus.RUNNING,
+                `[warn] Tool execution partially or fully failed: ${executionResult.toolCount} tools executed`
+            );
         }
     }
 
@@ -732,7 +754,8 @@ export class Agent {
         try {
             await this.session.sync();
         } catch (error) {
-            console.error('[Agent] Failed to sync session:', error);
+            const reason = error instanceof Error ? error.message : String(error);
+            this.emitter.emitError(`Failed to sync session: ${reason}`, 'session-sync');
         }
     }
 

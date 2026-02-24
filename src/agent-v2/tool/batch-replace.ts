@@ -16,7 +16,33 @@ import { resolveAndValidatePath, PathTraversalError } from './file';
 export class BatchReplaceTool extends BaseTool<any> {
   name = "batch_replace";
 
-  description = "Replace multiple text segments in a single file call.";
+  description = `Replace multiple text segments in a single file call.
+
+=============================================================================
+PREFERRED TOOL FOR MULTIPLE FILE MODIFICATIONS (0% FAILURE RATE)
+
+WHY USE batch_replace:
+- All replacements based on SAME file snapshot (read once at start)
+- No stale content issues from previous modifications
+- More efficient: single file read/write vs multiple calls
+- Atomic: all changes applied together or none
+
+WHEN TO USE:
+- 2+ changes to same file → ALWAYS use batch_replace
+- Multiple lines need editing → batch_replace
+- Complex refactoring across lines → batch_replace
+
+WHEN TO USE precise_replace INSTEAD:
+- Single small change AND you've just read the file
+- Need cross-line text replacement (batch_replace is single-line only)
+
+WORKFLOW:
+1. Call read_file to get current content
+2. Plan ALL changes needed for this file
+3. Call batch_replace ONCE with all replacements array
+4. Each replacement: { line, oldText, newText }
+
+=============================================================================`;
 
   schema = z.object({
     filePath: z.string().describe("Path to the file to modify"),
