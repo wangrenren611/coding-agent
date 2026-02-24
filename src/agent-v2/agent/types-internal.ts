@@ -162,7 +162,7 @@ export function isTextDeltaMessage(message: AgentMessage): message is AgentMessa
  */
 export function isStatusMessage(message: AgentMessage): message is AgentMessage & {
     type: AgentMessageType.STATUS;
-    payload: { state: string; message: string };
+    payload: { state: string; message?: string };
 } {
     return message.type === AgentMessageType.STATUS;
 }

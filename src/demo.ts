@@ -22,7 +22,7 @@ import { ToolRegistry } from './agent-v2/tool/registry';
 import { createMemoryManager } from './agent-v2/memory';
 import { ProviderRegistry } from './providers/registry';
 import { operatorPrompt } from './agent-v2/prompts/operator';
-import type { AgentMessage } from './agent-v2/agent/stream-types';
+import { AgentMessageType, type AgentMessage } from './agent-v2/agent/stream-types';
 import BashTool from './agent-v2/tool/bash';
 import dotenv from 'dotenv';
 
@@ -40,35 +40,52 @@ const RESET = '\x1b[0m';
  */
 function handleStreamMessage(message: AgentMessage) {
     switch (message.type) {
-        case 'reasoning-start':
+        case AgentMessageType.REASONING_START:
             process.stdout.write(`${GRAY}┌─ 💭 思考过程${RESET}\n`);
             process.stdout.write(`${GRAY}│${RESET} `);
             break;
-        case 'reasoning-delta':
+        case AgentMessageType.REASONING_DELTA:
             process.stdout.write(message.payload.content);
             break;
-        case 'reasoning-complete':
+        case AgentMessageType.REASONING_COMPLETE:
             process.stdout.write('\n');
             process.stdout.write(`${GRAY}└─ 思考完成${RESET}\n\n`);
             break;
-        case 'text-start':
+        case AgentMessageType.TEXT_START:
             process.stdout.write(`${GREEN}┌─ 🤖 回复${RESET}\n`);
             process.stdout.write(`${GREEN}│${RESET} `);
             break;
-        case 'text-delta':
+        case AgentMessageType.TEXT_DELTA:
             process.stdout.write(message.payload.content);
             break;
-        case 'text-complete':
+        case AgentMessageType.TEXT_COMPLETE:
             process.stdout.write('\n');
             process.stdout.write(`${GREEN}└─ 回复完成${RESET}\n`);
             break;
-        case 'tool-call-created':
+        case AgentMessageType.TOOL_CALL_CREATED:
             const tools = message.payload.tool_calls.map((call) => 
                 `${call.toolName}(${call.args.slice(0, 50)}${call.args.length > 50 ? '...' : ''})`
             );
             console.log(`${YELLOW}🔧 工具调用:${RESET}`, tools.join(', '));
             break;
-        case 'status':
+        case AgentMessageType.TOOL_CALL_STREAM:
+            if (message.payload.output) {
+                process.stdout.write(`${GRAY}${message.payload.output}${RESET}`);
+            }
+            break;
+        case AgentMessageType.TOOL_CALL_RESULT:
+            console.log(`${YELLOW}🔧 工具结果 [${message.payload.callId}]${RESET}`);
+            break;
+        case AgentMessageType.CODE_PATCH:
+            console.log(`${YELLOW}📝 代码补丁:${RESET} ${message.payload.path}`);
+            break;
+        case AgentMessageType.USAGE_UPDATE:
+            console.log(`${CYAN}📊 Token:${RESET} ${message.payload.usage.total_tokens}`);
+            break;
+        case AgentMessageType.ERROR:
+            console.error(`❌ ${message.payload.error}`);
+            break;
+        case AgentMessageType.STATUS:
             console.log(`\n📋 状态: ${message.payload.state}`);
             break;
         default:

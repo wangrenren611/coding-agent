@@ -105,32 +105,37 @@ export class LLMCaller {
 
         // 合并超时信号
         const requestTimeout = this.config.requestTimeoutMs ?? this.config.provider.getTimeTimeout();
-        const timeoutSignal = AbortSignal.any([
+        const mergedAbortSignal = AbortSignal.any([
             this.abortController.signal,
             AbortSignal.timeout(requestTimeout),
             ...(abortSignal ? [abortSignal] : []),
+            ...(options?.abortSignal ? [options.abortSignal] : []),
         ]);
 
         // 合并配置和传入的 options
         const llmOptions: LLMGenerateOptions = {
             tools,
-            abortSignal: timeoutSignal,
             thinking: this.config.thinking,
             stream: this.config.stream,
             // 允许传入的 options 覆盖配置
             ...options,
+            // 始终以合并后的信号为准，避免外部覆盖内部超时/中断保护
+            abortSignal: mergedAbortSignal,
         };
 
-        let response: LLMResponse;
+        try {
+            let response: LLMResponse;
 
-        if (llmOptions.stream ?? this.config.stream) {
-            response = await this.executeStream(messages, llmOptions, messageId);
-        } else {
-            response = await this.executeNormal(messages, llmOptions);
+            if (llmOptions.stream ?? this.config.stream) {
+                response = await this.executeStream(messages, llmOptions, messageId);
+            } else {
+                response = await this.executeNormal(messages, llmOptions);
+            }
+
+            return { response, messageId };
+        } finally {
+            this.cleanup();
         }
-
-        this.cleanup();
-        return { response, messageId };
     }
 
     /**

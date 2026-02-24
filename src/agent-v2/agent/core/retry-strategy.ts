@@ -169,7 +169,7 @@ export function createDefaultRetryStrategy(overrides?: Partial<RetryStrategyConf
     return new RetryStrategy({
         maxRetries: 10,
         maxCompensationRetries: 1,
-        defaultRetryDelayMs: 1000 * 60 * 10, // 10 分钟
+        defaultRetryDelayMs: 5 * 1000, // 5 秒
         useExponentialBackoff: false,
         ...overrides,
     });

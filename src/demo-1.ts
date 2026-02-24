@@ -180,7 +180,7 @@ async function demo1() {
     let agent: Agent | undefined;
     try {
         agent = new Agent({
-            provider: ProviderRegistry.createFromEnv('qwen3.5-plus',{
+            provider: ProviderRegistry.createFromEnv('glm-5',{
                 timeout: 1000*60*5,
             }),
             systemPrompt: operatorPrompt({
@@ -188,11 +188,13 @@ async function demo1() {
                 language: 'Chinese',
             }),
             // 如需恢复会话，请取消注释并填入有效 sessionId
-           sessionId: 'agent-5',
+        //    sessionId: 'agent-7',
+            // sessionId: 'agent-8',
+            sessionId: 'agent-9',
             stream: true,
             thinking: true,  // 启用 thinking 模式，支持推理内容
             enableCompaction: true,  // 启用上下文压缩
-            // sessionId: '063347b3-d379-4d0b-8674-d65a1936a469',
+            // sessionId: '063347b3-d379-4d0b-8674-d65a1936a469',//72dba8df-ac93-44f1-b385-0f5b47af373c
             compactionConfig: {
                 keepMessagesNum: 40,    // 保留最近 40 条消息
                 triggerRatio: 0.90,     // Token 使用达 90% 时触发压缩
@@ -202,9 +204,9 @@ async function demo1() {
         });
 
         // EventBus 监听重试事件
-        agent.on(EventType.TASK_RETRY, (data) => {
-            console.log('🔄 任务重试中:', data);
-        });
+        // agent.on(EventType.TASK_RETRY, (data) => {
+        //     console.log('🔄 任务重试中:', data);
+        // });
 
         // 执行查询
         const query = process.argv[2] || '你好，请介绍一下你自己';

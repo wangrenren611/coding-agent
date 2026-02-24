@@ -96,4 +96,17 @@ export const MODEL_DEFINITIONS: Record<ModelId, Omit<ModelConfig, 'apiKey'>> = {
         LLMMAX_TOKENS: 1024 * 1000,
         features: ["streaming", "function-calling"],
     },
+    "qwen-kimi-k2.5":{
+        id: "qwen-kimi-k2.5",
+        provider: "qwen",
+        name: "qwen kimi k2.5",
+        baseURL: "https://coding.dashscope.aliyuncs.com/v1",
+        endpointPath: "/chat/completions",
+        envApiKey: "QEPSEEK_API_KEY",
+        envBaseURL: "QEPSEEK_API_BASE",
+        model: "kimi-k2.5",
+        max_tokens: 8000,
+        LLMMAX_TOKENS: 1024 * 1000,
+        features: ["streaming", "function-calling"],
+    }
 };

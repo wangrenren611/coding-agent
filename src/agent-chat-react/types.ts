@@ -5,6 +5,12 @@ export type { AgentMessage, AgentStatus };
 
 export type ToolExecutionStatus = "success" | "error";
 
+export interface UITokenUsage {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+}
+
 export interface UIToolCallResult {
   status: ToolExecutionStatus;
   output: string | null;
@@ -24,8 +30,11 @@ export interface UIAssistantMessage {
   kind: "assistant";
   role: "assistant";
   content: string;
+  reasoning: string;
   phase: "streaming" | "completed";
   toolCalls: UIToolCall[];
+  usage?: UITokenUsage;
+  cumulativeUsage?: UITokenUsage;
   createdAt: number;
   updatedAt: number;
 }

@@ -37,6 +37,7 @@ export interface AgentStateSnapshot {
     status: AgentStatus;
     loopCount: number;
     retryCount: number;
+    totalRetryCount: number;
     compensationRetryCount: number;
     taskStartTime: number;
     nextRetryDelayMs: number;
@@ -55,6 +56,7 @@ export class AgentState {
     private _status: AgentStatus = AgentStatus.IDLE;
     private _loopCount: number = 0;
     private _retryCount: number = 0;
+    private _totalRetryCount: number = 0;
     private _compensationRetryCount: number = 0;
     private _taskStartTime: number = 0;
     private _nextRetryDelayMs: number;
@@ -81,6 +83,10 @@ export class AgentState {
 
     get retryCount(): number {
         return this._retryCount;
+    }
+
+    get totalRetryCount(): number {
+        return this._totalRetryCount;
     }
 
     get compensationRetryCount(): number {
@@ -130,7 +136,7 @@ export class AgentState {
      * 检查是否处于忙碌状态
      */
     isBusy(): boolean {
-        return [AgentStatus.RUNNING, AgentStatus.THINKING].includes(this._status);
+        return [AgentStatus.RUNNING, AgentStatus.THINKING, AgentStatus.RETRYING].includes(this._status);
     }
 
     /**
@@ -156,6 +162,7 @@ export class AgentState {
         this._taskStartTime = this.timeProvider.getCurrentTime();
         this._loopCount = 0;
         this._retryCount = 0;
+        this._totalRetryCount = 0;
         this._compensationRetryCount = 0;
         this._nextRetryDelayMs = this.config.defaultRetryDelayMs;
         this._lastFailure = undefined;
@@ -185,6 +192,7 @@ export class AgentState {
      */
     recordRetryableError(retryDelayMs?: number): void {
         this._retryCount++;
+        this._totalRetryCount++;
         this._nextRetryDelayMs = retryDelayMs ?? this.config.defaultRetryDelayMs;
     }
 
@@ -249,6 +257,7 @@ export class AgentState {
             status: this._status,
             loopCount: this._loopCount,
             retryCount: this._retryCount,
+            totalRetryCount: this._totalRetryCount,
             compensationRetryCount: this._compensationRetryCount,
             taskStartTime: this._taskStartTime,
             nextRetryDelayMs: this._nextRetryDelayMs,
@@ -259,10 +268,12 @@ export class AgentState {
     /**
      * 获取执行统计
      */
-    getStats(): { loops: number; retries: number; duration: number } {
+    getStats(): { loops: number; retries: number; totalRetries: number; maxRetries: number; duration: number } {
         return {
             loops: this._loopCount,
             retries: this._retryCount,
+            totalRetries: this._totalRetryCount,
+            maxRetries: this.config.maxRetries,
             duration: this.timeProvider.getCurrentTime() - this._taskStartTime,
         };
     }

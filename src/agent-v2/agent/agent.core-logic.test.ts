@@ -18,6 +18,7 @@ import { LLMCaller } from './core/llm-caller';
 import { ToolExecutor } from './core/tool-executor';
 import { Compaction } from '../session/compaction';
 import { createMemoryManager } from '../memory';
+import { EventType } from '../eventbus';
 import type { LLMGenerateOptions, LLMResponse } from '../../providers/types';
 import type { Message } from '../session/types';
 
@@ -181,6 +182,16 @@ describe('AgentState 状态管理测试', () => {
             state.recordRetryableError();
             expect(state.needsRetry()).toBe(true);
         });
+
+        it('totalRetryCount 应累计重试次数且不被 recordSuccess 清零', () => {
+            state.startTask();
+            state.recordRetryableError();
+            state.recordRetryableError();
+            expect(state.totalRetryCount).toBe(2);
+            state.recordSuccess();
+            expect(state.retryCount).toBe(0);
+            expect(state.totalRetryCount).toBe(2);
+        });
     });
 
     describe('补偿重试逻辑', () => {
@@ -252,6 +263,12 @@ describe('AgentState 状态管理测试', () => {
             state.startTask();
             state.completeTask();
             expect(state.isBusy()).toBe(false);
+        });
+
+        it('RETRYING 状态应该是 busy', () => {
+            state.startTask();
+            state.setStatus(AgentStatus.RETRYING);
+            expect(state.isBusy()).toBe(true);
         });
     });
 });
@@ -492,6 +509,101 @@ describe('Agent 重试机制测试', () => {
             expect(result).toBeDefined();
             expect(failCount).toBe(2);
         }, 15000);
+
+        it('executeWithResult 应返回累计重试次数', async () => {
+            let failCount = 0;
+            const originalGenerate = mockProvider.generate.bind(mockProvider);
+            const { LLMRetryableError } = await import('../../providers');
+
+            mockProvider.generate = async (messages, options) => {
+                if (failCount < 2) {
+                    failCount++;
+                    throw new LLMRetryableError('Server error', 10, 'SERVER_500');
+                }
+                return originalGenerate(messages, options);
+            };
+
+            const agent = new Agent({
+                provider: mockProvider as any,
+                systemPrompt: 'Test',
+                stream: false,
+                memoryManager,
+                maxRetries: 5,
+                retryDelayMs: 10,
+            });
+
+            const result = await agent.executeWithResult('Hello');
+            expect(result.status).toBe('completed');
+            expect(result.retryCount).toBe(2);
+        });
+
+        it('应该发出 TASK_START/TASK_RETRY/TASK_SUCCESS 事件', async () => {
+            let failCount = 0;
+            const originalGenerate = mockProvider.generate.bind(mockProvider);
+            const { LLMRetryableError } = await import('../../providers');
+
+            mockProvider.generate = async (messages, options) => {
+                if (failCount < 1) {
+                    failCount++;
+                    throw new LLMRetryableError('Transient timeout', 10, 'TIMEOUT');
+                }
+                return originalGenerate(messages, options);
+            };
+
+            const starts: unknown[] = [];
+            const retries: unknown[] = [];
+            const successes: unknown[] = [];
+
+            const agent = new Agent({
+                provider: mockProvider as any,
+                systemPrompt: 'Test',
+                stream: false,
+                memoryManager,
+                maxRetries: 3,
+                retryDelayMs: 10,
+            });
+
+            agent.on(EventType.TASK_START, (data) => starts.push(data));
+            agent.on(EventType.TASK_RETRY, (data) => retries.push(data));
+            agent.on(EventType.TASK_SUCCESS, (data) => successes.push(data));
+
+            await agent.execute('Hello');
+
+            expect(starts.length).toBe(1);
+            expect(retries.length).toBe(1);
+            expect(successes.length).toBe(1);
+            expect(retries[0]).toEqual(
+                expect.objectContaining({
+                    retryCount: 1,
+                    maxRetries: 3,
+                    reason: expect.stringContaining('Transient timeout'),
+                })
+            );
+            expect(successes[0]).toEqual(
+                expect.objectContaining({
+                    totalRetries: 1,
+                })
+            );
+        });
+
+        it('超过最大重试后错误信息应包含最后一次重试原因', async () => {
+            const { LLMRetryableError } = await import('../../providers');
+
+            mockProvider.generate = async () => {
+                throw new LLMRetryableError('Gateway timeout', 10, 'TIMEOUT');
+            };
+
+            const agent = new Agent({
+                provider: mockProvider as any,
+                systemPrompt: 'Test',
+                stream: false,
+                memoryManager,
+                maxRetries: 0,
+                retryDelayMs: 10,
+            });
+
+            await expect(agent.execute('Hello')).rejects.toThrow('Gateway timeout');
+        });
     });
 });
 
@@ -529,6 +641,31 @@ describe('Agent 中止机制测试', () => {
         // 执行并等待结果
         const result = await agent.executeWithResult('Hello');
         expect(['completed', 'failed', 'aborted']).toContain(result.status);
+    }, 10000);
+
+    it('重试等待期间 abort 应尽快返回 aborted', async () => {
+        const { LLMRetryableError } = await import('../../providers');
+        mockProvider.generate = async () => {
+            throw new LLMRetryableError('Retry later', 5000, 'TIMEOUT');
+        };
+
+        const agent = new Agent({
+            provider: mockProvider as any,
+            systemPrompt: 'Test',
+            stream: false,
+            memoryManager,
+            retryDelayMs: 5000,
+            maxRetries: 3,
+        });
+
+        const startedAt = Date.now();
+        const execution = agent.executeWithResult('Hello');
+        setTimeout(() => agent.abort(), 100);
+        const result = await execution;
+        const elapsed = Date.now() - startedAt;
+
+        expect(result.status).toBe('aborted');
+        expect(elapsed).toBeLessThan(1500);
     }, 10000);
 
     it('中止后再次执行应该从 IDLE 开始', async () => {

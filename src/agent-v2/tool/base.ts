@@ -21,6 +21,7 @@ export type ToolContext = {
     time: string;
     sessionId?: string;
     memoryManager?: IMemoryManager;
+    emitOutput?: (chunk: string) => void;
 };
 
 

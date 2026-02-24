@@ -93,6 +93,22 @@ describe('AgentEmitter', () => {
         });
     });
 
+    describe('错误事件', () => {
+        it('emitError 应该发送正确的消息', () => {
+            emitter.emitError('boom', 'task-failed');
+
+            expect(mockCallback).toHaveBeenCalledWith({
+                type: AgentMessageType.ERROR,
+                payload: {
+                    error: 'boom',
+                    phase: 'task-failed',
+                },
+                sessionId,
+                timestamp,
+            });
+        });
+    });
+
     describe('文本事件', () => {
         it('emitTextStart 应该发送正确的消息', () => {
             emitter.emitTextStart('msg-1');
@@ -230,6 +246,42 @@ describe('AgentEmitter', () => {
                 timestamp,
             });
         });
+
+        it('emitToolCallStream 应该发送正确的消息', () => {
+            emitter.emitToolCallStream('call-1', 'chunk-1', 'msg-1');
+
+            expect(mockCallback).toHaveBeenCalledWith({
+                type: AgentMessageType.TOOL_CALL_STREAM,
+                payload: {
+                    callId: 'call-1',
+                    output: 'chunk-1',
+                },
+                msgId: 'msg-1',
+                sessionId,
+                timestamp,
+            });
+        });
+
+        it('emitCodePatch 应该发送正确的消息', () => {
+            emitter.emitCodePatch(
+                'src/main.ts',
+                '@@ -1,1 +1,1 @@\n-old\n+new',
+                'msg-1',
+                'typescript'
+            );
+
+            expect(mockCallback).toHaveBeenCalledWith({
+                type: AgentMessageType.CODE_PATCH,
+                payload: {
+                    path: 'src/main.ts',
+                    diff: '@@ -1,1 +1,1 @@\n-old\n+new',
+                    language: 'typescript',
+                },
+                msgId: 'msg-1',
+                sessionId,
+                timestamp,
+            });
+        });
     });
 
     describe('Usage 事件', () => {
@@ -269,6 +321,18 @@ describe('AgentEmitter', () => {
                 completion_tokens: 5,
                 total_tokens: 15,
             });
+        });
+
+        it('emitUsageUpdate 应该支持 msgId', () => {
+            const usage: Usage = { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 };
+            emitter.emitUsageUpdate(usage, 'msg-usage');
+
+            expect(mockCallback).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    type: AgentMessageType.USAGE_UPDATE,
+                    msgId: 'msg-usage',
+                })
+            );
         });
 
         it('resetCumulativeUsage 应该重置累积值', () => {

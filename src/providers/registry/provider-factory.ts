@@ -91,6 +91,7 @@ export class ProviderFactory {
         // 如果需要特定适配器，可以在此处添加 switch 逻辑
         switch (modelId) {
             case 'kimi-k2.5':
+            case 'qwen-kimi-k2.5':
             case 'glm-5':
                 return new KimiAdapter({
                     defaultModel: modelConfig.model,

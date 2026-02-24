@@ -69,8 +69,8 @@ const AGENT_DEFAULTS = {
     LOOP_MAX: 3000,
     /** 最大重试次数 */
     MAX_RETRIES: 10,
-    /** 默认重试延迟（毫秒）- 10 分钟 */
-    RETRY_DELAY_MS: 10 * 60 * 1000,
+    /** 默认重试延迟（毫秒）- 5 秒 */
+    RETRY_DELAY_MS: 10 * 1000,
     /** 最大补偿重试次数 */
     MAX_COMPENSATION_RETRIES: 1,
     /** Abort 重试延迟（毫秒） */
@@ -95,6 +95,7 @@ export class Agent {
     private readonly requestTimeoutMs?: number;
     private readonly validationOptions?: Partial<ResponseValidatorOptions>;
     private readonly onValidationViolation?: (result: ValidationResult) => void;
+    private pendingRetryReason: string | null = null;
 
     // 内部组件
     private readonly agentState: AgentState;
@@ -165,7 +166,7 @@ export class Agent {
             onReasoningDelta: (content, msgId) => this.emitter.emitReasoningDelta(content, msgId),
             onReasoningComplete: (msgId) => this.emitter.emitReasoningComplete(msgId),
             onUsageUpdate: (usage, msgId) => {
-                this.emitter.emitUsageUpdate(usage);
+                this.emitter.emitUsageUpdate(usage, msgId);
                 this.updateMessageUsage(msgId, usage);
             },
             onStatusChange: (status, message, msgId) => this.emitter.emitStatus(status, message, msgId),
@@ -178,8 +179,12 @@ export class Agent {
             memoryManager: this.session.getMemoryManager(),
             onToolCallCreated: (toolCalls, messageId, content) => 
                 this.emitter.emitToolCallCreated(toolCalls, messageId, content),
+            onToolCallStream: (toolCallId, output, messageId) =>
+                this.emitter.emitToolCallStream(toolCallId, output, messageId),
             onToolCallResult: (toolCallId, result, status, resultMessageId) =>
                 this.emitter.emitToolCallResult(toolCallId, result, status, resultMessageId),
+            onCodePatch: (filePath, diff, messageId, language) =>
+                this.emitter.emitCodePatch(filePath, diff, messageId, language),
             onMessageAdd: (msg) => this.session.addMessage(msg),
         });
     }
@@ -192,10 +197,18 @@ export class Agent {
 
         await this.session.initialize();
         this.agentState.startTask();
+        this.pendingRetryReason = null;
+        this.eventBus.emit(EventType.TASK_START, {
+            timestamp: this.timeProvider.getCurrentTime(),
+            query: contentToText(query),
+        });
         this.session.addMessage({ messageId: uuid(), role: 'user', content: query });
 
         try {
             await this.runLoop(options);
+            if (this.agentState.isAborted()) {
+                throw new AgentError('Task was aborted.');
+            }
             this.completeTask();
             return this.getFinalMessage();
         } catch (error) {
@@ -218,7 +231,7 @@ export class Agent {
                 status: 'completed',
                 finalMessage,
                 loopCount: this.agentState.loopCount,
-                retryCount: this.agentState.retryCount,
+                retryCount: this.agentState.totalRetryCount,
                 sessionId: this.session.getSessionId(),
             };
         } catch (error) {
@@ -228,7 +241,7 @@ export class Agent {
                 status: this.agentState.status === AgentStatus.ABORTED ? 'aborted' : 'failed',
                 failure,
                 loopCount: this.agentState.loopCount,
-                retryCount: this.agentState.retryCount,
+                retryCount: this.agentState.totalRetryCount,
                 sessionId: this.session.getSessionId(),
             };
         }
@@ -299,8 +312,13 @@ export class Agent {
         this.emitter.emitStatus(AgentStatus.RUNNING, 'Agent is running...');
 
         while (this.agentState.canContinue()) {
+            if (this.agentState.isAborted()) {
+                break;
+            }
+
             if (this.agentState.isRetryExceeded()) {
-                throw new AgentError('Agent failed after maximum retries.');
+                const reasonSuffix = this.pendingRetryReason ? ` Last error: ${this.pendingRetryReason}` : '';
+                throw new AgentError(`Agent failed after maximum retries.${reasonSuffix}`);
             }
 
             if (this.checkComplete()) {
@@ -309,10 +327,18 @@ export class Agent {
 
             if (this.agentState.needsRetry()) {
                 await this.handleRetry();
+                if (this.agentState.isAborted()) {
+                    break;
+                }
             }
 
             this.agentState.incrementLoop();
             this.agentState.setStatus(AgentStatus.RUNNING);
+            this.eventBus.emit(EventType.TASK_PROGRESS, {
+                timestamp: this.timeProvider.getCurrentTime(),
+                loopCount: this.agentState.loopCount,
+                retryCount: this.agentState.retryCount,
+            });
 
             try {
                 await this.executeLLMCall(options);
@@ -343,6 +369,14 @@ export class Agent {
         if (isRetryableError(error)) {
             const delay = this.resolveRetryDelay(error);
             this.agentState.recordRetryableError(delay);
+            this.pendingRetryReason = this.formatRetryReason(error);
+            const stats = this.agentState.getStats();
+            this.eventBus.emit(EventType.TASK_RETRY, {
+                timestamp: this.timeProvider.getCurrentTime(),
+                retryCount: stats.retries,
+                maxRetries: stats.maxRetries,
+                reason: this.pendingRetryReason,
+            });
             return;
         }
 
@@ -351,11 +385,17 @@ export class Agent {
 
     private async handleRetry(): Promise<void> {
         this.agentState.setStatus(AgentStatus.RETRYING);
-        await this.timeProvider.sleep(this.agentState.nextRetryDelayMs);
+        await this.sleepWithAbort(this.agentState.nextRetryDelayMs);
+        if (this.agentState.isAborted()) {
+            return;
+        }
         const stats = this.agentState.getStats();
+        const retryDelay = this.agentState.nextRetryDelayMs;
+        const reasonSuffix = this.pendingRetryReason ? ` - ${this.pendingRetryReason}` : '';
+        this.pendingRetryReason = null;
         this.emitter.emitStatus(
             AgentStatus.RETRYING,
-            `Retrying... (${stats.retries}/${stats.loops})`
+            `Retrying... (${stats.retries}/${stats.maxRetries}) after ${retryDelay}ms${reasonSuffix}`
         );
     }
 
@@ -364,6 +404,47 @@ export class Agent {
             return error.retryAfter;
         }
         return this.agentState.nextRetryDelayMs;
+    }
+
+    private async sleepWithAbort(ms: number): Promise<void> {
+        const controller = this.agentState.abortController;
+        if (!controller) {
+            await this.timeProvider.sleep(ms);
+            return;
+        }
+        if (controller.signal.aborted) {
+            return;
+        }
+
+        await Promise.race([
+            this.timeProvider.sleep(ms),
+            new Promise<void>((resolve) => {
+                controller.signal.addEventListener('abort', () => resolve(), { once: true });
+            }),
+        ]);
+    }
+
+    private formatRetryReason(error: unknown): string {
+        if (!(error instanceof Error)) {
+            return String(error);
+        }
+
+        const withMeta = error as Error & { code?: unknown; errorType?: unknown };
+        const tags: string[] = [];
+        if (typeof withMeta.code === 'string' && withMeta.code) {
+            tags.push(withMeta.code);
+        }
+        if (
+            typeof withMeta.errorType === 'string'
+            && withMeta.errorType
+            && !tags.includes(withMeta.errorType)
+        ) {
+            tags.push(withMeta.errorType);
+        }
+
+        const prefix = tags.length > 0 ? `[${tags.join('/')}] ` : '';
+        const message = `${prefix}${error.message}`.trim();
+        return message.length > 200 ? `${message.slice(0, 200)}...` : message;
     }
 
     // ==================== 内部方法：完成检测 ====================
@@ -612,6 +693,13 @@ export class Agent {
 
     private completeTask(): void {
         this.agentState.completeTask();
+        const stats = this.agentState.getStats();
+        this.eventBus.emit(EventType.TASK_SUCCESS, {
+            timestamp: this.timeProvider.getCurrentTime(),
+            totalLoops: stats.loops,
+            totalRetries: stats.totalRetries,
+            duration: stats.duration,
+        });
         this.emitter.emitStatus(AgentStatus.COMPLETED, 'Task completed successfully');
     }
 
@@ -624,10 +712,11 @@ export class Agent {
             timestamp: this.timeProvider.getCurrentTime(),
             error: safeError.internalMessage || safeError.userMessage,
             totalLoops: this.agentState.loopCount,
-            totalRetries: this.agentState.retryCount,
+            totalRetries: this.agentState.totalRetryCount,
         };
         this.eventBus.emit(EventType.TASK_FAILED, event);
 
+        this.emitter.emitError(safeError.internalMessage || safeError.userMessage, 'task-failed');
         this.emitter.emitStatus(AgentStatus.FAILED, safeError.userMessage);
     }
 
@@ -654,7 +743,7 @@ export class Agent {
     }
 
     getRetryCount(): number {
-        return this.agentState.retryCount;
+        return this.agentState.totalRetryCount;
     }
 
     getTaskStartTime(): number {

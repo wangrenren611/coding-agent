@@ -59,6 +59,10 @@ export function agentChatReducer(state: AgentChatState, action: AgentChatAction)
 
 function ingestStreamMessage(state: AgentChatState, message: AgentMessage): AgentChatState {
   switch (message.type) {
+    case AgentMessageType.REASONING_START:
+    case AgentMessageType.REASONING_DELTA:
+    case AgentMessageType.REASONING_COMPLETE:
+      return ingestReasoningEvent(state, message);
     case AgentMessageType.TEXT_START:
     case AgentMessageType.TEXT_DELTA:
     case AgentMessageType.TEXT_COMPLETE:
@@ -71,6 +75,8 @@ function ingestStreamMessage(state: AgentChatState, message: AgentMessage): Agen
       return ingestToolResult(state, message);
     case AgentMessageType.CODE_PATCH:
       return ingestCodePatch(state, message);
+    case AgentMessageType.USAGE_UPDATE:
+      return ingestUsageUpdate(state, message);
     case AgentMessageType.STATUS: {
       const nextStatus = message.payload.state;
       return {
@@ -89,9 +95,51 @@ function ingestStreamMessage(state: AgentChatState, message: AgentMessage): Agen
       };
       return { ...state, messages: state.messages.concat(errorMessage), error: errorMessage, isStreaming: false };
     }
-    default:
+    default: {
+      const _exhaustive: never = message;
+      void _exhaustive;
       return state;
+    }
   }
+}
+
+function ingestReasoningEvent(
+  state: AgentChatState,
+  message: Extract<AgentMessage, { type: AgentMessageType.REASONING_START | AgentMessageType.REASONING_DELTA | AgentMessageType.REASONING_COMPLETE }>
+): AgentChatState {
+  const msgId = resolveTextMessageId(state, {
+    type: message.type === AgentMessageType.REASONING_START
+      ? AgentMessageType.TEXT_START
+      : message.type === AgentMessageType.REASONING_COMPLETE
+        ? AgentMessageType.TEXT_COMPLETE
+        : AgentMessageType.TEXT_DELTA,
+    msgId: message.msgId,
+    payload: { content: message.payload.content },
+    sessionId: message.sessionId,
+    timestamp: message.timestamp,
+  });
+
+  const ensured = ensureAssistantMessage(state, msgId, message.timestamp);
+  const assistant = ensured.state.messages[ensured.index];
+  if (assistant.kind !== "assistant") return ensured.state;
+
+  const incomingReasoning = message.payload.content || "";
+  const nextReasoning = message.type === AgentMessageType.REASONING_DELTA
+    ? mergeTextDelta(assistant.reasoning, incomingReasoning)
+    : mergeTextComplete(assistant.reasoning, incomingReasoning);
+
+  const nextAssistant: UIAssistantMessage = {
+    ...assistant,
+    reasoning: nextReasoning,
+    updatedAt: message.type === AgentMessageType.REASONING_COMPLETE
+      ? message.timestamp
+      : assistant.updatedAt,
+  };
+
+  return {
+    ...replaceAssistantAt(ensured.state, ensured.index, msgId, nextAssistant),
+    isStreaming: message.type !== AgentMessageType.REASONING_COMPLETE || state.isStreaming,
+  };
 }
 
 function ingestTextEvent(state: AgentChatState, message: Extract<AgentMessage, { type: AgentMessageType.TEXT_START | AgentMessageType.TEXT_DELTA | AgentMessageType.TEXT_COMPLETE }>): AgentChatState {
@@ -118,6 +166,25 @@ function ingestTextEvent(state: AgentChatState, message: Extract<AgentMessage, {
     ...replaceAssistantAt(ensured.state, ensured.index, msgId, nextAssistant),
     isStreaming: message.type !== AgentMessageType.TEXT_COMPLETE,
   };
+}
+
+function ingestUsageUpdate(
+  state: AgentChatState,
+  message: Extract<AgentMessage, { type: AgentMessageType.USAGE_UPDATE }>
+): AgentChatState {
+  const targetMsgId = message.msgId || state.latestAssistantMessageId || resolveMessageId(state, undefined, "usage", message.timestamp);
+  const ensured = ensureAssistantMessage(state, targetMsgId, message.timestamp);
+  const assistant = ensured.state.messages[ensured.index];
+  if (assistant.kind !== "assistant") return ensured.state;
+
+  const nextAssistant: UIAssistantMessage = {
+    ...assistant,
+    usage: message.payload.usage,
+    cumulativeUsage: message.payload.cumulative,
+    updatedAt: message.timestamp,
+  };
+
+  return replaceAssistantAt(ensured.state, ensured.index, targetMsgId, nextAssistant);
 }
 
 /**

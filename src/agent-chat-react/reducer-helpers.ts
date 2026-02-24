@@ -204,6 +204,7 @@ function createAssistantMessage(msgId: string, timestamp: number): UIAssistantMe
     kind: "assistant",
     role: "assistant",
     content: "",
+    reasoning: "",
     phase: "streaming",
     toolCalls: [],
     createdAt: timestamp,

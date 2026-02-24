@@ -4,9 +4,9 @@
 
 // Agent 核心
 export { Agent } from './agent/agent';
+export { AgentStatus } from './agent/types';
 export type {
   AgentOptions,
-  AgentStatus,
   StreamCallback,
 } from './agent/types';
 export { AgentError, ToolError } from './agent/errors';
@@ -22,9 +22,9 @@ export {
 } from './agent/message-builder';
 
 // 流式消息类型
+export { AgentMessageType } from './agent/stream-types';
 export type {
   AgentMessage,
-  AgentMessageType,
 } from './agent/stream-types';
 
 // 事件总线

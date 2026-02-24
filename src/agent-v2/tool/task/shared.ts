@@ -317,7 +317,8 @@ export const TASK_OUTPUT_DESCRIPTION = `- Retrieves output from a running or com
 - Use block=true (default) to wait for task completion
 - Use block=false for non-blocking check of current status
 - Task IDs can be found using the /tasks command
-- Works with all task types: background shells, async agents, and remote sessions`;
+- Works with all task types: background shells, async agents, and remote sessions
+- Note: When block=true, waits for the subagent to complete naturally. The subagent has its own timeout and error handling mechanisms (maxLoops, maxRetries, requestTimeout).`;
 export const TASK_STOP_DESCRIPTION = `- Stops a running background task by its ID
 - Takes a task_id parameter identifying the task
 - Returns a success or failure status

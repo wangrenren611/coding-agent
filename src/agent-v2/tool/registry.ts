@@ -10,6 +10,7 @@ const DEFAULT_TOOL_TIMEOUT = 300000; // 5分钟
 interface ExecutionContext {
     sessionId?: string;
     memoryManager?: ToolContext['memoryManager'];
+    onToolStream?: (toolCallId: string, toolName: string, output: string) => void;
 }
 
 /**
@@ -178,11 +179,17 @@ export class ToolRegistry {
           
           // 使用带清理的超时执行，防止内存泄漏
           const result = timeoutMs === null || timeoutMs <= 0
-            ? await tool.execute(resultSchema.data, toolContext)
+            ? await tool.execute(resultSchema.data, {
+                ...toolContext,
+                emitOutput: (chunk: string) => context?.onToolStream?.(toolCall.id, name, chunk),
+              })
             : await this.executeWithTimeout(
                 name,
                 // 使用 Promise.resolve 包装，因为 execute 可能返回同步值
-                () => Promise.resolve(tool.execute(resultSchema.data, toolContext)),
+                () => Promise.resolve(tool.execute(resultSchema.data, {
+                  ...toolContext,
+                  emitOutput: (chunk: string) => context?.onToolStream?.(toolCall.id, name, chunk),
+                })),
                 timeoutMs
               );
 

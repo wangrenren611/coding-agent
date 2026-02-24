@@ -84,6 +84,16 @@ export class AgentEmitter {
         });
     }
 
+    emitError(error: string, phase?: string): void {
+        this.emit({
+            type: AgentMessageType.ERROR,
+            payload: {
+                error,
+                ...(phase ? { phase } : {}),
+            },
+        });
+    }
+
     // ==================== 文本事件 ====================
 
     emitTextStart(messageId: string): void {
@@ -174,9 +184,41 @@ export class AgentEmitter {
         });
     }
 
+    emitToolCallStream(
+        toolCallId: string,
+        output: string,
+        messageId?: string
+    ): void {
+        this.emit({
+            type: AgentMessageType.TOOL_CALL_STREAM,
+            payload: {
+                callId: toolCallId,
+                output,
+            },
+            ...(messageId ? { msgId: messageId } : {}),
+        });
+    }
+
+    emitCodePatch(
+        filePath: string,
+        diff: string,
+        messageId: string,
+        language?: string
+    ): void {
+        this.emit({
+            type: AgentMessageType.CODE_PATCH,
+            payload: {
+                path: filePath,
+                diff,
+                ...(language ? { language } : {}),
+            },
+            msgId: messageId,
+        });
+    }
+
     // ==================== Usage 事件 ====================
 
-    emitUsageUpdate(usage: Usage): CumulativeUsage {
+    emitUsageUpdate(usage: Usage, messageId?: string): CumulativeUsage {
         // 累加使用量
         this.cumulativeUsage.prompt_tokens += usage.prompt_tokens;
         this.cumulativeUsage.completion_tokens += usage.completion_tokens;
@@ -190,6 +232,7 @@ export class AgentEmitter {
                 usage,
                 cumulative: { ...this.cumulativeUsage },
             },
+            ...(messageId ? { msgId: messageId } : {}),
         });
 
         return { ...this.cumulativeUsage };

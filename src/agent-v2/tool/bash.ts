@@ -107,8 +107,19 @@ export default class BashTool extends BaseTool<typeof schema> {
         return typeof (process as { versions?: { bun?: string } }).versions?.bun === 'string';
     }
 
-    private async runWithNode(command: string, timeoutMs: number): Promise<{ exitCode: number; all: Buffer }> {
-        const result = await execaCommand(command, {
+    private decodeOutputChunk(chunk: Buffer): string {
+        const decoded = process.platform === 'win32'
+            ? iconv.decode(chunk, 'gbk')
+            : iconv.decode(chunk, 'utf8');
+        return stripAnsi(decoded || '');
+    }
+
+    private async runWithNode(
+        command: string,
+        timeoutMs: number,
+        onChunk?: (chunk: string) => void
+    ): Promise<{ exitCode: number; all: Buffer; streamed: boolean }> {
+        const subprocess = execaCommand(command, {
             all: true,
             reject: false,
             shell: true,
@@ -118,17 +129,38 @@ export default class BashTool extends BaseTool<typeof schema> {
             timeout: timeoutMs,
         });
 
-        const all = Buffer.isBuffer(result.all)
-            ? result.all
-            : Buffer.from(result.all ?? '');
+        let streamed = false;
+        const outputChunks: Buffer[] = [];
+        const allStream = subprocess.all;
+
+        if (allStream) {
+            allStream.on('data', (chunk: string | Buffer) => {
+                const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+                outputChunks.push(buffer);
+                const decoded = this.decodeOutputChunk(buffer);
+                if (decoded && onChunk) {
+                    streamed = true;
+                    onChunk(decoded);
+                }
+            });
+        }
+
+        const result = await subprocess;
+
+        const all = outputChunks.length > 0
+            ? Buffer.concat(outputChunks)
+            : Buffer.isBuffer(result.all)
+                ? result.all
+                : Buffer.from(result.all ?? '');
 
         return {
             exitCode: result.exitCode ?? 1,
             all,
+            streamed,
         };
     }
 
-    private async runWithBun(command: string, timeoutMs: number): Promise<{ exitCode: number; all: Buffer }> {
+    private async runWithBun(command: string, timeoutMs: number): Promise<{ exitCode: number; all: Buffer; streamed: boolean }> {
         const bun = (globalThis as { Bun?: any }).Bun;
         if (!bun || typeof bun.spawn !== 'function') {
             throw new Error('Bun runtime unavailable');
@@ -168,13 +200,15 @@ export default class BashTool extends BaseTool<typeof schema> {
             if (killedByTimeout) {
                 return {
                     exitCode: 124,
-                    all: Buffer.concat([all, Buffer.from(`\nCommand timed out after ${timeoutMs}ms`)])
+                    all: Buffer.concat([all, Buffer.from(`\nCommand timed out after ${timeoutMs}ms`)]),
+                    streamed: false,
                 };
             }
 
             return {
                 exitCode: typeof exitCode === 'number' ? exitCode : 1,
                 all,
+                streamed: false,
             };
         } finally {
             clearTimeout(timer);
@@ -283,7 +317,7 @@ export default class BashTool extends BaseTool<typeof schema> {
         try {
             const result = this.isBunRuntime()
                 ? await this.runWithBun(command, timeoutMs)
-                : await this.runWithNode(command, timeoutMs);
+                : await this.runWithNode(command, timeoutMs, (chunk) => _context?.emitOutput?.(chunk));
 
             const rawStr = process.platform === 'win32'
                 ? iconv.decode(result.all, 'gbk')
@@ -297,6 +331,10 @@ export default class BashTool extends BaseTool<typeof schema> {
                 finalOutput = finalOutput.slice(0, 4000) +
                     "\n\n[... Output Truncated for Brevity ...]\n\n" +
                     finalOutput.slice(-4000);
+            }
+
+            if (!result.streamed && finalOutput) {
+                _context?.emitOutput?.(finalOutput);
             }
 
             if (result.exitCode === 0) {

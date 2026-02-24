@@ -60,7 +60,7 @@ export interface AgentOptions{
     maxRetries?: number;
     /** 单次 LLM 请求超时时间（毫秒，默认使用 provider 配置） */
     requestTimeout?: number;
-    /** 重试等待时间（毫秒，默认 1000 * 60 * 10） */
+    /** 重试等待时间（毫秒，默认 5000） */
     retryDelayMs?: number;
     /** 是否启用流式输出 */
     stream?: boolean;

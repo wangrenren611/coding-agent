@@ -110,10 +110,23 @@ When creating a task, always provide:
 - description (context + acceptance criteria)
 - activeForm (present continuous)
 
-Status discipline:
-- Start work: task_update(status="in_progress")
-- Finish work: task_update(status="completed") immediately
-- Keep updates incremental; avoid bulk status jumps
+Status workflow (STRICT - must follow in order):
+- Task status MUST progress: pending → in_progress → completed
+- Transitions are ONLY allowed in this order, no skipping allowed
+- After task_create, the task is in "pending" state
+- Before doing any work on a task, you MUST call task_update(status="in_progress") first
+- This declares which task you are currently working on
+- Then execute the actual work (using task tool, read_file, write_file, etc.)
+- After the work is done, call task_update(status="completed")
+
+Task execution workflow (MUST follow all steps):
+1. task_create → creates task in "pending" state
+2. task_update(status="in_progress") → declares you are starting this task (REQUIRED)
+3. Execute the actual work (call task tool, read files, write code, etc.)
+4. task_update(status="completed") → marks task as done after work finishes
+
+CRITICAL: Never skip step 2. Always mark a task as "in_progress" BEFORE doing any work.
+CRITICAL: You CANNOT transition from "pending" directly to "completed".
 
 Dependency discipline:
 - Use addBlockedBy/addBlocks when sequencing matters

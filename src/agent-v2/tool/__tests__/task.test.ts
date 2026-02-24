@@ -404,11 +404,10 @@ describe('Task tools', () => {
     const output = await outputTool.execute({
       task_id: taskId,
       block: true,
-      timeout: 5000,
     });
     expect(output.success).toBe(true);
     expect(output.metadata?.status).toBe('completed');
-    expect(output.metadata?.wait?.timeout_reached).toBe(false);
+    expect(output.metadata?.block_requested).toBe(true);
     expect(output.metadata?.progress?.message_count).toBeGreaterThan(0);
     expect(output.output).toContain('background done');
     expect(output.metadata?.message_count).toBeGreaterThan(0);
@@ -441,7 +440,6 @@ describe('Task tools', () => {
     const output = await outputTool.execute({
       task_id: taskId,
       block: false,
-      timeout: 10,
     });
     expect(output.success).toBe(true);
     expect(['cancelled', 'completed']).toContain(output.metadata?.status);
@@ -451,8 +449,8 @@ describe('Task tools', () => {
     expect(run?.messages).toBeUndefined();
   });
 
-  it('should report wait timeout without auto-cancelling running task', async () => {
-    const taskTool = withContext(new TaskTool(new MockProvider('slow done', 150)));
+  it('should wait for task completion with block=true', async () => {
+    const taskTool = withContext(new TaskTool(new MockProvider('slow done', 50)));
     const outputTool = withContext(new TaskOutputTool());
 
     const started = await taskTool.execute({
@@ -463,24 +461,16 @@ describe('Task tools', () => {
     });
 
     const taskId = started.metadata?.task_id as string;
-    const timed = await outputTool.execute({
+    
+    // block=true 会等待任务完成，依赖 Agent 内部的超时机制
+    const result = await outputTool.execute({
       task_id: taskId,
       block: true,
-      timeout: 30,
     });
-    expect(timed.success).toBe(true);
-    expect(timed.metadata?.wait?.timeout_reached).toBe(true);
-    expect(['running', 'cancelling']).toContain(timed.metadata?.status);
-    expect(timed.metadata?.progress?.message_count).toBeGreaterThan(0);
-
-    const eventually = await outputTool.execute({
-      task_id: taskId,
-      block: true,
-      timeout: 2000,
-    });
-    expect(eventually.success).toBe(true);
-    expect(eventually.metadata?.status).toBe('completed');
-    expect(eventually.metadata?.wait?.timeout_reached).toBe(false);
+    expect(result.success).toBe(true);
+    expect(result.metadata?.status).toBe('completed');
+    expect(result.metadata?.block_requested).toBe(true);
+    expect(result.output).toContain('slow done');
   });
 
   it('should not apply ToolRegistry timeout to task tool execution', async () => {

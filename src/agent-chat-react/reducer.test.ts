@@ -227,6 +227,52 @@ describe("agent-chat-react reducer", () => {
     expect(state.isStreaming).toBe(false);
   });
 
+  it("should ingest reasoning and usage events into assistant message", () => {
+    let state = createInitialAgentChatState();
+
+    state = ingest(state, {
+      type: AgentMessageType.REASONING_START,
+      msgId: "m-reason",
+      payload: { content: "" },
+      sessionId: "s1",
+      timestamp: 60,
+    });
+    state = ingest(state, {
+      type: AgentMessageType.REASONING_DELTA,
+      msgId: "m-reason",
+      payload: { content: "Thinking" },
+      sessionId: "s1",
+      timestamp: 61,
+    });
+    state = ingest(state, {
+      type: AgentMessageType.REASONING_COMPLETE,
+      msgId: "m-reason",
+      payload: { content: "" },
+      sessionId: "s1",
+      timestamp: 62,
+    });
+    state = ingest(state, {
+      type: AgentMessageType.USAGE_UPDATE,
+      msgId: "m-reason",
+      payload: {
+        usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 },
+        cumulative: { prompt_tokens: 10, completion_tokens: 7, total_tokens: 17 },
+      },
+      sessionId: "s1",
+      timestamp: 63,
+    });
+
+    expect(state.messages).toHaveLength(1);
+    const message = state.messages[0];
+    expect(message.kind).toBe("assistant");
+    if (message.kind !== "assistant") {
+      throw new Error("Expected assistant message");
+    }
+    expect(message.reasoning).toBe("Thinking");
+    expect(message.usage).toEqual({ prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 });
+    expect(message.cumulativeUsage).toEqual({ prompt_tokens: 10, completion_tokens: 7, total_tokens: 17 });
+  });
+
   it("should prune old messages and rebuild tool locators", () => {
     let state = createInitialAgentChatState();
 

@@ -646,7 +646,6 @@ export class TaskUpdateTool extends BaseTool<typeof taskUpdateSchema> {
 const taskOutputSchema = z.object({
   task_id: z.string().min(1),
   block: z.boolean().default(true),
-  timeout: z.number().int().min(1).max(600000).default(30000),
 }).strict();
 
 export class TaskOutputTool extends BaseTool<typeof taskOutputSchema> {
@@ -655,7 +654,7 @@ export class TaskOutputTool extends BaseTool<typeof taskOutputSchema> {
   schema = taskOutputSchema;
 
   async execute(args: z.infer<typeof this.schema>, context?: ToolContext): Promise<ToolResult> {
-    const { task_id, block, timeout } = args;
+    const { task_id, block } = args;
     const execution = getBackgroundExecution(task_id);
     const runRecord = await getSubTaskRunRecord(context?.memoryManager, task_id);
     if (!execution && !runRecord) {
@@ -670,10 +669,9 @@ export class TaskOutputTool extends BaseTool<typeof taskOutputSchema> {
       await refreshExecutionProgress(execution, true);
     }
 
-    let waitTimeoutReached = false;
+    // block=true 时直接等待任务完成，依赖 Agent 内部的超时/错误机制
     if (block && execution && (execution.status === 'queued' || execution.status === 'running' || execution.status === 'cancelling') && execution.promise) {
-      const waitResult = await waitWithTimeout(execution.promise, timeout);
-      waitTimeoutReached = waitResult.timedOut;
+      await execution.promise;
       await refreshExecutionProgress(execution, true);
     }
 
@@ -693,11 +691,7 @@ export class TaskOutputTool extends BaseTool<typeof taskOutputSchema> {
     let output = execution?.output || latestRun?.output;
     if (!output) {
       if (status === 'queued' || status === 'running' || status === 'cancelling') {
-        if (waitTimeoutReached) {
-          output = `Wait timeout reached after ${timeout}ms. Task is still ${status}. Continue polling with task_output(block=false).`;
-        } else {
-          output = `Task is currently ${status}. Use task_output(block=false) to poll progress.`;
-        }
+        output = `Task is currently ${status}. Use task_output(block=false) to poll progress.`;
       } else if (status === 'cancelled') {
         output = 'Task cancelled by user.';
       } else {
@@ -722,11 +716,7 @@ export class TaskOutputTool extends BaseTool<typeof taskOutputSchema> {
           last_activity_at: lastActivityAt,
           last_tool_name: lastToolName,
         },
-        wait: {
-          block_requested: block,
-          timeout_ms: timeout,
-          timeout_reached: waitTimeoutReached,
-        },
+        block_requested: block,
         createdAt: execution?.createdAt || (latestRun ? new Date(latestRun.createdAt).toISOString() : undefined),
         startedAt: execution?.startedAt || (latestRun ? new Date(latestRun.startedAt).toISOString() : undefined),
         finishedAt: execution?.finishedAt || (latestRun?.finishedAt ? new Date(latestRun.finishedAt).toISOString() : undefined),
