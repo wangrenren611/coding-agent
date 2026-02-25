@@ -9,6 +9,7 @@ import { BatchReplaceTool } from './batch-replace';
 import { LspTool } from './lsp';
 import { TaskCreateTool, TaskGetTool, TaskListTool, TaskStopTool, TaskTool, TaskUpdateTool } from './task';
 import { ToolRegistry } from './registry';
+import { SkillTool } from '../skill';
 import type { ToolRegistryConfig } from './registry';
 import type { BaseTool } from './base';
 import type { ToolResult } from './base';
@@ -48,6 +49,9 @@ export function getDefaultTools(
         tools.push(new TaskTool(provider, workingDir));
     }
 
+    // SkillTool 添加到默认工具列表
+    tools.push(new SkillTool());
+
     return tools;
 }
 
@@ -85,3 +89,7 @@ export {
 export { ToolRegistry } from './registry';
 export type { ToolRegistryConfig } from './registry';
 export type { BaseTool, ToolResult };
+
+// 导出 Skill 相关
+export { SkillTool, createSkillTool, defaultSkillTool } from '../skill';
+export type { Skill, SkillMetadata, SkillLoaderOptions, SkillToolResult } from '../skill';
