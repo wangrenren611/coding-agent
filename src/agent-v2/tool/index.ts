@@ -42,15 +42,13 @@ export function getDefaultTools(
         new TaskStopTool(),
         new BatchReplaceTool(),
         new LspTool(),
+        new SkillTool(),
     ];
 
     // TaskTool 需要 provider，只有在有 provider 时才添加
     if (provider) {
         tools.push(new TaskTool(provider, workingDir));
     }
-
-    // SkillTool 添加到默认工具列表
-    tools.push(new SkillTool());
 
     return tools;
 }

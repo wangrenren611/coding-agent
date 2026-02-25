@@ -229,22 +229,14 @@ async function demo1() {
     console.log('='.repeat(60));
     console.log();
 
-    const preferredMemoryPath = './data/agent-memory';
-    const fallbackMemoryPath = '.memory/agent-memory';
-    let memoryPath = preferredMemoryPath;
+    const preferredMemoryPath = '/Users/wrr/work/coding-agent-data/agent-memory';
 
-    try {
-        fs.mkdirSync(preferredMemoryPath, { recursive: true });
-        fs.accessSync(preferredMemoryPath, fs.constants.W_OK);
-    } catch {
-        memoryPath = fallbackMemoryPath;
-        fs.mkdirSync(memoryPath, { recursive: true });
-        console.warn(`[demo1] 存储目录不可写，已回退到: ${memoryPath}`);
-    }
+    fs.mkdirSync(preferredMemoryPath, { recursive: true });
+    fs.accessSync(preferredMemoryPath, fs.constants.W_OK);
 
     const memoryManager = createMemoryManager({
         type: 'file',
-        connectionString: memoryPath,
+        connectionString: preferredMemoryPath,
     });
 
     await memoryManager.initialize();
@@ -252,7 +244,7 @@ async function demo1() {
     let agent: Agent | undefined;
     try {
         agent = new Agent({
-            provider: ProviderRegistry.createFromEnv('glm-5', {
+            provider: ProviderRegistry.createFromEnv('qwen-glm-5', {
                 temperature: 0.3,
             }),
             systemPrompt: operatorPrompt({
@@ -264,7 +256,7 @@ async function demo1() {
             // 如需恢复会话，请取消注释并填入有效 sessionId
             //    sessionId: 'agent-7',
             // sessionId: 'agent-8',
-            sessionId: 'agent-24',
+            sessionId: 'agent-26',
             //   sessionId:'18a09614-bb1e-4f06-b685-d040ff08c3aa',
 
             stream: true,
@@ -311,10 +303,7 @@ async function demo1() {
         console.log(`会话 ID: ${agent.getSessionId()}`);
         console.log(`消息数: ${agent.getMessages().length}`);
     } catch (error) {
-        // console.error('\n❌ demo1 执行失败:', error);
-        if (agent) {
-            fs.writeFileSync('./demo-1.error.messages.json', JSON.stringify(agent.getMessages(), null, 2));
-        }
+        console.error('\n❌ demo1 执行失败:', error);
         process.exitCode = 1;
     } finally {
         await memoryManager.close();

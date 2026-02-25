@@ -18,9 +18,9 @@ import fg from 'fast-glob';
 import type { Skill, SkillMetadata, SkillLoaderOptions, ParsedSkillFile, SkillFrontmatter } from './types';
 
 /**
- * 默认技能目录名
+ * 默认技能目录路径（相对于工作目录）
  */
-const DEFAULT_SKILLS_DIR_NAME = 'skills';
+const DEFAULT_SKILLS_DIR = '.agents/skills';
 
 /**
  * 技能文件名
@@ -59,7 +59,7 @@ export class SkillLoader {
 
     constructor(options: SkillLoaderOptions = {}) {
         const workingDir = options.workingDir ?? process.cwd();
-        this.skillsDir = options.skillsDir ?? path.join(workingDir, DEFAULT_SKILLS_DIR_NAME);
+        this.skillsDir = options.skillsDir ?? path.join(workingDir, DEFAULT_SKILLS_DIR);
     }
 
     /**
