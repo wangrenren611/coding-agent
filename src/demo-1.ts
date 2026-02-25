@@ -253,13 +253,14 @@ async function demo1() {
     try {
         agent = new Agent({
             provider: ProviderRegistry.createFromEnv('glm-5', {
-                timeout: 1000 * 60 * 5,
                 temperature: 0.3,
             }),
             systemPrompt: operatorPrompt({
                 directory: process.cwd(),
                 language: 'Chinese',
             }),
+            // 单次 LLM 请求超时（5 分钟）
+            requestTimeout: 1000 * 60 * 5,
             // 如需恢复会话，请取消注释并填入有效 sessionId
             //    sessionId: 'agent-7',
             // sessionId: 'agent-8',
@@ -310,7 +311,7 @@ async function demo1() {
         console.log(`会话 ID: ${agent.getSessionId()}`);
         console.log(`消息数: ${agent.getMessages().length}`);
     } catch (error) {
-        console.error('\n❌ demo1 执行失败:', error);
+        // console.error('\n❌ demo1 执行失败:', error);
         if (agent) {
             fs.writeFileSync('./demo-1.error.messages.json', JSON.stringify(agent.getMessages(), null, 2));
         }
