@@ -29,7 +29,7 @@ describe('Rollback Tools', () => {
             const testFile = await env.createFile('test.txt', 'content');
             const tool = new ListBackupsTool();
             const result = await tool.execute({
-                filePath: testFile
+                filePath: testFile,
             });
 
             expect(result.success).toBe(true);
@@ -47,7 +47,7 @@ describe('Rollback Tools', () => {
 
             const tool = new ListBackupsTool();
             const result = await tool.execute({
-                filePath: testFile
+                filePath: testFile,
             });
 
             expect(result.success).toBe(true);
@@ -73,7 +73,7 @@ describe('Rollback Tools', () => {
 
             const tool = new ListBackupsTool();
             const result = await tool.execute({
-                filePath: testFile
+                filePath: testFile,
             });
 
             expect(result.success).toBe(true);
@@ -84,7 +84,7 @@ describe('Rollback Tools', () => {
         it('should return error for non-existent file', async () => {
             const tool = new ListBackupsTool();
             const result = await tool.execute({
-                filePath: 'nonexistent.txt'
+                filePath: 'nonexistent.txt',
             });
 
             // ListBackupsTool doesn't check file existence, just returns empty list
@@ -114,7 +114,7 @@ describe('Rollback Tools', () => {
             const tool = new RollbackTool();
             const result = await tool.execute({
                 filePath: testFile,
-                backupId: backupId!
+                backupId: backupId!,
             });
 
             expect(result.success).toBe(true);
@@ -130,7 +130,7 @@ describe('Rollback Tools', () => {
             const tool = new RollbackTool();
             const result = await tool.execute({
                 filePath: testFile,
-                backupId: 'non-existent-backup-id'
+                backupId: 'non-existent-backup-id',
             });
 
             expect(result.success).toBe(false);
@@ -142,7 +142,7 @@ describe('Rollback Tools', () => {
             const tool = new RollbackTool();
             const result = await tool.execute({
                 filePath: 'nonexistent.txt',
-                backupId: 'some-backup-id'
+                backupId: 'some-backup-id',
             });
 
             expect(result.success).toBe(false);
@@ -154,7 +154,7 @@ describe('Rollback Tools', () => {
             const tool = new RollbackTool();
             const result = await tool.execute({
                 filePath: testFile,
-                backupId: 'invalid-backup-id-12345'
+                backupId: 'invalid-backup-id-12345',
             });
 
             expect(result.success).toBe(false);
@@ -174,7 +174,7 @@ describe('Rollback Tools', () => {
             const tool = new CleanBackupsTool();
             const result = await tool.execute({
                 filePath: testFile,
-                confirm: false  // Not confirmed
+                confirm: false, // Not confirmed
             });
 
             expect(result.success).toBe(false);
@@ -201,7 +201,7 @@ describe('Rollback Tools', () => {
             const cleanTool = new CleanBackupsTool();
             const cleanResult = await cleanTool.execute({
                 filePath: testFile,
-                confirm: true
+                confirm: true,
             });
 
             expect(cleanResult.success).toBe(true);
@@ -217,7 +217,7 @@ describe('Rollback Tools', () => {
             const tool = new CleanBackupsTool();
             const result = await tool.execute({
                 filePath: testFile,
-                confirm: true
+                confirm: true,
             });
 
             expect(result.success).toBe(true);
@@ -228,7 +228,7 @@ describe('Rollback Tools', () => {
             const tool = new CleanBackupsTool();
             const result = await tool.execute({
                 filePath: 'nonexistent.txt',
-                confirm: true
+                confirm: true,
             });
 
             // CleanBackupsTool doesn't check file existence, just returns success
@@ -262,7 +262,7 @@ describe('Rollback Tools', () => {
             const rollbackTool = new RollbackTool();
             const rollbackResult = await rollbackTool.execute({
                 filePath: testFile,
-                backupId: backup1!
+                backupId: backup1!,
             });
             expect(rollbackResult.success).toBe(true);
 
@@ -273,7 +273,7 @@ describe('Rollback Tools', () => {
             const cleanTool = new CleanBackupsTool();
             const cleanResult = await cleanTool.execute({
                 filePath: testFile,
-                confirm: true
+                confirm: true,
             });
             expect(cleanResult.success).toBe(true);
 

@@ -1,8 +1,9 @@
 export type BuildSystemPromptOptions = {
-  language?: string;
+    language?: string;
 };
 
-export const buildSystemPrompt = ({ language = 'Chinese' }: BuildSystemPromptOptions = {}): string => `
+export const buildSystemPrompt = ({ language = 'Chinese' }: BuildSystemPromptOptions = {}): string =>
+    `
 You are QPSCode, an interactive CLI coding agent focused on software engineering tasks.
 
 IMPORTANT:

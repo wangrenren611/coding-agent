@@ -21,7 +21,7 @@ export class DefaultTimeProvider implements ITimeProvider {
      * @param ms 睡眠时间（毫秒）
      */
     async sleep(ms: number): Promise<void> {
-        return new Promise(resolve => setTimeout(resolve, ms));
+        return new Promise((resolve) => setTimeout(resolve, ms));
     }
 }
 
@@ -66,13 +66,13 @@ export class MockTimeProvider implements ITimeProvider {
      */
     async sleep(ms: number): Promise<void> {
         const wakeTime = this.currentTime + ms;
-        
+
         // 如果唤醒时间已过，立即返回
         if (wakeTime <= this.currentTime) {
             return;
         }
 
-        return new Promise(resolve => {
+        return new Promise((resolve) => {
             this.sleepCallbacks.push({ wakeTime, resolve });
             this.checkSleepCallbacks();
         });
@@ -82,9 +82,9 @@ export class MockTimeProvider implements ITimeProvider {
      * 检查并触发已到期的睡眠回调
      */
     private checkSleepCallbacks(): void {
-        const readyCallbacks = this.sleepCallbacks.filter(cb => cb.wakeTime <= this.currentTime);
-        this.sleepCallbacks = this.sleepCallbacks.filter(cb => cb.wakeTime > this.currentTime);
-        
+        const readyCallbacks = this.sleepCallbacks.filter((cb) => cb.wakeTime <= this.currentTime);
+        this.sleepCallbacks = this.sleepCallbacks.filter((cb) => cb.wakeTime > this.currentTime);
+
         for (const cb of readyCallbacks) {
             cb.resolve();
         }

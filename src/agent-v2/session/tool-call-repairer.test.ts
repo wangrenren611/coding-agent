@@ -19,7 +19,7 @@ describe('ToolCallRepairer', () => {
             messageId: 'assistant-1',
             role: 'assistant',
             content: '',
-            tool_calls: toolCallIds.map(id => ({
+            tool_calls: toolCallIds.map((id) => ({
                 id,
                 type: 'function',
                 function: { name: 'test_tool', arguments: '{}' },
@@ -113,13 +113,11 @@ describe('ToolCallRepairer', () => {
 
             expect(result.repaired).toBe(true);
             expect(result.repairedMessages).toHaveLength(1);
-            expect(messages).toHaveLength(5);  // 原始 4 + 修复的 1
+            expect(messages).toHaveLength(5); // 原始 4 + 修复的 1
         });
 
         it('应该调用 onRepair 回调', () => {
-            const messages: Message[] = [
-                createAssistantWithToolCalls(['call-1']),
-            ];
+            const messages: Message[] = [createAssistantWithToolCalls(['call-1'])];
             const repairedList: Message[] = [];
 
             repairer.repairInPlace(messages, (msg) => {
@@ -148,9 +146,7 @@ describe('ToolCallRepairer', () => {
 
     describe('detect', () => {
         it('应该返回需要修复的消息但不修改原数组', () => {
-            const messages: Message[] = [
-                createAssistantWithToolCalls(['call-1']),
-            ];
+            const messages: Message[] = [createAssistantWithToolCalls(['call-1'])];
 
             const detected = repairer.detect(messages);
 
@@ -159,10 +155,7 @@ describe('ToolCallRepairer', () => {
         });
 
         it('应该返回空数组当不需要修复时', () => {
-            const messages: Message[] = [
-                createAssistantWithToolCalls(['call-1']),
-                createToolResult('call-1'),
-            ];
+            const messages: Message[] = [createAssistantWithToolCalls(['call-1']), createToolResult('call-1')];
 
             const detected = repairer.detect(messages);
 
@@ -203,9 +196,7 @@ describe('ToolCallRepairer', () => {
         });
 
         it('应该处理没有 tool_calls 的 assistant 消息', () => {
-            const messages: Message[] = [
-                { messageId: 'asst', role: 'assistant', content: 'Hello' },
-            ];
+            const messages: Message[] = [{ messageId: 'asst', role: 'assistant', content: 'Hello' }];
 
             const result = repairer.repairInPlace(messages);
 

@@ -1,6 +1,6 @@
 /**
  * Agent 错误处理全面测试
- * 
+ *
  * 测试目标：
  * 1. 错误码常量和类型
  * 2. 专用错误子类
@@ -63,7 +63,7 @@ class MockProvider {
 
         // 模拟延迟
         if (this.responseDelay > 0) {
-            await new Promise(resolve => setTimeout(resolve, this.responseDelay));
+            await new Promise((resolve) => setTimeout(resolve, this.responseDelay));
         }
 
         if (this.errorToThrow) {
@@ -89,15 +89,19 @@ class MockProvider {
             object: 'chat.completion',
             created: Date.now(),
             model: 'test-model',
-            choices: [{
-                index: 0,
-                message: { role: 'assistant', content: 'Hello!' },
-                finish_reason: 'stop',
-            }],
+            choices: [
+                {
+                    index: 0,
+                    message: { role: 'assistant', content: 'Hello!' },
+                    finish_reason: 'stop',
+                },
+            ],
         } as LLMResponse;
     }
 
-    getTimeTimeout() { return 60000; }
+    getTimeTimeout() {
+        return 60000;
+    }
 
     reset() {
         this.callCount = 0;
@@ -647,10 +651,10 @@ describe('Agent 错误抛出测试', () => {
             });
 
             const firstExecution = agent.execute('First');
-            
+
             // 等待一小段时间确保第一次执行已经开始
-            await new Promise(resolve => setTimeout(resolve, 200));
-            
+            await new Promise((resolve) => setTimeout(resolve, 200));
+
             // 第二次执行应该被拒绝
             try {
                 await agent.execute('Second');
@@ -669,7 +673,7 @@ describe('Agent 错误抛出测试', () => {
             const { LLMRetryableError: ProviderLLMRetryableError } = await import('../../providers');
             const originalGenerate = mockProvider.generate.bind(mockProvider);
             mockProvider.generate = async () => {
-                await new Promise(resolve => setTimeout(resolve, 5000));
+                await new Promise((resolve) => setTimeout(resolve, 5000));
                 throw new ProviderLLMRetryableError('Retry later', 1000, 'RATE_LIMIT');
             };
 
@@ -683,14 +687,14 @@ describe('Agent 错误抛出测试', () => {
             });
 
             const execution = agent.executeWithResult('Hello');
-            
+
             // 等待一小段时间后中止
             setTimeout(() => agent.abort(), 100);
-            
+
             const result = await execution;
             expect(result.status).toBe('aborted');
             expect(result.failure?.code).toBe('AGENT_ABORTED');
-            
+
             // 恢复原始 generate
             mockProvider.generate = originalGenerate;
         }, 10000);
@@ -699,7 +703,7 @@ describe('Agent 错误抛出测试', () => {
     describe('重试超过限制错误', () => {
         it('超过最大重试次数应该抛出 AgentMaxRetriesExceededError', async () => {
             const { LLMRetryableError: ProviderLLMRetryableError } = await import('../../providers');
-            
+
             // 每次调用都抛出错误（不重置）
             const originalGenerate = mockProvider.generate.bind(mockProvider);
             mockProvider.generate = async () => {
@@ -718,7 +722,7 @@ describe('Agent 错误抛出测试', () => {
             const result = await agent.executeWithResult('Hello');
             expect(result.status).toBe('failed');
             expect(result.failure?.code).toBe('AGENT_MAX_RETRIES_EXCEEDED');
-            
+
             // 恢复原始 generate
             mockProvider.generate = originalGenerate;
         }, 10000);
@@ -728,18 +732,22 @@ describe('Agent 错误抛出测试', () => {
         it('超过最大补偿重试次数应该返回正确的错误码', async () => {
             mockProvider.customResponses = [
                 {
-                    choices: [{
-                        index: 0,
-                        message: { role: 'assistant', content: '' },
-                        finish_reason: 'stop',
-                    }],
+                    choices: [
+                        {
+                            index: 0,
+                            message: { role: 'assistant', content: '' },
+                            finish_reason: 'stop',
+                        },
+                    ],
                 },
                 {
-                    choices: [{
-                        index: 0,
-                        message: { role: 'assistant', content: '' },
-                        finish_reason: 'stop',
-                    }],
+                    choices: [
+                        {
+                            index: 0,
+                            message: { role: 'assistant', content: '' },
+                            finish_reason: 'stop',
+                        },
+                    ],
                 },
             ];
 

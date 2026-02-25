@@ -1,6 +1,6 @@
 /**
  * 工具调用修复器
- * 
+ *
  * 负责检测和修复异常中断导致的未闭合 tool call
  */
 
@@ -19,7 +19,7 @@ export interface RepairResult {
 
 /**
  * 工具调用修复器
- * 
+ *
  * 用于检测和修复因异常中断而未闭合的 tool call。
  * 当 agent 在执行工具调用过程中崩溃或被终止时，
  * 可能会留下没有对应 tool result 的 tool call。
@@ -27,15 +27,12 @@ export interface RepairResult {
 export class ToolCallRepairer {
     /**
      * 原地修复消息列表中的中断工具调用
-     * 
+     *
      * @param messages 消息列表（会被原地修改）
      * @param onRepair 每个修复消息的回调（用于持久化）
      * @returns 修复结果
      */
-    repairInPlace(
-        messages: Message[],
-        onRepair?: (message: Message) => void
-    ): RepairResult {
+    repairInPlace(messages: Message[], onRepair?: (message: Message) => void): RepairResult {
         const repairedMessages: Message[] = [];
         let index = 0;
         let repaired = false;
@@ -53,7 +50,7 @@ export class ToolCallRepairer {
             const { responded, cursor } = this.collectToolResponses(messages, index);
 
             // 找出缺失响应的 tool calls
-            const missingIds = toolCallIds.filter(id => !responded.has(id));
+            const missingIds = toolCallIds.filter((id) => !responded.has(id));
 
             if (missingIds.length === 0) {
                 index = cursor + 1;
@@ -61,8 +58,8 @@ export class ToolCallRepairer {
             }
 
             // 创建修复消息
-            const recovered = missingIds.map(id => this.createInterruptedResult(id));
-            
+            const recovered = missingIds.map((id) => this.createInterruptedResult(id));
+
             // 在 cursor 位置插入修复的消息
             messages.splice(cursor, 0, ...recovered);
             repairedMessages.push(...recovered);
@@ -84,7 +81,7 @@ export class ToolCallRepairer {
 
     /**
      * 仅检测不修复，返回需要修复的消息
-     * 
+     *
      * @param messages 消息列表
      * @returns 需要修复的消息列表
      */
@@ -102,10 +99,10 @@ export class ToolCallRepairer {
             }
 
             const { responded, cursor } = this.collectToolResponses(messages, index);
-            const missingIds = toolCallIds.filter(id => !responded.has(id));
+            const missingIds = toolCallIds.filter((id) => !responded.has(id));
 
             if (missingIds.length > 0) {
-                result.push(...missingIds.map(id => this.createInterruptedResult(id)));
+                result.push(...missingIds.map((id) => this.createInterruptedResult(id)));
             }
 
             index = cursor + 1;
@@ -151,10 +148,7 @@ export class ToolCallRepairer {
         return Array.from(uniqueIds);
     }
 
-    private collectToolResponses(
-        messages: Message[],
-        startIndex: number
-    ): { responded: Set<string>; cursor: number } {
+    private collectToolResponses(messages: Message[], startIndex: number): { responded: Set<string>; cursor: number } {
         const responded = new Set<string>();
         let cursor = startIndex + 1;
 
@@ -173,8 +167,6 @@ export class ToolCallRepairer {
         if (message.role !== 'tool') return null;
 
         const toolCallId = (message as any).tool_call_id;
-        return typeof toolCallId === 'string' && toolCallId.length > 0
-            ? toolCallId
-            : null;
+        return typeof toolCallId === 'string' && toolCallId.length > 0 ? toolCallId : null;
     }
 }

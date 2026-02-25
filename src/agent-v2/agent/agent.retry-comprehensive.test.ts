@@ -1,6 +1,6 @@
 /**
  * Agent 重试机制全面测试
- * 
+ *
  * 测试目标：
  * 1. AgentState 重试计数和重置逻辑
  * 2. 各类可重试错误（网络错误、超时、RateLimit、服务器错误等）
@@ -37,7 +37,7 @@ class MockProvider {
         this.callCount++;
 
         if (this.responseDelay > 0) {
-            await new Promise(resolve => setTimeout(resolve, this.responseDelay));
+            await new Promise((resolve) => setTimeout(resolve, this.responseDelay));
         }
 
         // 检查是否应该抛出错误
@@ -72,19 +72,23 @@ class MockProvider {
             object: 'chat.completion',
             created: Date.now(),
             model: 'test-model',
-            choices: [{
-                index: 0,
-                message: {
-                    role: 'assistant',
-                    content: 'Hello! How can I help you?',
+            choices: [
+                {
+                    index: 0,
+                    message: {
+                        role: 'assistant',
+                        content: 'Hello! How can I help you?',
+                    },
+                    finish_reason: 'stop',
                 },
-                finish_reason: 'stop',
-            }],
+            ],
             usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
         };
     }
 
-    getTimeTimeout() { return 60000; }
+    getTimeTimeout() {
+        return 60000;
+    }
 
     reset() {
         this.callCount = 0;
@@ -117,7 +121,7 @@ describe('AgentState 重试机制测试', () => {
         it('isRetryExceeded 在 retryCount <= maxRetries 时返回 false', () => {
             state.startTask();
             expect(state.isRetryExceeded()).toBe(false);
-            
+
             for (let i = 0; i <= defaultConfig.maxRetries; i++) {
                 if (i > 0) {
                     state.recordRetryableError();
@@ -142,11 +146,11 @@ describe('AgentState 重试机制测试', () => {
             state.recordRetryableError();
             state.recordRetryableError();
             expect(state.totalRetryCount).toBe(2);
-            
+
             state.recordSuccess(); // 成功会重置 retryCount 但不重置 totalRetryCount
             expect(state.retryCount).toBe(0);
             expect(state.totalRetryCount).toBe(2);
-            
+
             state.recordRetryableError();
             expect(state.totalRetryCount).toBe(3);
         });
@@ -156,7 +160,7 @@ describe('AgentState 重试机制测试', () => {
             state.recordRetryableError(5000); // 设置自定义延迟
             expect(state.retryCount).toBe(1);
             expect(state.nextRetryDelayMs).toBe(5000);
-            
+
             state.recordSuccess();
             expect(state.retryCount).toBe(0);
             expect(state.nextRetryDelayMs).toBe(defaultConfig.defaultRetryDelayMs);
@@ -171,10 +175,10 @@ describe('AgentState 重试机制测试', () => {
             state.recordRetryableError();
             state.recordRetryableError();
             state.recordCompensationRetry();
-            
+
             // 开始新任务
             state.startTask();
-            
+
             expect(state.loopCount).toBe(0);
             expect(state.retryCount).toBe(0);
             expect(state.totalRetryCount).toBe(0);
@@ -187,7 +191,7 @@ describe('AgentState 重试机制测试', () => {
             state.startTask();
             state.failTask({ code: 'TEST_ERROR', userMessage: 'Test failure' });
             expect(state.lastFailure).toBeDefined();
-            
+
             state.startTask();
             expect(state.lastFailure).toBeUndefined();
         });
@@ -196,7 +200,7 @@ describe('AgentState 重试机制测试', () => {
             state.startTask();
             state.recordRetryableError(5000);
             expect(state.nextRetryDelayMs).toBe(5000);
-            
+
             state.startTask();
             expect(state.nextRetryDelayMs).toBe(defaultConfig.defaultRetryDelayMs);
         });
@@ -206,7 +210,7 @@ describe('AgentState 重试机制测试', () => {
         it('isCompensationRetryExceeded 在达到 maxCompensationRetries 时返回 true', () => {
             state.startTask();
             expect(state.isCompensationRetryExceeded()).toBe(false);
-            
+
             state.recordCompensationRetry();
             expect(state.isCompensationRetryExceeded()).toBe(true);
         });
@@ -215,10 +219,10 @@ describe('AgentState 重试机制测试', () => {
             state.startTask();
             state.recordCompensationRetry();
             expect(state.compensationRetryCount).toBe(1);
-            
+
             state.recordSuccess();
             expect(state.compensationRetryCount).toBe(1); // 不重置
-            
+
             state.recordCompensationRetry();
             expect(state.compensationRetryCount).toBe(2);
         });
@@ -227,7 +231,7 @@ describe('AgentState 重试机制测试', () => {
             state.startTask();
             state.recordCompensationRetry();
             state.recordCompensationRetry();
-            
+
             state.startTask();
             expect(state.compensationRetryCount).toBe(0);
         });
@@ -273,7 +277,7 @@ describe('Agent 各类错误重试测试', () => {
             const { LLMRetryableError } = await import('../../providers');
             let failCount = 0;
             const originalGenerate = mockProvider.generate.bind(mockProvider);
-            
+
             mockProvider.generate = async (messages, options) => {
                 if (failCount < 2) {
                     failCount++;
@@ -301,7 +305,7 @@ describe('Agent 各类错误重试测试', () => {
             const { LLMRetryableError } = await import('../../providers');
             let failCount = 0;
             const originalGenerate = mockProvider.generate.bind(mockProvider);
-            
+
             mockProvider.generate = async (messages, options) => {
                 if (failCount < 1) {
                     failCount++;
@@ -328,7 +332,7 @@ describe('Agent 各类错误重试测试', () => {
             const { LLMRateLimitError } = await import('../../providers');
             let failCount = 0;
             const originalGenerate = mockProvider.generate.bind(mockProvider);
-            
+
             mockProvider.generate = async (messages, options) => {
                 if (failCount < 1) {
                     failCount++;
@@ -355,7 +359,7 @@ describe('Agent 各类错误重试测试', () => {
             const { LLMRetryableError } = await import('../../providers');
             let failCount = 0;
             const originalGenerate = mockProvider.generate.bind(mockProvider);
-            
+
             mockProvider.generate = async (messages, options) => {
                 if (failCount < 1) {
                     failCount++;
@@ -382,7 +386,7 @@ describe('Agent 各类错误重试测试', () => {
     describe('不可重试错误', () => {
         it('认证错误不应该触发重试', async () => {
             const { LLMAuthError } = await import('../../providers');
-            
+
             mockProvider.generate = async () => {
                 throw new LLMAuthError('Invalid API key');
             };
@@ -402,7 +406,7 @@ describe('Agent 各类错误重试测试', () => {
 
         it('404 错误不应该触发重试', async () => {
             const { LLMNotFoundError } = await import('../../providers');
-            
+
             mockProvider.generate = async () => {
                 throw new LLMNotFoundError('Model not found');
             };
@@ -422,7 +426,7 @@ describe('Agent 各类错误重试测试', () => {
 
         it('400 错误不应该触发重试', async () => {
             const { LLMBadRequestError } = await import('../../providers');
-            
+
             mockProvider.generate = async () => {
                 throw new LLMBadRequestError('Invalid request format');
             };
@@ -444,7 +448,7 @@ describe('Agent 各类错误重试测试', () => {
     describe('最大重试次数限制', () => {
         it('超过最大重试次数应该抛出错误', async () => {
             const { LLMRetryableError } = await import('../../providers');
-            
+
             mockProvider.generate = async () => {
                 throw new LLMRetryableError('Persistent server error', 10, 'SERVER_500');
             };
@@ -464,7 +468,7 @@ describe('Agent 各类错误重试测试', () => {
 
         it('maxRetries=0 时不允许任何重试', async () => {
             const { LLMRetryableError } = await import('../../providers');
-            
+
             mockProvider.generate = async () => {
                 throw new LLMRetryableError('Server error', 10, 'SERVER_500');
             };
@@ -484,7 +488,7 @@ describe('Agent 各类错误重试测试', () => {
 
         it('错误信息应该包含最后一次重试原因', async () => {
             const { LLMRetryableError } = await import('../../providers');
-            
+
             mockProvider.generate = async () => {
                 throw new LLMRetryableError('Specific error message', 10, 'CUSTOM_ERROR');
             };
@@ -510,26 +514,30 @@ describe('Agent 各类错误重试测试', () => {
     describe('补偿重试（空响应）', () => {
         it('空响应应该触发补偿重试', async () => {
             let callCount = 0;
-            
+
             mockProvider.generate = async () => {
                 callCount++;
                 if (callCount <= 2) {
                     return {
                         id: `empty-${callCount}`,
-                        choices: [{
-                            index: 0,
-                            message: { role: 'assistant', content: '' },
-                            finish_reason: 'stop',
-                        }],
+                        choices: [
+                            {
+                                index: 0,
+                                message: { role: 'assistant', content: '' },
+                                finish_reason: 'stop',
+                            },
+                        ],
                     } as LLMResponse;
                 }
                 return {
                     id: 'normal',
-                    choices: [{
-                        index: 0,
-                        message: { role: 'assistant', content: 'Normal response' },
-                        finish_reason: 'stop',
-                    }],
+                    choices: [
+                        {
+                            index: 0,
+                            message: { role: 'assistant', content: 'Normal response' },
+                            finish_reason: 'stop',
+                        },
+                    ],
                 } as LLMResponse;
             };
 
@@ -551,11 +559,13 @@ describe('Agent 各类错误重试测试', () => {
             mockProvider.generate = async () => {
                 return {
                     id: 'empty',
-                    choices: [{
-                        index: 0,
-                        message: { role: 'assistant', content: '' },
-                        finish_reason: 'stop',
-                    }],
+                    choices: [
+                        {
+                            index: 0,
+                            message: { role: 'assistant', content: '' },
+                            finish_reason: 'stop',
+                        },
+                    ],
                 } as LLMResponse;
             };
 
@@ -579,11 +589,13 @@ describe('Agent 各类错误重试测试', () => {
             mockProvider.generate = async () => {
                 return {
                     id: 'empty',
-                    choices: [{
-                        index: 0,
-                        message: { role: 'assistant', content: '' },
-                        finish_reason: 'stop',
-                    }],
+                    choices: [
+                        {
+                            index: 0,
+                            message: { role: 'assistant', content: '' },
+                            finish_reason: 'stop',
+                        },
+                    ],
                 } as LLMResponse;
             };
 
@@ -597,18 +609,18 @@ describe('Agent 各类错误重试测试', () => {
             });
 
             await agent.executeWithResult('Hello');
-            
+
             // 补偿重试超过限制后，空响应消息应该被移除
             // Session 中应该只有：系统消息 + 用户消息（没有助手空响应）
             const messages = agent.getMessages();
-            const assistantMessages = messages.filter(m => m.role === 'assistant');
+            const assistantMessages = messages.filter((m) => m.role === 'assistant');
             expect(assistantMessages.length).toBe(0); // 没有助手消息（空响应被移除）
         }, 10000);
 
         it('补偿重试次数与普通重试次数独立计算', async () => {
             const { LLMRetryableError } = await import('../../providers');
             let callCount = 0;
-            
+
             mockProvider.generate = async () => {
                 callCount++;
                 if (callCount === 1) {
@@ -619,21 +631,25 @@ describe('Agent 各类错误重试测试', () => {
                     // 第 2、3 次：空响应（触发补偿重试）
                     return {
                         id: `empty-${callCount}`,
-                        choices: [{
-                            index: 0,
-                            message: { role: 'assistant', content: '' },
-                            finish_reason: 'stop',
-                        }],
+                        choices: [
+                            {
+                                index: 0,
+                                message: { role: 'assistant', content: '' },
+                                finish_reason: 'stop',
+                            },
+                        ],
                     } as LLMResponse;
                 }
                 // 第 4 次：正常响应
                 return {
                     id: 'normal',
-                    choices: [{
-                        index: 0,
-                        message: { role: 'assistant', content: 'Success' },
-                        finish_reason: 'stop',
-                    }],
+                    choices: [
+                        {
+                            index: 0,
+                            message: { role: 'assistant', content: 'Success' },
+                            finish_reason: 'stop',
+                        },
+                    ],
                 } as LLMResponse;
             };
 
@@ -659,7 +675,7 @@ describe('Agent 各类错误重试测试', () => {
             const { LLMRetryableError } = await import('../../providers');
             let failCount = 0;
             const originalGenerate = mockProvider.generate.bind(mockProvider);
-            
+
             mockProvider.generate = async (messages, options) => {
                 if (failCount < 2) {
                     failCount++;
@@ -708,7 +724,7 @@ describe('Agent 各类错误重试测试', () => {
 
         it('失败时应该发出 TASK_FAILED 事件', async () => {
             const { LLMRetryableError } = await import('../../providers');
-            
+
             mockProvider.generate = async () => {
                 throw new LLMRetryableError('Persistent error', 10, 'PERSISTENT');
             };
@@ -766,7 +782,7 @@ describe('Agent 重试延迟测试', () => {
     it('应该使用配置的 retryDelayMs', async () => {
         const { LLMRetryableError } = await import('../../providers');
         let failCount = 0;
-        
+
         mockProvider.generate = async () => {
             if (failCount < 1) {
                 failCount++;
@@ -774,11 +790,13 @@ describe('Agent 重试延迟测试', () => {
             }
             return {
                 id: 'success',
-                choices: [{
-                    index: 0,
-                    message: { role: 'assistant', content: 'OK' },
-                    finish_reason: 'stop',
-                }],
+                choices: [
+                    {
+                        index: 0,
+                        message: { role: 'assistant', content: 'OK' },
+                        finish_reason: 'stop',
+                    },
+                ],
             } as LLMResponse;
         };
 
@@ -802,7 +820,7 @@ describe('Agent 重试延迟测试', () => {
     it('LLMRetryableError 的 retryAfter 应该优先于默认延迟', async () => {
         const { LLMRetryableError } = await import('../../providers');
         let failCount = 0;
-        
+
         mockProvider.generate = async () => {
             if (failCount < 1) {
                 failCount++;
@@ -811,11 +829,13 @@ describe('Agent 重试延迟测试', () => {
             }
             return {
                 id: 'success',
-                choices: [{
-                    index: 0,
-                    message: { role: 'assistant', content: 'OK' },
-                    finish_reason: 'stop',
-                }],
+                choices: [
+                    {
+                        index: 0,
+                        message: { role: 'assistant', content: 'OK' },
+                        finish_reason: 'stop',
+                    },
+                ],
             } as LLMResponse;
         };
 
@@ -839,7 +859,7 @@ describe('Agent 重试延迟测试', () => {
     it('多次重试应该保持相同的延迟（非指数退避）', async () => {
         const { LLMRetryableError } = await import('../../providers');
         let failCount = 0;
-        
+
         mockProvider.generate = async () => {
             if (failCount < 3) {
                 failCount++;
@@ -847,11 +867,13 @@ describe('Agent 重试延迟测试', () => {
             }
             return {
                 id: 'success',
-                choices: [{
-                    index: 0,
-                    message: { role: 'assistant', content: 'OK' },
-                    finish_reason: 'stop',
-                }],
+                choices: [
+                    {
+                        index: 0,
+                        message: { role: 'assistant', content: 'OK' },
+                        finish_reason: 'stop',
+                    },
+                ],
             } as LLMResponse;
         };
 
@@ -892,7 +914,7 @@ describe('Agent 中止与重试交互测试', () => {
 
     it('重试等待期间 abort 应该尽快返回', async () => {
         const { LLMRetryableError } = await import('../../providers');
-        
+
         mockProvider.generate = async () => {
             throw new LLMRetryableError('Server error', 5000, 'SERVER_500');
         };
@@ -908,10 +930,10 @@ describe('Agent 中止与重试交互测试', () => {
 
         const startTime = Date.now();
         const execution = agent.executeWithResult('Hello');
-        
+
         // 100ms 后中止
         setTimeout(() => agent.abort(), 100);
-        
+
         const result = await execution;
         const elapsed = Date.now() - startTime;
 
@@ -932,14 +954,14 @@ describe('Agent 中止与重试交互测试', () => {
 
         const execution = agent.executeWithResult('Hello');
         setTimeout(() => agent.abort(), 50);
-        
+
         const result = await execution;
         expect(result.status).toBe('aborted');
     }, 10000);
 
     it('中止后状态应该重置为 IDLE', async () => {
         const { LLMRetryableError } = await import('../../providers');
-        
+
         mockProvider.generate = async () => {
             throw new LLMRetryableError('Server error', 1000, 'SERVER_500');
         };
@@ -962,11 +984,13 @@ describe('Agent 中止与重试交互测试', () => {
         mockProvider.generate = async () => {
             return {
                 id: 'success',
-                choices: [{
-                    index: 0,
-                    message: { role: 'assistant', content: 'OK' },
-                    finish_reason: 'stop',
-                }],
+                choices: [
+                    {
+                        index: 0,
+                        message: { role: 'assistant', content: 'OK' },
+                        finish_reason: 'stop',
+                    },
+                ],
             } as LLMResponse;
         };
 
@@ -1000,7 +1024,7 @@ describe('Agent 重试边界条件测试', () => {
             const { LLMRetryableError } = await import('../../providers');
             let failCount = 0;
             const originalGenerate = mockProvider.generate.bind(mockProvider);
-            
+
             mockProvider.generate = async (messages, options) => {
                 if (failCount < 1) {
                     failCount++;
@@ -1056,34 +1080,40 @@ describe('Agent 重试边界条件测试', () => {
     describe('循环和重试交互', () => {
         it('工具调用循环应该计入 loopCount 而不是 retryCount', async () => {
             let callCount = 0;
-            
+
             mockProvider.generate = async () => {
                 callCount++;
                 if (callCount <= 3) {
                     return {
                         id: `tool-${callCount}`,
-                        choices: [{
-                            index: 0,
-                            message: {
-                                role: 'assistant',
-                                content: '',
-                                tool_calls: [{
-                                    id: `call-${callCount}`,
-                                    type: 'function',
-                                    function: { name: 'glob', arguments: '{"pattern": "*.ts"}' },
-                                }],
+                        choices: [
+                            {
+                                index: 0,
+                                message: {
+                                    role: 'assistant',
+                                    content: '',
+                                    tool_calls: [
+                                        {
+                                            id: `call-${callCount}`,
+                                            type: 'function',
+                                            function: { name: 'glob', arguments: '{"pattern": "*.ts"}' },
+                                        },
+                                    ],
+                                },
+                                finish_reason: 'tool_calls',
                             },
-                            finish_reason: 'tool_calls',
-                        }],
+                        ],
                     } as LLMResponse;
                 }
                 return {
                     id: 'final',
-                    choices: [{
-                        index: 0,
-                        message: { role: 'assistant', content: 'Done' },
-                        finish_reason: 'stop',
-                    }],
+                    choices: [
+                        {
+                            index: 0,
+                            message: { role: 'assistant', content: 'Done' },
+                            finish_reason: 'stop',
+                        },
+                    ],
                 } as LLMResponse;
             };
 
@@ -1110,28 +1140,34 @@ describe('Agent 重试边界条件测试', () => {
                 if (callCount <= 2) {
                     return {
                         id: 'tool',
-                        choices: [{
-                            index: 0,
-                            message: {
-                                role: 'assistant',
-                                content: 'Calling tool...',
-                                tool_calls: [{
-                                    id: 'call-1',
-                                    type: 'function',
-                                    function: { name: 'glob', arguments: '{"pattern": "*.ts"}' },
-                                }],
+                        choices: [
+                            {
+                                index: 0,
+                                message: {
+                                    role: 'assistant',
+                                    content: 'Calling tool...',
+                                    tool_calls: [
+                                        {
+                                            id: 'call-1',
+                                            type: 'function',
+                                            function: { name: 'glob', arguments: '{"pattern": "*.ts"}' },
+                                        },
+                                    ],
+                                },
+                                finish_reason: 'tool_calls',
                             },
-                            finish_reason: 'tool_calls',
-                        }],
+                        ],
                     } as LLMResponse;
                 }
                 return {
                     id: 'final',
-                    choices: [{
-                        index: 0,
-                        message: { role: 'assistant', content: 'Done' },
-                        finish_reason: 'stop',
-                    }],
+                    choices: [
+                        {
+                            index: 0,
+                            message: { role: 'assistant', content: 'Done' },
+                            finish_reason: 'stop',
+                        },
+                    ],
                 } as LLMResponse;
             };
 
@@ -1153,7 +1189,7 @@ describe('Agent 重试边界条件测试', () => {
     describe('错误分类', () => {
         it('网络错误应该被分类为可重试', async () => {
             const { LLMRetryableError } = await import('../../providers');
-            
+
             mockProvider.generate = async () => {
                 const error = new Error('Network error');
                 (error as any).code = 'ENOTFOUND';
@@ -1176,11 +1212,11 @@ describe('Agent 重试边界条件测试', () => {
 
         it('AbortError 不被分类为可重试错误', async () => {
             const { LLMAbortedError, isRetryableError } = await import('../../providers');
-            
+
             // LLMAbortedError 实际上不被视为可重试错误，因为中止通常意味着永久失败
             const error = new LLMAbortedError('Request aborted');
             expect(isRetryableError(error)).toBe(false); // 中止错误不可重试
-            
+
             // 当遇到 LLMAbortedError 时，应该直接失败而不是重试
             mockProvider.generate = async () => {
                 throw new LLMAbortedError('Request was cancelled');
@@ -1227,7 +1263,7 @@ describe('Agent 流式模式重试测试', () => {
         const { LLMRetryableError } = await import('../../providers');
         let failCount = 0;
         const originalGenerate = mockProvider.generate.bind(mockProvider);
-        
+
         mockProvider.generate = async (messages, options) => {
             if (failCount < 1) {
                 failCount++;
@@ -1252,26 +1288,30 @@ describe('Agent 流式模式重试测试', () => {
 
     it('流式模式空响应应该触发补偿重试', async () => {
         let callCount = 0;
-        
+
         mockProvider.generate = async () => {
             callCount++;
             if (callCount <= 1) {
                 return {
                     id: `empty-${callCount}`,
-                    choices: [{
-                        index: 0,
-                        message: { role: 'assistant', content: '' },
-                        finish_reason: 'length',
-                    }],
+                    choices: [
+                        {
+                            index: 0,
+                            message: { role: 'assistant', content: '' },
+                            finish_reason: 'length',
+                        },
+                    ],
                 } as LLMResponse;
             }
             return {
                 id: 'normal',
-                choices: [{
-                    index: 0,
-                    message: { role: 'assistant', content: 'Normal response' },
-                    finish_reason: 'stop',
-                }],
+                choices: [
+                    {
+                        index: 0,
+                        message: { role: 'assistant', content: 'Normal response' },
+                        finish_reason: 'stop',
+                    },
+                ],
             } as LLMResponse;
         };
 
@@ -1313,7 +1353,7 @@ describe('Agent executeWithResult 重试测试', () => {
         const { LLMRetryableError } = await import('../../providers');
         let failCount = 0;
         const originalGenerate = mockProvider.generate.bind(mockProvider);
-        
+
         mockProvider.generate = async (messages, options) => {
             if (failCount < 2) {
                 failCount++;
@@ -1339,7 +1379,7 @@ describe('Agent executeWithResult 重试测试', () => {
 
     it('失败时应该返回 failure 信息', async () => {
         const { LLMRetryableError } = await import('../../providers');
-        
+
         mockProvider.generate = async () => {
             throw new LLMRetryableError('Persistent error', 10, 'PERSISTENT_ERROR');
         };
@@ -1362,7 +1402,7 @@ describe('Agent executeWithResult 重试测试', () => {
 
     it('中止时应该返回 aborted 状态', async () => {
         const { LLMRetryableError } = await import('../../providers');
-        
+
         mockProvider.generate = async () => {
             throw new LLMRetryableError('Server error', 5000, 'SERVER_500');
         };
@@ -1378,7 +1418,7 @@ describe('Agent executeWithResult 重试测试', () => {
 
         const execution = agent.executeWithResult('Hello');
         setTimeout(() => agent.abort(), 50);
-        
+
         const result = await execution;
         expect(result.status).toBe('aborted');
         expect(result.failure?.code).toBe('AGENT_ABORTED');

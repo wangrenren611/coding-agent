@@ -3,16 +3,16 @@
  * 统一构建各种类型的消息，确保一致性
  */
 
-import { v4 as uuid } from "uuid";
-import { FinishReason, LLMResponse, MessageContent, Role, Usage } from "../../providers";
-import { Message, MessageType } from "../session/types";
+import { v4 as uuid } from 'uuid';
+import { FinishReason, LLMResponse, MessageContent, Role, Usage } from '../../providers';
+import { Message, MessageType } from '../session/types';
 import {
     ToolCall,
     getResponseContent,
     getResponseFinishReason,
     getResponseToolCalls,
     responseHasToolCalls,
-} from "./types-internal";
+} from './types-internal';
 
 // ==================== 消息构建选项 ====================
 
@@ -33,7 +33,7 @@ export interface UserMessageOptions extends BaseMessageOptions {
 export interface AssistantMessageOptions extends BaseMessageOptions {
     content?: MessageContent;
     tool_calls?: ToolCall[];
-    reasoning_content?: string;  // 推理内容
+    reasoning_content?: string; // 推理内容
 }
 
 export interface ToolMessageOptions extends BaseMessageOptions {
@@ -108,10 +108,7 @@ export class MessageBuilder {
      * 从 LLM 响应构建助手消息
      * 自动判断是文本还是工具调用
      */
-    static fromLLMResponse(
-        response: LLMResponse,
-        messageId?: string
-    ): Message {
+    static fromLLMResponse(response: LLMResponse, messageId?: string): Message {
         const id = messageId || uuid();
         const finishReason = getResponseFinishReason(response);
         const usage = response.usage;
@@ -140,10 +137,7 @@ export class MessageBuilder {
     /**
      * 更新现有消息
      */
-    static updateMessage(
-        message: Message,
-        updates: Partial<Omit<Message, 'messageId'>>
-    ): Message {
+    static updateMessage(message: Message, updates: Partial<Omit<Message, 'messageId'>>): Message {
         return {
             ...message,
             ...updates,
@@ -161,9 +155,7 @@ export class MessageBuilder {
             finish_reason?: FinishReason;
         }
     ): Message {
-        const currentContent = typeof message.content === 'string'
-            ? message.content
-            : JSON.stringify(message.content);
+        const currentContent = typeof message.content === 'string' ? message.content : JSON.stringify(message.content);
         return this.updateMessage(message, {
             content: currentContent + additionalContent,
             id: options?.id ?? message.id,
@@ -184,10 +176,7 @@ export function createUserMessage(content: MessageContent, messageId?: string): 
 /**
  * 创建助手文本消息的便捷函数
  */
-export function createAssistantMessage(
-    content: string,
-    options?: Omit<AssistantMessageOptions, 'content'>
-): Message {
+export function createAssistantMessage(content: string, options?: Omit<AssistantMessageOptions, 'content'>): Message {
     return MessageBuilder.assistantMessage({ content, ...options });
 }
 
@@ -204,11 +193,7 @@ export function createToolCallMessage(
 /**
  * 创建工具结果消息的便捷函数
  */
-export function createToolResultMessage(
-    toolCallId: string,
-    content: string,
-    messageId?: string
-): Message {
+export function createToolResultMessage(toolCallId: string, content: string, messageId?: string): Message {
     return MessageBuilder.toolMessage({
         tool_call_id: toolCallId,
         content,

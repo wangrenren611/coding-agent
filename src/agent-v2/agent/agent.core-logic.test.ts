@@ -1,6 +1,6 @@
 /**
  * Agent 核心逻辑全面测试
- * 
+ *
  * 测试目标：
  * 1. 边界条件和错误处理
  * 2. 状态转换逻辑
@@ -39,7 +39,7 @@ class MockProvider {
         this.callCount++;
 
         if (this.responseDelay > 0) {
-            await new Promise(resolve => setTimeout(resolve, this.responseDelay));
+            await new Promise((resolve) => setTimeout(resolve, this.responseDelay));
         }
 
         if (this.shouldFail && this.failCount < 3) {
@@ -50,7 +50,7 @@ class MockProvider {
         }
 
         if (this.shouldTimeout) {
-            await new Promise(resolve => setTimeout(resolve, 120000)); // 2 minutes
+            await new Promise((resolve) => setTimeout(resolve, 120000)); // 2 minutes
         }
 
         if (this.customResponse) {
@@ -68,19 +68,23 @@ class MockProvider {
             object: 'chat.completion',
             created: Date.now(),
             model: 'test-model',
-            choices: [{
-                index: 0,
-                message: {
-                    role: 'assistant',
-                    content: 'Hello! How can I help you?',
+            choices: [
+                {
+                    index: 0,
+                    message: {
+                        role: 'assistant',
+                        content: 'Hello! How can I help you?',
+                    },
+                    finish_reason: 'stop',
                 },
-                finish_reason: 'stop',
-            }],
+            ],
             usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
         };
     }
 
-    getTimeTimeout() { return 60000; }
+    getTimeTimeout() {
+        return 60000;
+    }
 
     setCustomResponse(response: Partial<LLMResponse>) {
         this.customResponse = response;
@@ -312,25 +316,29 @@ describe('Agent 完成条件判断测试', () => {
             // 第一次返回工具调用，第二次返回正常响应
             let callCount = 0;
             const originalGenerate = mockProvider.generate.bind(mockProvider);
-            
+
             mockProvider.generate = async (messages, options) => {
                 callCount++;
                 if (callCount === 1) {
                     return {
                         id: 'test-1',
-                        choices: [{
-                            index: 0,
-                            message: {
-                                role: 'assistant',
-                                content: '',
-                                tool_calls: [{
-                                    id: 'call-1',
-                                    type: 'function',
-                                    function: { name: 'glob', arguments: '{"pattern": "*.ts"}' },
-                                }],
+                        choices: [
+                            {
+                                index: 0,
+                                message: {
+                                    role: 'assistant',
+                                    content: '',
+                                    tool_calls: [
+                                        {
+                                            id: 'call-1',
+                                            type: 'function',
+                                            function: { name: 'glob', arguments: '{"pattern": "*.ts"}' },
+                                        },
+                                    ],
+                                },
+                                finish_reason: 'tool_calls',
                             },
-                            finish_reason: 'tool_calls',
-                        }],
+                        ],
                     };
                 }
                 return originalGenerate(messages, options);
@@ -349,14 +357,16 @@ describe('Agent 完成条件判断测试', () => {
 
         it('finish_reason=length 应该在有内容时完成', async () => {
             mockProvider.setCustomResponse({
-                choices: [{
-                    index: 0,
-                    message: {
-                        role: 'assistant',
-                        content: 'This is a partial response...',
+                choices: [
+                    {
+                        index: 0,
+                        message: {
+                            role: 'assistant',
+                            content: 'This is a partial response...',
+                        },
+                        finish_reason: 'length',
                     },
-                    finish_reason: 'length',
-                }],
+                ],
             });
 
             const agent = new Agent({
@@ -376,17 +386,19 @@ describe('Agent 完成条件判断测试', () => {
         it('空内容 + stop 应该触发补偿重试', async () => {
             let callCount = 0;
             const originalGenerate = mockProvider.generate.bind(mockProvider);
-            
+
             mockProvider.generate = async (messages, options) => {
                 callCount++;
                 if (callCount <= 2) {
                     return {
                         id: 'test-id',
-                        choices: [{
-                            index: 0,
-                            message: { role: 'assistant', content: '' },
-                            finish_reason: 'stop',
-                        }],
+                        choices: [
+                            {
+                                index: 0,
+                                message: { role: 'assistant', content: '' },
+                                finish_reason: 'stop',
+                            },
+                        ],
                     };
                 }
                 return originalGenerate(messages, options);
@@ -410,11 +422,13 @@ describe('Agent 完成条件判断测试', () => {
                 callCount++;
                 return {
                     id: `stream-empty-${callCount}`,
-                    choices: [{
-                        index: 0,
-                        message: { role: 'assistant', content: '' },
-                        finish_reason: 'length',
-                    }],
+                    choices: [
+                        {
+                            index: 0,
+                            message: { role: 'assistant', content: '' },
+                            finish_reason: 'length',
+                        },
+                    ],
                 } as LLMResponse;
             };
 
@@ -479,22 +493,26 @@ describe('Agent 重试机制测试', () => {
                 callCount++;
                 return {
                     id: `test-id-${callCount}`,
-                    choices: [{
-                        index: 0,
-                        message: {
-                            role: 'assistant',
-                            content: 'Processing...',
-                            tool_calls: [{
-                                id: `call-${callCount}`,
-                                type: 'function',
-                                function: {
-                                    name: 'read_file',
-                                    arguments: '{"path": "test.txt"}',
-                                },
-                            }],
+                    choices: [
+                        {
+                            index: 0,
+                            message: {
+                                role: 'assistant',
+                                content: 'Processing...',
+                                tool_calls: [
+                                    {
+                                        id: `call-${callCount}`,
+                                        type: 'function',
+                                        function: {
+                                            name: 'read_file',
+                                            arguments: '{"path": "test.txt"}',
+                                        },
+                                    },
+                                ],
+                            },
+                            finish_reason: 'tool_calls',
                         },
-                        finish_reason: 'tool_calls',
-                    }],
+                    ],
                 };
             };
 
@@ -517,7 +535,7 @@ describe('Agent 重试机制测试', () => {
             let failCount = 0;
             const originalGenerate = mockProvider.generate.bind(mockProvider);
             const { LLMRetryableError } = await import('../../providers');
-            
+
             mockProvider.generate = async (messages, options) => {
                 if (failCount < 2) {
                     failCount++;
@@ -755,21 +773,25 @@ describe('Compaction 压缩逻辑测试', () => {
 
     describe('触发条件', () => {
         it('消息数少于 keepMessagesNum 不应该触发压缩', () => {
-            const messages: Message[] = Array(3).fill(null).map((_, i) => ({
-                messageId: `${i}`,
-                role: 'user' as const,
-                content: 'Test message',
-            }));
+            const messages: Message[] = Array(3)
+                .fill(null)
+                .map((_, i) => ({
+                    messageId: `${i}`,
+                    role: 'user' as const,
+                    content: 'Test message',
+                }));
             const info = compaction.getTokenInfo(messages);
             expect(info.shouldCompact).toBe(false);
         });
 
         it('消息数多于 keepMessagesNum 但 token 未达阈值不应该触发', () => {
-            const messages: Message[] = Array(10).fill(null).map((_, i) => ({
-                messageId: `${i}`,
-                role: 'user' as const,
-                content: 'Short', // 短内容，token 少
-            }));
+            const messages: Message[] = Array(10)
+                .fill(null)
+                .map((_, i) => ({
+                    messageId: `${i}`,
+                    role: 'user' as const,
+                    content: 'Short', // 短内容，token 少
+                }));
             const info = compaction.getTokenInfo(messages);
             // 即使消息多，如果 token 少也不触发
             expect(info.shouldCompact).toBe(false);
@@ -786,11 +808,13 @@ describe('Compaction 压缩逻辑测试', () => {
 
             // 设置 mock 返回摘要
             mockProvider.setCustomResponse({
-                choices: [{
-                    index: 0,
-                    message: { role: 'assistant', content: 'Summary' },
-                    finish_reason: 'stop',
-                }],
+                choices: [
+                    {
+                        index: 0,
+                        message: { role: 'assistant', content: 'Summary' },
+                        finish_reason: 'stop',
+                    },
+                ],
             });
 
             // 不触发压缩的测试
@@ -802,28 +826,30 @@ describe('Compaction 压缩逻辑测试', () => {
             // 创建足够多的消息以触发压缩
             const messages: Message[] = [
                 { messageId: 'sys', role: 'system', content: 'System prompt' },
-                ...Array(20).fill(null).map((_, i) => ({
-                    messageId: `${i}`,
-                    role: i % 2 === 0 ? 'user' as const : 'assistant' as const,
-                    content: 'A'.repeat(100), // 足够长以触发 token 阈值
-                })),
+                ...Array(20)
+                    .fill(null)
+                    .map((_, i) => ({
+                        messageId: `${i}`,
+                        role: i % 2 === 0 ? ('user' as const) : ('assistant' as const),
+                        content: 'A'.repeat(100), // 足够长以触发 token 阈值
+                    })),
             ];
 
             mockProvider.setCustomResponse({
-                choices: [{
-                    index: 0,
-                    message: { role: 'assistant', content: 'Summary' },
-                    finish_reason: 'stop',
-                }],
+                choices: [
+                    {
+                        index: 0,
+                        message: { role: 'assistant', content: 'Summary' },
+                        finish_reason: 'stop',
+                    },
+                ],
             });
 
             const result = await compaction.compact(messages);
-            
+
             if (result.isCompacted) {
                 // 检查 active 区域最后一条 user 消息被保留
-                const activeUserMessages = result.messages.filter(
-                    m => m.role === 'user' && m.type !== 'summary'
-                );
+                const activeUserMessages = result.messages.filter((m) => m.role === 'user' && m.type !== 'summary');
                 expect(activeUserMessages.length).toBeGreaterThanOrEqual(1);
             }
         });
@@ -834,38 +860,45 @@ describe('Compaction 压缩逻辑测试', () => {
             const messages: Message[] = [
                 { messageId: 'sys', role: 'system', content: 'System' },
                 { messageId: '1', role: 'user', content: 'Read file' },
-                { 
-                    messageId: '2', 
-                    role: 'assistant', 
+                {
+                    messageId: '2',
+                    role: 'assistant',
                     content: '',
                     tool_calls: [{ id: 'tc1', type: 'function', function: { name: 'read_file', arguments: '{}' } }],
                 },
                 { messageId: '3', role: 'tool', tool_call_id: 'tc1', content: 'File content' },
                 { messageId: '4', role: 'user', content: 'Thanks' },
-                ...Array(20).fill(null).map((_, i) => ({
-                    messageId: `${i + 5}`,
-                    role: i % 2 === 0 ? 'user' as const : 'assistant' as const,
-                    content: 'A'.repeat(100),
-                })),
+                ...Array(20)
+                    .fill(null)
+                    .map((_, i) => ({
+                        messageId: `${i + 5}`,
+                        role: i % 2 === 0 ? ('user' as const) : ('assistant' as const),
+                        content: 'A'.repeat(100),
+                    })),
             ];
 
             mockProvider.setCustomResponse({
-                choices: [{
-                    index: 0,
-                    message: { role: 'assistant', content: 'Summary' },
-                    finish_reason: 'stop',
-                }],
+                choices: [
+                    {
+                        index: 0,
+                        message: { role: 'assistant', content: 'Summary' },
+                        finish_reason: 'stop',
+                    },
+                ],
             });
 
             const result = await compaction.compact(messages);
-            
+
             if (result.isCompacted) {
                 // 检查 tool 消息和 assistant 消息配对
-                const hasToolMessage = result.messages.some(m => m.role === 'tool');
+                const hasToolMessage = result.messages.some((m) => m.role === 'tool');
                 const hasAssistantWithToolCall = result.messages.some(
-                    m => m.role === 'assistant' && Array.isArray((m as any).tool_calls) && (m as any).tool_calls.length > 0
+                    (m) =>
+                        m.role === 'assistant' &&
+                        Array.isArray((m as any).tool_calls) &&
+                        (m as any).tool_calls.length > 0
                 );
-                
+
                 if (hasToolMessage) {
                     expect(hasAssistantWithToolCall).toBe(true);
                 }
@@ -963,10 +996,10 @@ describe('Agent 边界条件测试', () => {
             });
 
             const firstExecution = agent.execute('First');
-            
+
             // 等待一小段时间确保第一次执行已经开始
-            await new Promise(resolve => setTimeout(resolve, 100));
-            
+            await new Promise((resolve) => setTimeout(resolve, 100));
+
             // 第二次执行应该被拒绝
             await expect(agent.execute('Second')).rejects.toThrow();
 
@@ -1057,14 +1090,14 @@ describe('消息处理测试', () => {
             const messages = agent.getMessages();
 
             expect(messages.length).toBeGreaterThan(0);
-            expect(messages.some(m => m.role === 'system')).toBe(true);
-            expect(messages.some(m => m.role === 'user')).toBe(true);
-            expect(messages.some(m => m.role === 'assistant')).toBe(true);
+            expect(messages.some((m) => m.role === 'system')).toBe(true);
+            expect(messages.some((m) => m.role === 'user')).toBe(true);
+            expect(messages.some((m) => m.role === 'assistant')).toBe(true);
         });
 
         it('同一 session 多次执行应该累积消息', async () => {
             const sessionId = 'test-session-accumulate';
-            
+
             const agent = new Agent({
                 provider: mockProvider as any,
                 systemPrompt: 'Test',
@@ -1114,26 +1147,30 @@ describe('Task 子 Agent 事件透传', () => {
                     object: 'chat.completion',
                     created: Date.now(),
                     model: 'test-model',
-                    choices: [{
-                        index: 0,
-                        message: {
-                            role: 'assistant',
-                            content: 'Use task tool',
-                            tool_calls: [{
-                                id: 'call-task-1',
-                                type: 'function',
-                                function: {
-                                    name: 'task',
-                                    arguments: JSON.stringify({
-                                        description: 'subagent check',
-                                        prompt: 'just answer done',
-                                        subagent_type: 'explore',
-                                    }),
-                                },
-                            }],
+                    choices: [
+                        {
+                            index: 0,
+                            message: {
+                                role: 'assistant',
+                                content: 'Use task tool',
+                                tool_calls: [
+                                    {
+                                        id: 'call-task-1',
+                                        type: 'function',
+                                        function: {
+                                            name: 'task',
+                                            arguments: JSON.stringify({
+                                                description: 'subagent check',
+                                                prompt: 'just answer done',
+                                                subagent_type: 'explore',
+                                            }),
+                                        },
+                                    },
+                                ],
+                            },
+                            finish_reason: 'tool_calls',
                         },
-                        finish_reason: 'tool_calls',
-                    }],
+                    ],
                 } as LLMResponse;
             }
 
@@ -1144,11 +1181,13 @@ describe('Task 子 Agent 事件透传', () => {
                     object: 'chat.completion',
                     created: Date.now(),
                     model: 'test-model',
-                    choices: [{
-                        index: 0,
-                        message: { role: 'assistant', content: 'subagent done' },
-                        finish_reason: 'stop',
-                    }],
+                    choices: [
+                        {
+                            index: 0,
+                            message: { role: 'assistant', content: 'subagent done' },
+                            finish_reason: 'stop',
+                        },
+                    ],
                 } as LLMResponse;
             }
 
@@ -1158,11 +1197,13 @@ describe('Task 子 Agent 事件透传', () => {
                 object: 'chat.completion',
                 created: Date.now(),
                 model: 'test-model',
-                choices: [{
-                    index: 0,
-                    message: { role: 'assistant', content: 'final answer' },
-                    finish_reason: 'stop',
-                }],
+                choices: [
+                    {
+                        index: 0,
+                        message: { role: 'assistant', content: 'final answer' },
+                        finish_reason: 'stop',
+                    },
+                ],
             } as LLMResponse;
         };
 
@@ -1208,25 +1249,29 @@ describe('工具执行测试', () => {
             // 第一次返回工具调用，第二次返回普通响应
             let callCount = 0;
             const originalGenerate = mockProvider.generate.bind(mockProvider);
-            
+
             mockProvider.generate = async (messages, options) => {
                 callCount++;
                 if (callCount === 1) {
                     return {
                         id: 'test-1',
-                        choices: [{
-                            index: 0,
-                            message: {
-                                role: 'assistant',
-                                content: '',
-                                tool_calls: [{
-                                    id: 'call-1',
-                                    type: 'function',
-                                    function: { name: 'glob', arguments: '{"pattern": "*.ts"}' },
-                                }],
+                        choices: [
+                            {
+                                index: 0,
+                                message: {
+                                    role: 'assistant',
+                                    content: '',
+                                    tool_calls: [
+                                        {
+                                            id: 'call-1',
+                                            type: 'function',
+                                            function: { name: 'glob', arguments: '{"pattern": "*.ts"}' },
+                                        },
+                                    ],
+                                },
+                                finish_reason: 'tool_calls',
                             },
-                            finish_reason: 'tool_calls',
-                        }],
+                        ],
                     };
                 }
                 return originalGenerate(messages, options);
@@ -1249,7 +1294,7 @@ describe('工具执行测试', () => {
         it('敏感信息应该被脱敏', async () => {
             // 简化测试：只验证 security 模块的脱敏功能
             const { sanitizeToolResult, toolResultToString } = await import('../security');
-            
+
             const sensitiveResult = {
                 tool_call_id: 'call-1',
                 result: {
@@ -1257,10 +1302,10 @@ describe('工具执行测试', () => {
                     output: 'API_KEY=sk-1234567890\nPASSWORD=secret123\nNORMAL=text',
                 },
             };
-            
+
             const sanitized = sanitizeToolResult(sensitiveResult);
             const resultString = toolResultToString(sanitized);
-            
+
             // 敏感信息应该被脱敏
             expect(resultString).not.toContain('sk-1234567890');
             expect(resultString).not.toContain('secret123');

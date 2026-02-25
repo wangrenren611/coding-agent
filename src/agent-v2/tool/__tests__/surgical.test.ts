@@ -28,7 +28,7 @@ describe('SurgicalEditTool - Deep Tests', () => {
                 filePath: testFile,
                 line: 2,
                 oldText: 'Line 2',
-                newText: 'Modified Line 2'
+                newText: 'Modified Line 2',
             });
 
             expect(result.success).toBe(true);
@@ -43,8 +43,8 @@ describe('SurgicalEditTool - Deep Tests', () => {
             const result = await tool.execute({
                 filePath: testFile,
                 line: 1,
-                oldText: 'function OLD_NAME() {',  // Full line content
-                newText: 'function NEW_NAME() {'
+                oldText: 'function OLD_NAME() {', // Full line content
+                newText: 'function NEW_NAME() {',
             });
 
             expect(result.success).toBe(true);
@@ -59,8 +59,8 @@ describe('SurgicalEditTool - Deep Tests', () => {
             const result = await tool.execute({
                 filePath: testFile,
                 line: 1,
-                oldText: 'const x = 1;// comment',  // Full line content
-                newText: 'const x = 1;// updated comment'
+                oldText: 'const x = 1;// comment', // Full line content
+                newText: 'const x = 1;// updated comment',
             });
 
             expect(result.success).toBe(true);
@@ -78,7 +78,7 @@ describe('SurgicalEditTool - Deep Tests', () => {
                 filePath: testFile,
                 line: 2,
                 oldText: 'Line 2\nLine 3',
-                newText: 'New Line 2\nNew Line 3'
+                newText: 'New Line 2\nNew Line 3',
             });
 
             expect(result.success).toBe(true);
@@ -94,7 +94,7 @@ describe('SurgicalEditTool - Deep Tests', () => {
                 filePath: testFile,
                 line: 2,
                 oldText: 'Line 2\nLine 3\nLine 4',
-                newText: 'REPLACED'
+                newText: 'REPLACED',
             });
 
             expect(result.success).toBe(true);
@@ -112,7 +112,7 @@ describe('SurgicalEditTool - Deep Tests', () => {
                 filePath: testFile,
                 line: 1,
                 oldText: 'function oldFunc() {\n    return 1;\n}',
-                newText: 'const newFunc = () => 42;'
+                newText: 'const newFunc = () => 42;',
             });
 
             expect(result.success).toBe(true);
@@ -128,7 +128,7 @@ describe('SurgicalEditTool - Deep Tests', () => {
                 filePath: testFile,
                 line: 2,
                 oldText: 'OLD LINE',
-                newText: 'New Line A\nNew Line B\nNew Line C'
+                newText: 'New Line A\nNew Line B\nNew Line C',
             });
 
             expect(result.success).toBe(true);
@@ -144,7 +144,7 @@ describe('SurgicalEditTool - Deep Tests', () => {
                 filePath: testFile,
                 line: 2,
                 oldText: 'Line A\nLine B\nLine C',
-                newText: 'SINGLE LINE'
+                newText: 'SINGLE LINE',
             });
 
             expect(result.success).toBe(true);
@@ -161,8 +161,8 @@ describe('SurgicalEditTool - Deep Tests', () => {
             const result = await tool.execute({
                 filePath: testFile,
                 line: 1,
-                oldText: 'function calculateSum(a, b) {',  // Full line content
-                newText: 'function addNumbers(a, b) {'
+                oldText: 'function calculateSum(a, b) {', // Full line content
+                newText: 'function addNumbers(a, b) {',
             });
 
             expect(result.success).toBe(true);
@@ -178,7 +178,7 @@ describe('SurgicalEditTool - Deep Tests', () => {
                 filePath: testFile,
                 line: 1,
                 oldText: 'const API_URL = "https://api.example.com";',
-                newText: 'const API_ENDPOINT = "https://api.newdomain.com";'
+                newText: 'const API_ENDPOINT = "https://api.newdomain.com";',
             });
 
             expect(result.success).toBe(true);
@@ -198,7 +198,7 @@ describe('SurgicalEditTool - Deep Tests', () => {
                 filePath: testFile,
                 line: 2,
                 oldText: '    id: number;',
-                newText: '    userId: number;'
+                newText: '    userId: number;',
             });
 
             expect(result.success).toBe(true);
@@ -214,7 +214,7 @@ describe('SurgicalEditTool - Deep Tests', () => {
                 filePath: testFile,
                 line: 1,
                 oldText: 'import { Component } from "react";',
-                newText: 'import { FC } from "react";'
+                newText: 'import { FC } from "react";',
             });
 
             expect(result.success).toBe(true);
@@ -230,7 +230,7 @@ describe('SurgicalEditTool - Deep Tests', () => {
                 filePath: 'nonexistent.txt',
                 line: 1,
                 oldText: 'old',
-                newText: 'new'
+                newText: 'new',
             });
 
             expect(result.success).toBe(false);
@@ -245,7 +245,7 @@ describe('SurgicalEditTool - Deep Tests', () => {
                 filePath: testFile,
                 line: 10,
                 oldText: 'old',
-                newText: 'new'
+                newText: 'new',
             });
 
             expect(result.success).toBe(false);
@@ -260,8 +260,8 @@ describe('SurgicalEditTool - Deep Tests', () => {
             const result = await tool.execute({
                 filePath: testFile,
                 line: 2,
-                oldText: 'Line X',  // Wrong text
-                newText: 'New Line'
+                oldText: 'Line X', // Wrong text
+                newText: 'New Line',
             });
 
             expect(result.success).toBe(false);
@@ -275,8 +275,8 @@ describe('SurgicalEditTool - Deep Tests', () => {
             const result = await tool.execute({
                 filePath: testFile,
                 line: 2,
-                oldText: 'Line 2\nLine 3\nLine 4\nLine 5',  // More lines than available
-                newText: 'Replacement'
+                oldText: 'Line 2\nLine 3\nLine 4\nLine 5', // More lines than available
+                newText: 'Replacement',
             });
 
             expect(result.success).toBe(false);
@@ -292,7 +292,7 @@ describe('SurgicalEditTool - Deep Tests', () => {
                 filePath: testFile,
                 line: 1,
                 oldText: 'Hello World',
-                newText: 'Hi World'
+                newText: 'Hi World',
             });
 
             expect(result.success).toBe(true);
@@ -307,8 +307,8 @@ describe('SurgicalEditTool - Deep Tests', () => {
             const result = await tool.execute({
                 filePath: testFile,
                 line: 1,
-                oldText: 'Price: $100.00',  // Full line content
-                newText: 'Price: $99.99'
+                oldText: 'Price: $100.00', // Full line content
+                newText: 'Price: $99.99',
             });
 
             expect(result.success).toBe(true);
@@ -324,7 +324,7 @@ describe('SurgicalEditTool - Deep Tests', () => {
                 filePath: testFile,
                 line: 1,
                 oldText: '\tindented',
-                newText: '\tmodified'
+                newText: '\tmodified',
             });
 
             expect(result.success).toBe(true);
@@ -340,7 +340,7 @@ describe('SurgicalEditTool - Deep Tests', () => {
                 filePath: testFile,
                 line: 2,
                 oldText: 'REMOVE ME',
-                newText: ''
+                newText: '',
             });
 
             expect(result.success).toBe(true);
@@ -356,7 +356,7 @@ describe('SurgicalEditTool - Deep Tests', () => {
                 filePath: testFile,
                 line: 1,
                 oldText: 'SingleLine',
-                newText: 'Line A\nLine B\nLine C'
+                newText: 'Line A\nLine B\nLine C',
             });
 
             expect(result.success).toBe(true);
@@ -380,7 +380,7 @@ export const Button = ({ title }: Props) => {
                 filePath: testFile,
                 line: 2,
                 oldText: '    title: string;',
-                newText: '    label: string;\n    onClick: () => void;'
+                newText: '    label: string;\n    onClick: () => void;',
             });
 
             expect(result.success).toBe(true);
@@ -400,7 +400,7 @@ export const Button = ({ title }: Props) => {
                 filePath: testFile,
                 line: 2,
                 oldText: "    apiUrl: 'https://old-api.example.com',",
-                newText: "    apiUrl: 'https://new-api.example.com',"
+                newText: "    apiUrl: 'https://new-api.example.com',",
             });
 
             expect(result.success).toBe(true);
@@ -417,12 +417,14 @@ export const Button = ({ title }: Props) => {
                 filePath: testFile,
                 line: 1,
                 oldText: 'function fetchData(userId: string, page: number): Promise<Data> {',
-                newText: 'async function fetchData(userId: string, options: FetchOptions = {}): Promise<Data> {'
+                newText: 'async function fetchData(userId: string, options: FetchOptions = {}): Promise<Data> {',
             });
 
             expect(result.success).toBe(true);
             const modified = await env.readFile('api.ts');
-            expect(modified).toContain('async function fetchData(userId: string, options: FetchOptions = {}): Promise<Data> {');
+            expect(modified).toContain(
+                'async function fetchData(userId: string, options: FetchOptions = {}): Promise<Data> {'
+            );
         });
     });
 
@@ -435,7 +437,7 @@ export const Button = ({ title }: Props) => {
                 filePath: testFile,
                 line: 1,
                 oldText: 'Line 1   ',
-                newText: 'Modified 1   '
+                newText: 'Modified 1   ',
             });
 
             expect(result.success).toBe(true);
@@ -451,7 +453,7 @@ export const Button = ({ title }: Props) => {
                 filePath: testFile,
                 line: 2,
                 oldText: 'Line 2',
-                newText: 'Modified 2'
+                newText: 'Modified 2',
             });
 
             expect(result.success).toBe(true);
@@ -467,7 +469,7 @@ export const Button = ({ title }: Props) => {
                 filePath: testFile,
                 line: 1,
                 oldText: 'Line 1',
-                newText: 'Modified 1'
+                newText: 'Modified 1',
             });
 
             expect(result.success).toBe(true);
@@ -479,9 +481,9 @@ export const Button = ({ title }: Props) => {
             const tool = new SurgicalEditTool();
             const result = await tool.execute({
                 filePath: testFile,
-                line: 2,  // Line 2 is '    const x = 1;'
+                line: 2, // Line 2 is '    const x = 1;'
                 oldText: '    const x = 1;',
-                newText: '    let x = 1;'
+                newText: '    let x = 1;',
             });
 
             expect(result.success).toBe(true);
@@ -511,7 +513,7 @@ console.log('done');`;
     const result = x + y;
     return result;
 }`,
-                newText: `const calculate = (x: number, y: number): number => x * y;`
+                newText: `const calculate = (x: number, y: number): number => x * y;`,
             });
 
             expect(result.success).toBe(true);
@@ -540,7 +542,7 @@ console.log('done');`;
     }`,
                 newText: `    add(...numbers: number[]): number {
         return numbers.reduce((sum, n) => sum + n, 0);
-    }`
+    }`,
             });
 
             expect(result.success).toBe(true);

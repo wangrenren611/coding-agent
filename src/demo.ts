@@ -9,59 +9,59 @@
 // 注意：排除 StreamCallback，使用 agent-v2 中的 StreamCallback
 // =============================================================================
 export {
-  // Registry
-  Models,
-  MODEL_CONFIGS,
-  ProviderRegistry,
-  type ProviderType,
-  type ModelId,
-  // Provider
-  LLMProvider,
-  type BaseProviderConfig,
-  // OpenAI Compatible
-  OpenAICompatibleProvider,
-  type OpenAICompatibleConfig,
-  // Adapters
-  BaseAPIAdapter,
-  StandardAdapter,
-  // HTTP
-  HTTPClient,
-  StreamParser,
-  // Errors
-  LLMError,
-  LLMRetryableError,
-  LLMRateLimitError,
-  LLMPermanentError,
-  LLMAuthError,
-  LLMNotFoundError,
-  LLMBadRequestError,
-  LLMAbortedError,
-  createErrorFromStatus,
-  isRetryableError,
-  isPermanentError,
-  isAbortedError,
-  // Types (excluding StreamCallback)
-  type ToolCall,
-  type Role,
-  type TextContentPart,
-  type ImageUrlContentPart,
-  type InputAudioContentPart,
-  type InputVideoContentPart,
-  type FileContentPart,
-  type InputContentPart,
-  type MessageContent,
-  type Usage,
-  type StreamOptions,
-  type BaseLLMMessage,
-  type LLMRequestMessage,
-  type FinishReason,
-  type LLMResponse,
-  type Chunk,
-  type Tool,
-  type LLMGenerateOptions,
-  type LLMRequest,
-  // StreamCallback with alias to avoid conflict
-  type StreamCallback as LLMStreamCallback,
+    // Registry
+    Models,
+    MODEL_CONFIGS,
+    ProviderRegistry,
+    type ProviderType,
+    type ModelId,
+    // Provider
+    LLMProvider,
+    type BaseProviderConfig,
+    // OpenAI Compatible
+    OpenAICompatibleProvider,
+    type OpenAICompatibleConfig,
+    // Adapters
+    BaseAPIAdapter,
+    StandardAdapter,
+    // HTTP
+    HTTPClient,
+    StreamParser,
+    // Errors
+    LLMError,
+    LLMRetryableError,
+    LLMRateLimitError,
+    LLMPermanentError,
+    LLMAuthError,
+    LLMNotFoundError,
+    LLMBadRequestError,
+    LLMAbortedError,
+    createErrorFromStatus,
+    isRetryableError,
+    isPermanentError,
+    isAbortedError,
+    // Types (excluding StreamCallback)
+    type ToolCall,
+    type Role,
+    type TextContentPart,
+    type ImageUrlContentPart,
+    type InputAudioContentPart,
+    type InputVideoContentPart,
+    type FileContentPart,
+    type InputContentPart,
+    type MessageContent,
+    type Usage,
+    type StreamOptions,
+    type BaseLLMMessage,
+    type LLMRequestMessage,
+    type FinishReason,
+    type LLMResponse,
+    type Chunk,
+    type Tool,
+    type LLMGenerateOptions,
+    type LLMRequest,
+    // StreamCallback with alias to avoid conflict
+    type StreamCallback as LLMStreamCallback,
 } from './providers';
 
 // =============================================================================
@@ -118,8 +118,8 @@ function handleStreamMessage(message: AgentMessage) {
             process.stdout.write(`${GREEN}└─ 回复完成${RESET}\n`);
             break;
         case AgentMessageType.TOOL_CALL_CREATED:
-            const tools = message.payload.tool_calls.map((call) => 
-                `${call.toolName}(${call.args.slice(0, 50)}${call.args.length > 50 ? '...' : ''})`
+            const tools = message.payload.tool_calls.map(
+                (call) => `${call.toolName}(${call.args.slice(0, 50)}${call.args.length > 50 ? '...' : ''})`
             );
             console.log(`${YELLOW}🔧 工具调用:${RESET}`, tools.join(', '));
             break;
@@ -196,7 +196,6 @@ async function demo() {
         if (response.usage) {
             console.log(`Token 使用: ${response.usage.total_tokens}`);
         }
-
     } finally {
         await memoryManager.close();
     }

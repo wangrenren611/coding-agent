@@ -68,8 +68,17 @@ const KNOWN_NONSENSE_PATTERNS = [
  * 高频幻觉词汇（出现过多时触发警告）
  */
 const HALLUCINATION_WORDS = [
-    'alpha', 'daemon', 'gamma', 'beta', 'omega', 'lambda',
-    'shared', 'team', 'local', 'global', 'agent',
+    'alpha',
+    'daemon',
+    'gamma',
+    'beta',
+    'omega',
+    'lambda',
+    'shared',
+    'team',
+    'local',
+    'global',
+    'agent',
 ];
 
 /**

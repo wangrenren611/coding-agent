@@ -1,6 +1,6 @@
 /**
  * Agent 深度测试用例
- * 
+ *
  * 验证 Agent 的传参是否正确应用到各个层：
  * - Agent 构造参数
  * - Provider 调用参数
@@ -31,19 +31,23 @@ class MockProvider {
             object: 'chat.completion',
             created: Date.now(),
             model: 'test-model',
-            choices: [{
-                index: 0,
-                message: {
-                    role: 'assistant',
-                    content: 'Hello!',
+            choices: [
+                {
+                    index: 0,
+                    message: {
+                        role: 'assistant',
+                        content: 'Hello!',
+                    },
+                    finish_reason: 'stop',
                 },
-                finish_reason: 'stop',
-            }],
+            ],
             usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
         };
     }
 
-    getTimeTimeout() { return 60000; }
+    getTimeTimeout() {
+        return 60000;
+    }
 }
 
 describe('Agent 参数传递深度测试', () => {

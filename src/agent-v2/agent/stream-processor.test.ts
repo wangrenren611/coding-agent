@@ -47,12 +47,14 @@ describe('StreamProcessor', () => {
         it('should store reasoning_content via onMessageUpdate', () => {
             const chunk: Chunk = {
                 id: 'chunk-1',
-                choices: [{
-                    index: 0,
-                    delta: {
-                        reasoning_content: '思考中...',
+                choices: [
+                    {
+                        index: 0,
+                        delta: {
+                            reasoning_content: '思考中...',
+                        },
                     },
-                }],
+                ],
             };
 
             processor.processChunk(chunk);
@@ -73,7 +75,7 @@ describe('StreamProcessor', () => {
                 { id: 'c3', choices: [{ index: 0, delta: { reasoning_content: '第三步。' } }] },
             ];
 
-            chunks.forEach(c => processor.processChunk(c));
+            chunks.forEach((c) => processor.processChunk(c));
 
             expect(onMessageUpdate).toHaveBeenLastCalledWith(
                 expect.objectContaining({
@@ -89,7 +91,7 @@ describe('StreamProcessor', () => {
                 { id: 'c3', choices: [{ index: 0, delta: { reasoning_content: 'c' } }] },
             ];
 
-            chunks.forEach(c => processor.processChunk(c));
+            chunks.forEach((c) => processor.processChunk(c));
 
             expect(onReasoningStart).toHaveBeenCalledTimes(1);
             expect(onReasoningStart).toHaveBeenCalledWith('test-msg-id');
@@ -101,7 +103,7 @@ describe('StreamProcessor', () => {
                 { id: 'c2', choices: [{ index: 0, delta: { reasoning_content: 'b' } }] },
             ];
 
-            chunks.forEach(c => processor.processChunk(c));
+            chunks.forEach((c) => processor.processChunk(c));
 
             expect(onReasoningDelta).toHaveBeenCalledTimes(2);
         });
@@ -109,11 +111,13 @@ describe('StreamProcessor', () => {
         it('should trigger onReasoningComplete when finish_reason present', () => {
             const chunk: Chunk = {
                 id: 'c1',
-                choices: [{
-                    index: 0,
-                    delta: { reasoning_content: 'done' },
-                    finish_reason: 'stop',
-                }],
+                choices: [
+                    {
+                        index: 0,
+                        delta: { reasoning_content: 'done' },
+                        finish_reason: 'stop',
+                    },
+                ],
             };
 
             processor.processChunk(chunk);
@@ -127,7 +131,7 @@ describe('StreamProcessor', () => {
                 { id: 'c2', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] },
             ];
 
-            chunks.forEach(c => processor.processChunk(c));
+            chunks.forEach((c) => processor.processChunk(c));
 
             expect(onReasoningComplete).toHaveBeenCalledTimes(1);
         });
@@ -160,7 +164,7 @@ describe('StreamProcessor', () => {
                 { id: 'c3', choices: [{ index: 0, delta: { content: '!' } }] },
             ];
 
-            chunks.forEach(c => processor.processChunk(c));
+            chunks.forEach((c) => processor.processChunk(c));
 
             expect(onMessageUpdate).toHaveBeenLastCalledWith(
                 expect.objectContaining({
@@ -175,7 +179,7 @@ describe('StreamProcessor', () => {
                 { id: 'c2', choices: [{ index: 0, delta: { content: 'b' } }] },
             ];
 
-            chunks.forEach(c => processor.processChunk(c));
+            chunks.forEach((c) => processor.processChunk(c));
 
             expect(onTextStart).toHaveBeenCalledTimes(1);
         });
@@ -199,45 +203,57 @@ describe('StreamProcessor', () => {
             const chunks: Chunk[] = [
                 {
                     id: 'c1',
-                    choices: [{
-                        index: 0,
-                        delta: {
-                            tool_calls: [{
-                                index: 0,
-                                id: 'call_1',
-                                type: 'function',
-                                function: { name: 'read_file', arguments: '' },
-                            }],
+                    choices: [
+                        {
+                            index: 0,
+                            delta: {
+                                tool_calls: [
+                                    {
+                                        index: 0,
+                                        id: 'call_1',
+                                        type: 'function',
+                                        function: { name: 'read_file', arguments: '' },
+                                    },
+                                ],
+                            },
                         },
-                    }],
+                    ],
                 },
                 {
                     id: 'c2',
-                    choices: [{
-                        index: 0,
-                        delta: {
-                            tool_calls: [{
-                                index: 0,
-                                function: { arguments: '{"path"' },
-                            }],
+                    choices: [
+                        {
+                            index: 0,
+                            delta: {
+                                tool_calls: [
+                                    {
+                                        index: 0,
+                                        function: { arguments: '{"path"' },
+                                    },
+                                ],
+                            },
                         },
-                    }],
+                    ],
                 },
                 {
                     id: 'c3',
-                    choices: [{
-                        index: 0,
-                        delta: {
-                            tool_calls: [{
-                                index: 0,
-                                function: { arguments: ': "test.txt"}' },
-                            }],
+                    choices: [
+                        {
+                            index: 0,
+                            delta: {
+                                tool_calls: [
+                                    {
+                                        index: 0,
+                                        function: { arguments: ': "test.txt"}' },
+                                    },
+                                ],
+                            },
                         },
-                    }],
+                    ],
                 },
             ];
 
-            chunks.forEach(c => processor.processChunk(c));
+            chunks.forEach((c) => processor.processChunk(c));
 
             const toolCalls = processor.getToolCalls();
             expect(toolCalls).toHaveLength(1);
@@ -249,19 +265,31 @@ describe('StreamProcessor', () => {
             const chunks: Chunk[] = [
                 {
                     id: 'c1',
-                    choices: [{
-                        index: 0,
-                        delta: {
-                            tool_calls: [
-                                { index: 0, id: 'call_1', type: 'function', function: { name: 'read', arguments: '' } },
-                                { index: 1, id: 'call_2', type: 'function', function: { name: 'write', arguments: '' } },
-                            ],
+                    choices: [
+                        {
+                            index: 0,
+                            delta: {
+                                tool_calls: [
+                                    {
+                                        index: 0,
+                                        id: 'call_1',
+                                        type: 'function',
+                                        function: { name: 'read', arguments: '' },
+                                    },
+                                    {
+                                        index: 1,
+                                        id: 'call_2',
+                                        type: 'function',
+                                        function: { name: 'write', arguments: '' },
+                                    },
+                                ],
+                            },
                         },
-                    }],
+                    ],
                 },
             ];
 
-            chunks.forEach(c => processor.processChunk(c));
+            chunks.forEach((c) => processor.processChunk(c));
 
             expect(processor.hasToolCalls()).toBe(true);
             expect(processor.getToolCalls()).toHaveLength(2);
@@ -272,16 +300,25 @@ describe('StreamProcessor', () => {
                 { id: 'c1', choices: [{ index: 0, delta: { content: 'Let me help' } }] },
                 {
                     id: 'c2',
-                    choices: [{
-                        index: 0,
-                        delta: {
-                            tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: 'test', arguments: '' } }],
+                    choices: [
+                        {
+                            index: 0,
+                            delta: {
+                                tool_calls: [
+                                    {
+                                        index: 0,
+                                        id: 'call_1',
+                                        type: 'function',
+                                        function: { name: 'test', arguments: '' },
+                                    },
+                                ],
+                            },
                         },
-                    }],
+                    ],
                 },
             ];
 
-            chunks.forEach(c => processor.processChunk(c));
+            chunks.forEach((c) => processor.processChunk(c));
 
             expect(onTextComplete).toHaveBeenCalled();
         });
@@ -289,12 +326,21 @@ describe('StreamProcessor', () => {
         it('should call onMessageCreate for tool calls', () => {
             const chunk: Chunk = {
                 id: 'c1',
-                choices: [{
-                    index: 0,
-                    delta: {
-                        tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: 'test', arguments: '{}' } }],
+                choices: [
+                    {
+                        index: 0,
+                        delta: {
+                            tool_calls: [
+                                {
+                                    index: 0,
+                                    id: 'call_1',
+                                    type: 'function',
+                                    function: { name: 'test', arguments: '{}' },
+                                },
+                            ],
+                        },
                     },
-                }],
+                ],
             };
 
             processor.processChunk(chunk);
@@ -318,7 +364,7 @@ describe('StreamProcessor', () => {
                 { id: 'c3', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] },
             ];
 
-            chunks.forEach(c => processor.processChunk(c));
+            chunks.forEach((c) => processor.processChunk(c));
 
             // 验证最终消息包含两种内容
             expect(onMessageUpdate).toHaveBeenLastCalledWith(
@@ -335,16 +381,25 @@ describe('StreamProcessor', () => {
                 { id: 'c2', choices: [{ index: 0, delta: { content: 'I will read it' } }] },
                 {
                     id: 'c3',
-                    choices: [{
-                        index: 0,
-                        delta: {
-                            tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: 'read', arguments: '' } }],
+                    choices: [
+                        {
+                            index: 0,
+                            delta: {
+                                tool_calls: [
+                                    {
+                                        index: 0,
+                                        id: 'call_1',
+                                        type: 'function',
+                                        function: { name: 'read', arguments: '' },
+                                    },
+                                ],
+                            },
                         },
-                    }],
+                    ],
                 },
             ];
 
-            chunks.forEach(c => processor.processChunk(c));
+            chunks.forEach((c) => processor.processChunk(c));
 
             expect(onMessageCreate).toHaveBeenCalledWith(
                 expect.objectContaining({
@@ -360,16 +415,25 @@ describe('StreamProcessor', () => {
                 { id: 'c1', choices: [{ index: 0, delta: { content: 'Here is the result' } }] },
                 {
                     id: 'c2',
-                    choices: [{
-                        index: 0,
-                        delta: {
-                            tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: 'write', arguments: '' } }],
+                    choices: [
+                        {
+                            index: 0,
+                            delta: {
+                                tool_calls: [
+                                    {
+                                        index: 0,
+                                        id: 'call_1',
+                                        type: 'function',
+                                        function: { name: 'write', arguments: '' },
+                                    },
+                                ],
+                            },
                         },
-                    }],
+                    ],
                 },
             ];
 
-            chunks.forEach(c => processor.processChunk(c));
+            chunks.forEach((c) => processor.processChunk(c));
 
             expect(onMessageCreate).toHaveBeenCalledWith(
                 expect.objectContaining({
@@ -386,7 +450,7 @@ describe('StreamProcessor', () => {
                 { id: 'c3', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] },
             ];
 
-            chunks.forEach(c => processor.processChunk(c));
+            chunks.forEach((c) => processor.processChunk(c));
 
             // 只有 reasoning 也应该被持久化
             expect(onMessageUpdate).toHaveBeenCalledWith(
@@ -462,7 +526,7 @@ describe('StreamProcessor', () => {
                 { id: 'chatcmpl-1', choices: [{ index: 0, delta: { content: ' World' }, finish_reason: 'stop' }] },
             ];
 
-            chunks.forEach(c => processor.processChunk(c));
+            chunks.forEach((c) => processor.processChunk(c));
             const response = processor.buildResponse();
 
             expect(response.id).toBe('chatcmpl-1');
@@ -478,7 +542,7 @@ describe('StreamProcessor', () => {
                 { id: 'c2', choices: [{ index: 0, delta: { content: 'Answer' } }] },
             ];
 
-            chunks.forEach(c => processor.processChunk(c));
+            chunks.forEach((c) => processor.processChunk(c));
             const response = processor.buildResponse();
 
             expect(response.choices[0].message.content).toBe('Answer');
@@ -489,16 +553,25 @@ describe('StreamProcessor', () => {
             const chunks: Chunk[] = [
                 {
                     id: 'c1',
-                    choices: [{
-                        index: 0,
-                        delta: {
-                            tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: 'read', arguments: '{}' } }],
+                    choices: [
+                        {
+                            index: 0,
+                            delta: {
+                                tool_calls: [
+                                    {
+                                        index: 0,
+                                        id: 'call_1',
+                                        type: 'function',
+                                        function: { name: 'read', arguments: '{}' },
+                                    },
+                                ],
+                            },
                         },
-                    }],
+                    ],
                 },
             ];
 
-            chunks.forEach(c => processor.processChunk(c));
+            chunks.forEach((c) => processor.processChunk(c));
             const response = processor.buildResponse();
 
             expect(response.choices[0].message.tool_calls).toHaveLength(1);
@@ -529,7 +602,7 @@ describe('StreamProcessor', () => {
                 { id: 'c2', choices: [{ index: 0, delta: { content: 'answer' } }] },
             ];
 
-            chunks.forEach(c => processor.processChunk(c));
+            chunks.forEach((c) => processor.processChunk(c));
 
             expect(processor.getBuffer()).toBe('answer');
             expect(processor.getReasoningBuffer()).toBe('think');
@@ -552,9 +625,7 @@ describe('StreamProcessor', () => {
 
             processor.processChunk(chunk);
 
-            expect(onMessageUpdate).toHaveBeenCalledWith(
-                expect.objectContaining({ messageId: 'new-id' })
-            );
+            expect(onMessageUpdate).toHaveBeenCalledWith(expect.objectContaining({ messageId: 'new-id' }));
         });
     });
 
@@ -676,13 +747,17 @@ describe('StreamProcessor', () => {
         it('should handle tool_calls with finish_reason in same chunk', () => {
             const chunk: Chunk = {
                 id: 'c1',
-                choices: [{
-                    index: 0,
-                    delta: {
-                        tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: 'test', arguments: '' } }],
+                choices: [
+                    {
+                        index: 0,
+                        delta: {
+                            tool_calls: [
+                                { index: 0, id: 'call_1', type: 'function', function: { name: 'test', arguments: '' } },
+                            ],
+                        },
+                        finish_reason: 'tool_calls',
                     },
-                    finish_reason: 'tool_calls',
-                }],
+                ],
             };
 
             processor.processChunk(chunk);
@@ -707,7 +782,7 @@ describe('StreamProcessor', () => {
                 });
             }
 
-            chunks.forEach(c => processor.processChunk(c));
+            chunks.forEach((c) => processor.processChunk(c));
 
             expect(onReasoningDelta).toHaveBeenCalledTimes(100);
             expect(onReasoningStart).toHaveBeenCalledTimes(1);
@@ -723,7 +798,7 @@ describe('StreamProcessor', () => {
                 });
             }
 
-            chunks.forEach(c => processor.processChunk(c));
+            chunks.forEach((c) => processor.processChunk(c));
 
             expect(onTextDelta).toHaveBeenCalledTimes(100);
             expect(onTextStart).toHaveBeenCalledTimes(1);
@@ -734,19 +809,23 @@ describe('StreamProcessor', () => {
             for (let i = 0; i < 50; i++) {
                 chunks.push({
                     id: `chunk-${i}`,
-                    choices: [{
-                        index: 0,
-                        delta: {
-                            tool_calls: [{
-                                index: 0,
-                                function: { arguments: `{"part":${i}}` },
-                            }],
+                    choices: [
+                        {
+                            index: 0,
+                            delta: {
+                                tool_calls: [
+                                    {
+                                        index: 0,
+                                        function: { arguments: `{"part":${i}}` },
+                                    },
+                                ],
+                            },
                         },
-                    }],
+                    ],
                 });
             }
 
-            chunks.forEach(c => processor.processChunk(c));
+            chunks.forEach((c) => processor.processChunk(c));
 
             const toolCalls = processor.getToolCalls();
             expect(toolCalls[0].function.arguments.length).toBeGreaterThan(0);
@@ -776,19 +855,23 @@ describe('StreamProcessor', () => {
             for (let i = 0; i < 10; i++) {
                 chunks.push({
                     id: `t-${i}`,
-                    choices: [{
-                        index: 0,
-                        delta: {
-                            tool_calls: [{
-                                index: 0,
-                                ...(i === 0 ? { id: 'call_1', type: 'function' } : {}),
-                                function: {
-                                    ...(i === 0 ? { name: 'read_file' } : {}),
-                                    arguments: `{"part":${i}}`,
-                                },
-                            }],
+                    choices: [
+                        {
+                            index: 0,
+                            delta: {
+                                tool_calls: [
+                                    {
+                                        index: 0,
+                                        ...(i === 0 ? { id: 'call_1', type: 'function' } : {}),
+                                        function: {
+                                            ...(i === 0 ? { name: 'read_file' } : {}),
+                                            arguments: `{"part":${i}}`,
+                                        },
+                                    },
+                                ],
+                            },
                         },
-                    }],
+                    ],
                 });
             }
 
@@ -798,7 +881,7 @@ describe('StreamProcessor', () => {
                 choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }],
             });
 
-            chunks.forEach(c => processor.processChunk(c));
+            chunks.forEach((c) => processor.processChunk(c));
 
             // 验证所有内容都被正确处理
             expect(processor.getReasoningBuffer()).toContain('推理步骤');

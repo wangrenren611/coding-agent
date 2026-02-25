@@ -4,7 +4,7 @@
 
 /**
  * 处理器状态枚举
- * 
+ *
  * 状态转换图：
  * IDLE -> REASONING -> TEXT -> COMPLETED
  * IDLE -> TEXT -> COMPLETED
@@ -45,15 +45,8 @@ export const STATE_TRANSITIONS: Record<ProcessorState, ProcessorState[]> = {
         ProcessorState.COMPLETED,
         ProcessorState.ABORTED,
     ],
-    [ProcessorState.TEXT]: [
-        ProcessorState.TOOL_CALLS,
-        ProcessorState.COMPLETED,
-        ProcessorState.ABORTED,
-    ],
-    [ProcessorState.TOOL_CALLS]: [
-        ProcessorState.COMPLETED,
-        ProcessorState.ABORTED,
-    ],
+    [ProcessorState.TEXT]: [ProcessorState.TOOL_CALLS, ProcessorState.COMPLETED, ProcessorState.ABORTED],
+    [ProcessorState.TOOL_CALLS]: [ProcessorState.COMPLETED, ProcessorState.ABORTED],
     [ProcessorState.COMPLETED]: [ProcessorState.ABORTED],
     [ProcessorState.ABORTED]: [],
 };

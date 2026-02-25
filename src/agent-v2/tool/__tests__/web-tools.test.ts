@@ -27,7 +27,7 @@ describe('Web Tools', () => {
             const tool = new WebSearchTool();
             const result = await tool.execute({
                 query: 'test search',
-                maxResults: 5
+                maxResults: 5,
             });
 
             expect(result.success).toBe(false);
@@ -38,7 +38,7 @@ describe('Web Tools', () => {
             const tool = new WebSearchTool();
             const result = await tool.execute({
                 query: '',
-                maxResults: 5
+                maxResults: 5,
             });
 
             // Should fail validation
@@ -49,7 +49,7 @@ describe('Web Tools', () => {
             const tool = new WebSearchTool();
             const result = await tool.execute({
                 query: 'test',
-                maxResults: 100 // Too many
+                maxResults: 100, // Too many
             });
 
             // Should fail validation
@@ -61,7 +61,7 @@ describe('Web Tools', () => {
 
             const tool = new WebSearchTool();
             const result = await tool.execute({
-                query: 'test search'
+                query: 'test search',
             });
 
             expect(result).toBeDefined();
@@ -73,7 +73,7 @@ describe('Web Tools', () => {
             const tool = new WebFetchTool();
             const result = await tool.execute({
                 url: 'not-a-valid-url',
-                format: 'markdown'
+                format: 'markdown',
             });
 
             expect(result.success).toBe(false);
@@ -84,7 +84,7 @@ describe('Web Tools', () => {
             const tool = new WebFetchTool();
             const result = await tool.execute({
                 url: 'ftp://example.com',
-                format: 'markdown'
+                format: 'markdown',
             });
 
             expect(result.success).toBe(false);
@@ -96,7 +96,7 @@ describe('Web Tools', () => {
             const result = await tool.execute({
                 url: 'https://example.com',
                 format: 'markdown',
-                timeout: 200 // Too large (max 120)
+                timeout: 200, // Too large (max 120)
             });
 
             // Should cap at max timeout
@@ -107,7 +107,7 @@ describe('Web Tools', () => {
             const tool = new WebFetchTool();
             const result = await tool.execute({
                 url: 'https://example.com',
-                format: 'markdown'
+                format: 'markdown',
             });
 
             // Should attempt fetch (may fail due to network)
@@ -118,7 +118,7 @@ describe('Web Tools', () => {
             const tool = new WebFetchTool();
             const result = await tool.execute({
                 url: 'https://example.com',
-                format: 'text'
+                format: 'text',
             });
 
             expect(result).toBeDefined();
@@ -128,7 +128,7 @@ describe('Web Tools', () => {
             const tool = new WebFetchTool();
             const result = await tool.execute({
                 url: 'https://example.com',
-                format: 'html'
+                format: 'html',
             });
 
             expect(result).toBeDefined();
@@ -137,7 +137,7 @@ describe('Web Tools', () => {
         it('should use default format when not specified', async () => {
             const tool = new WebFetchTool();
             const result = await tool.execute({
-                url: 'https://example.com'
+                url: 'https://example.com',
             });
 
             expect(result).toBeDefined();
@@ -148,7 +148,7 @@ describe('Web Tools', () => {
             const tool = new WebFetchTool();
             const result = await tool.execute({
                 url: 'https://this-domain-definitely-does-not-exist-12345.com',
-                format: 'markdown'
+                format: 'markdown',
             });
 
             expect(result).toBeDefined();
@@ -160,7 +160,7 @@ describe('Web Tools', () => {
             const result = await tool.execute({
                 url: 'https://httpbin.org/delay/10',
                 format: 'markdown',
-                timeout: 1 // Very short timeout
+                timeout: 1, // Very short timeout
             });
 
             expect(result).toBeDefined();
@@ -171,7 +171,7 @@ describe('Web Tools', () => {
             const tool = new WebFetchTool();
             const result = await tool.execute({
                 url: 'https://example.com',
-                format: 'markdown'
+                format: 'markdown',
             });
 
             if (result.success) {
@@ -183,7 +183,7 @@ describe('Web Tools', () => {
             const tool = new WebFetchTool();
             const result = await tool.execute({
                 url: 'https://example.com',
-                format: 'markdown'
+                format: 'markdown',
             });
 
             if (result.success) {
@@ -196,7 +196,7 @@ describe('Web Tools', () => {
             const tool = new WebFetchTool();
             const result = await tool.execute({
                 url: 'https://example.com',
-                format: 'markdown'
+                format: 'markdown',
             });
 
             if (result.success) {
@@ -208,7 +208,7 @@ describe('Web Tools', () => {
             const tool = new WebFetchTool();
             const result = await tool.execute({
                 url: 'https://httpbin.org/bytes/6000000', // 6MB response
-                format: 'markdown'
+                format: 'markdown',
             });
 
             // Should fail with RESPONSE_TOO_LARGE or timeout

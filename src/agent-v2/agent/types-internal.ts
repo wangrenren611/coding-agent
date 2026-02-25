@@ -1,13 +1,13 @@
 /**
  * Agent 内部类型定义
  * 包含类型守卫和内部使用的类型
- * 
+ *
  * 注意：共享类型已迁移到 core-types.ts
  */
 
-import { Chunk, FinishReason, LLMResponse, InputContentPart } from "../../providers";
-import { AgentMessage, AgentMessageType } from "./stream-types";
-import { stringifyContentPart } from "./core-types";
+import { Chunk, FinishReason, LLMResponse, InputContentPart } from '../../providers';
+import { AgentMessage, AgentMessageType } from './stream-types';
+import { stringifyContentPart } from './core-types';
 
 // 从 core-types 重新导出共享类型
 export type {
@@ -21,10 +21,7 @@ export type {
     StreamChunkMetadata,
 } from './core-types';
 
-export {
-    contentToText,
-    hasContent,
-} from './core-types';
+export { contentToText, hasContent } from './core-types';
 
 // ==================== 流式处理类型守卫 ====================
 
@@ -46,9 +43,7 @@ interface ChunkDeltaWithReasoning {
 }
 
 function hasReasoningContent(delta: unknown): delta is ChunkDeltaWithReasoning {
-    return delta !== null &&
-        typeof delta === 'object' &&
-        'reasoning_content' in delta;
+    return delta !== null && typeof delta === 'object' && 'reasoning_content' in delta;
 }
 
 /**
@@ -183,7 +178,5 @@ export function isToolCallCreatedMessage(message: AgentMessage): message is Agen
  * 检查是否为 AsyncGenerator<Chunk> 类型
  */
 export function isChunkStream(result: unknown): result is AsyncGenerator<Chunk, unknown, unknown> {
-    return result !== null &&
-        typeof result === 'object' &&
-        Symbol.asyncIterator in result;
+    return result !== null && typeof result === 'object' && Symbol.asyncIterator in result;
 }

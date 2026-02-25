@@ -1,8 +1,8 @@
 /**
  * 工具执行器
- * 
+ *
  * 封装工具调用执行逻辑。
- * 
+ *
  * 职责：
  * 1. 执行工具调用
  * 2. 记录工具结果
@@ -48,12 +48,7 @@ export interface ToolExecutorConfig {
     /** 工具调用创建回调 */
     onToolCallCreated?: (toolCalls: ToolCall[], messageId: string, content?: string) => void;
     /** 工具调用结果回调 */
-    onToolCallResult?: (
-        toolCallId: string,
-        result: unknown,
-        status: 'success' | 'error',
-        messageId: string
-    ) => void;
+    onToolCallResult?: (toolCallId: string, result: unknown, status: 'success' | 'error', messageId: string) => void;
     /** 工具执行流式输出回调 */
     onToolCallStream?: (toolCallId: string, output: string, messageId: string) => void;
     /** 代码补丁回调 */
@@ -87,11 +82,7 @@ export class ToolExecutor {
     /**
      * 执行工具调用
      */
-    async execute(
-        toolCalls: ToolCall[],
-        messageId: string,
-        messageContent?: string
-    ): Promise<ToolExecutionOutput> {
+    async execute(toolCalls: ToolCall[], messageId: string, messageContent?: string): Promise<ToolExecutionOutput> {
         // 触发工具调用创建回调
         this.config.onToolCallCreated?.(toolCalls, messageId, messageContent);
 
@@ -116,7 +107,7 @@ export class ToolExecutor {
         this.emitCodePatches(fileSnapshots, messageId);
 
         return {
-            success: results.every(r => r.result?.success !== false),
+            success: results.every((r) => r.result?.success !== false),
             toolCount: results.length,
             resultMessages,
         };
@@ -172,11 +163,7 @@ export class ToolExecutor {
             );
 
             // 创建工具结果消息
-            const message = createToolResultMessage(
-                result.tool_call_id,
-                outputText,
-                resultMessageId
-            );
+            const message = createToolResultMessage(result.tool_call_id, outputText, resultMessageId);
 
             // 添加到会话
             this.config.onMessageAdd?.(message);
@@ -254,9 +241,7 @@ export class ToolExecutor {
     }
 
     private resolveCandidatePath(rawPath: string): string | null {
-        const resolved = path.isAbsolute(rawPath)
-            ? path.normalize(rawPath)
-            : path.resolve(process.cwd(), rawPath);
+        const resolved = path.isAbsolute(rawPath) ? path.normalize(rawPath) : path.resolve(process.cwd(), rawPath);
         return resolved || null;
     }
 

@@ -1,8 +1,8 @@
 /**
  * LLM 调用器
- * 
+ *
  * 封装 LLM 调用逻辑，支持流式和非流式两种模式。
- * 
+ *
  * 职责：
  * 1. 执行 LLM 调用
  * 2. 管理流式处理
@@ -34,7 +34,7 @@ export interface LLMCallerConfig {
     thinking?: boolean;
     /** 时间提供者 */
     timeProvider?: ITimeProvider;
-    
+
     // 响应验证选项
     /** 响应验证器配置 */
     validatorOptions?: Partial<ResponseValidatorOptions>;
@@ -150,13 +150,13 @@ export class LLMCaller {
 
         options.stream = true;
         const streamResult = await this.config.provider.generate(messages, options);
-        
+
         // 检查是否为流式结果
         if (!streamResult || typeof (streamResult as AsyncIterable<unknown>)[Symbol.asyncIterator] !== 'function') {
             // 非流式结果，直接返回
             return streamResult as LLMResponse;
         }
-        
+
         const stream = streamResult as AsyncIterable<unknown>;
 
         for await (const chunk of stream) {
@@ -169,10 +169,7 @@ export class LLMCaller {
     /**
      * 执行非流式调用
      */
-    private async executeNormal(
-        messages: Message[],
-        options: LLMGenerateOptions
-    ): Promise<LLMResponse> {
+    private async executeNormal(messages: Message[], options: LLMGenerateOptions): Promise<LLMResponse> {
         const response = await this.config.provider.generate(messages, options);
         return response as LLMResponse;
     }

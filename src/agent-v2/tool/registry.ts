@@ -1,8 +1,8 @@
-import { BaseTool, ToolResult, ToolContext } from "./base";
+import { BaseTool, ToolResult, ToolContext } from './base';
 import { z } from 'zod';
-import { ToolSchema } from "./type";
-import { ToolCall } from "../../providers";
-import { safeParse } from "../util";
+import { ToolSchema } from './type';
+import { ToolCall } from '../../providers';
+import { safeParse } from '../util';
 
 /** 默认工具执行超时时间（毫秒） */
 const DEFAULT_TOOL_TIMEOUT = 300000; // 5分钟
@@ -74,22 +74,18 @@ export class ToolRegistry {
      * 带超时控制的工具执行
      * 使用 setTimeout/clearTimeout 确保超时定时器被正确清理，防止内存泄漏
      */
-    private async executeWithTimeout<T>(
-        toolName: string,
-        executeFn: () => Promise<T>,
-        timeoutMs: number
-    ): Promise<T> {
+    private async executeWithTimeout<T>(toolName: string, executeFn: () => Promise<T>, timeoutMs: number): Promise<T> {
         return new Promise<T>((resolve, reject) => {
             const timeoutId = setTimeout(() => {
                 reject(new Error(`Tool "${toolName}" execution timeout (${timeoutMs}ms)`));
             }, timeoutMs);
 
             executeFn()
-                .then(result => {
+                .then((result) => {
                     clearTimeout(timeoutId);
                     resolve(result);
                 })
-                .catch(error => {
+                .catch((error) => {
                     clearTimeout(timeoutId);
                     reject(error);
                 });
@@ -97,7 +93,7 @@ export class ToolRegistry {
     }
 
     register(tools: BaseTool<z.ZodType>[]): void {
-        tools.forEach(tool => {
+        tools.forEach((tool) => {
             if (this.tools.has(tool.name)) {
                 throw new Error(`Tool "${tool.name}" is already registered`);
             }
@@ -113,143 +109,146 @@ export class ToolRegistry {
      * 执行工具
      */
     async execute(
-      toolCalls: ToolCall[],
-      context?: ExecutionContext,
-    ): Promise<{tool_call_id: string, name: string, arguments: string, result: any}[]> {
-      const toolContext = this.buildToolContext(context);
+        toolCalls: ToolCall[],
+        context?: ExecutionContext
+    ): Promise<{ tool_call_id: string; name: string; arguments: string; result: any }[]> {
+        const toolContext = this.buildToolContext(context);
 
-      const results = await Promise.all(toolCalls.map(async toolCall => {
-          const { name, arguments: paramsStr } = toolCall.function;
-          const tool = this.tools.get(name);
+        const results = await Promise.all(
+            toolCalls.map(async (toolCall) => {
+                const { name, arguments: paramsStr } = toolCall.function;
+                const tool = this.tools.get(name);
 
-          if (!tool) {
-            const error = `Tool "${name}" not found`;
-            this.eventCallbacks?.onToolFailed?.(name, error);
-            return {
-                tool_call_id: toolCall.id,
-                name,
-                arguments:paramsStr,
-                result:{
-                    success: false,
-                    error,
+                if (!tool) {
+                    const error = `Tool "${name}" not found`;
+                    this.eventCallbacks?.onToolFailed?.(name, error);
+                    return {
+                        tool_call_id: toolCall.id,
+                        name,
+                        arguments: paramsStr,
+                        result: {
+                            success: false,
+                            error,
+                        },
+                    };
                 }
-            };
-        }
 
-       const params = safeParse(paramsStr || '');
+                const params = safeParse(paramsStr || '');
 
-        if(!params){
-            const error = `Invalid arguments format: ${paramsStr}`;
-            this.eventCallbacks?.onToolFailed?.(name, error);
-            return {
-               tool_call_id: toolCall.id,
-                name,
-                arguments:paramsStr,
-                result:{
-                    success: false,
-                    error,
+                if (!params) {
+                    const error = `Invalid arguments format: ${paramsStr}`;
+                    this.eventCallbacks?.onToolFailed?.(name, error);
+                    return {
+                        tool_call_id: toolCall.id,
+                        name,
+                        arguments: paramsStr,
+                        result: {
+                            success: false,
+                            error,
+                        },
+                    };
                 }
-            };
-        }
-           // 验证参数
-        const schema = tool.schema;
+                // 验证参数
+                const schema = tool.schema;
 
-        const resultSchema = schema.safeParse(params);
+                const resultSchema = schema.safeParse(params);
 
-        if (!resultSchema.success) {
-            const error = resultSchema.error.issues.map(issue => issue.message).join(', ');
-            this.eventCallbacks?.onToolFailed?.(name, error);
-            return {
-                tool_call_id: toolCall.id,
-                name,
-                arguments:paramsStr,
-                result:{
-                    success: false,
-                    error,
+                if (!resultSchema.success) {
+                    const error = resultSchema.error.issues.map((issue) => issue.message).join(', ');
+                    this.eventCallbacks?.onToolFailed?.(name, error);
+                    return {
+                        tool_call_id: toolCall.id,
+                        name,
+                        arguments: paramsStr,
+                        result: {
+                            success: false,
+                            error,
+                        },
+                    };
                 }
-            };
-        }
 
-          // 执行工具（task 工具可通过 executionTimeoutMs=null 显式关闭超时）
-        const startTime = Date.now();
-        this.eventCallbacks?.onToolStart?.(name, paramsStr || '');
-        
-        try {
-          const timeoutMs = tool.executionTimeoutMs === undefined
-            ? this.toolTimeout
-            : tool.executionTimeoutMs;
-          
-          const result = timeoutMs === null || timeoutMs <= 0
-            ? await Promise.resolve(tool.execute(resultSchema.data, {
-                ...toolContext,
-                emitOutput: (chunk: string) => context?.onToolStream?.(toolCall.id, name, chunk),
-              }))
-            : await this.executeWithTimeout(
-                name,
-                () => Promise.resolve(tool.execute(resultSchema.data, {
-                  ...toolContext,
-                  emitOutput: (chunk: string) => context?.onToolStream?.(toolCall.id, name, chunk),
-                })),
-                timeoutMs
-              );
+                // 执行工具（task 工具可通过 executionTimeoutMs=null 显式关闭超时）
+                const startTime = Date.now();
+                this.eventCallbacks?.onToolStart?.(name, paramsStr || '');
 
-          const duration = Date.now() - startTime;
-        
+                try {
+                    const timeoutMs =
+                        tool.executionTimeoutMs === undefined ? this.toolTimeout : tool.executionTimeoutMs;
 
-          if((result as ToolResult).success === true){
-            this.eventCallbacks?.onToolSuccess?.(name, duration , result);
-          }else{
-             this.eventCallbacks?.onToolFailed?.(name, result);
-          }
-         
-           return {
-                tool_call_id: toolCall.id,
-                name,
-                arguments:paramsStr,
-                result,
-            };
+                    const result =
+                        timeoutMs === null || timeoutMs <= 0
+                            ? await Promise.resolve(
+                                  tool.execute(resultSchema.data, {
+                                      ...toolContext,
+                                      emitOutput: (chunk: string) => context?.onToolStream?.(toolCall.id, name, chunk),
+                                  })
+                              )
+                            : await this.executeWithTimeout(
+                                  name,
+                                  () =>
+                                      Promise.resolve(
+                                          tool.execute(resultSchema.data, {
+                                              ...toolContext,
+                                              emitOutput: (chunk: string) =>
+                                                  context?.onToolStream?.(toolCall.id, name, chunk),
+                                          })
+                                      ),
+                                  timeoutMs
+                              );
 
-        } catch (error) {
-          const err = error as Error;
-          const errorMessage = err.message || `${name} Tool execution failed: ${err}`;
-          this.eventCallbacks?.onToolFailed?.(name, errorMessage);
+                    const duration = Date.now() - startTime;
 
-            return {
-                tool_call_id: toolCall.id,
-                name,
-                arguments:paramsStr,
-                result:{
-                    success: false,
-                    error: errorMessage,
+                    if ((result as ToolResult).success === true) {
+                        this.eventCallbacks?.onToolSuccess?.(name, duration, result);
+                    } else {
+                        this.eventCallbacks?.onToolFailed?.(name, result);
+                    }
+
+                    return {
+                        tool_call_id: toolCall.id,
+                        name,
+                        arguments: paramsStr,
+                        result,
+                    };
+                } catch (error) {
+                    const err = error as Error;
+                    const errorMessage = err.message || `${name} Tool execution failed: ${err}`;
+                    this.eventCallbacks?.onToolFailed?.(name, errorMessage);
+
+                    return {
+                        tool_call_id: toolCall.id,
+                        name,
+                        arguments: paramsStr,
+                        result: {
+                            success: false,
+                            error: errorMessage,
+                        },
+                    };
                 }
-            };
-        }
-      }))
+            })
+        );
 
-
-      return results as {tool_call_id: string, name: string, arguments: string, result: any}[];
+        return results as { tool_call_id: string; name: string; arguments: string; result: any }[];
     }
- 
 
-
-  /**
+    /**
      * 转换为 LLM 工具格式
      */
     toLLMTools(): Array<ToolSchema> {
-        return Array.from(this.tools.values()).map(tool =>({
+        return Array.from(this.tools.values()).map((tool) => ({
             type: 'function',
-            function:{
+            function: {
                 name: tool.name,
                 description: tool.description,
                 parameters: z.toJSONSchema(tool.schema),
             },
         }));
-    } 
+    }
 
     /**
      * 验证工具定义
      */
-    private validateTool(tool:  BaseTool<z.ZodType>): void {
+    private validateTool(tool: BaseTool<z.ZodType>): void {
         if (!tool.name || typeof tool.name !== 'string') {
             throw new Error('Tool name is required and must be a string');
         }

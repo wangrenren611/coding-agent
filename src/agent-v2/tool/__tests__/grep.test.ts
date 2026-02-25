@@ -24,7 +24,7 @@ describe('GrepTool', () => {
             const tool = new GrepTool();
             const result = await tool.execute({
                 pattern: 'hello',
-                path: env.getTestDir()
+                path: env.getTestDir(),
             });
 
             expect(result.success).toBe(true);
@@ -40,7 +40,7 @@ describe('GrepTool', () => {
             const tool = new GrepTool();
             const result = await tool.execute({
                 pattern: 'Pattern',
-                path: env.getTestDir()
+                path: env.getTestDir(),
             });
 
             expect(result.success).toBe(true);
@@ -53,7 +53,7 @@ describe('GrepTool', () => {
             const result = await tool.execute({
                 pattern: 'hello',
                 caseMode: 'sensitive',
-                path: env.getTestDir()
+                path: env.getTestDir(),
             });
 
             expect(result.success).toBe(true);
@@ -67,7 +67,7 @@ describe('GrepTool', () => {
             const result = await tool.execute({
                 pattern: 'hello',
                 caseMode: 'insensitive',
-                path: env.getTestDir()
+                path: env.getTestDir(),
             });
 
             expect(result.success).toBe(true);
@@ -81,7 +81,7 @@ describe('GrepTool', () => {
             const tool = new GrepTool();
             const result = await tool.execute({
                 pattern: 'hello',
-                path: env.getTestDir()
+                path: env.getTestDir(),
             });
 
             expect(result.success).toBe(true);
@@ -96,7 +96,7 @@ describe('GrepTool', () => {
             const tool = new GrepTool();
             const result = await tool.execute({
                 pattern: '[a-z]+\\d+',
-                path: env.getTestDir()
+                path: env.getTestDir(),
             });
 
             expect(result.success).toBe(true);
@@ -109,7 +109,7 @@ describe('GrepTool', () => {
             const result = await tool.execute({
                 pattern: 'cat',
                 word: true,
-                path: env.getTestDir()
+                path: env.getTestDir(),
             });
 
             expect(result.success).toBe(true);
@@ -123,7 +123,7 @@ describe('GrepTool', () => {
             const result = await tool.execute({
                 pattern: 'start\\nend',
                 multiline: true,
-                path: env.getTestDir()
+                path: env.getTestDir(),
             });
 
             expect(result.success).toBe(true);
@@ -140,7 +140,7 @@ describe('GrepTool', () => {
             const result = await tool.execute({
                 pattern: 'pattern',
                 filePattern: '*.js',
-                path: env.getTestDir()
+                path: env.getTestDir(),
             });
 
             expect(result.success).toBe(true);
@@ -155,12 +155,12 @@ describe('GrepTool', () => {
             const tool = new GrepTool();
             const result = await tool.execute({
                 pattern: 'export',
-                path: env.getTestDir()
+                path: env.getTestDir(),
             });
 
             expect(result.success).toBe(true);
             // Should not find files in node_modules
-            expect(result.metadata?.results?.every(r => !r.file.includes('node_modules'))).toBe(true);
+            expect(result.metadata?.results?.every((r) => !r.file.includes('node_modules'))).toBe(true);
         });
 
         it('should include hidden files when requested', async () => {
@@ -171,7 +171,7 @@ describe('GrepTool', () => {
             const result = await tool.execute({
                 pattern: 'content',
                 includeHidden: true,
-                path: env.getTestDir()
+                path: env.getTestDir(),
             });
 
             expect(result.success).toBe(true);
@@ -186,7 +186,7 @@ describe('GrepTool', () => {
             const result = await tool.execute({
                 pattern: 'console',
                 noIgnore: true,
-                path: env.getTestDir()
+                path: env.getTestDir(),
             });
 
             expect(result.success).toBe(true);
@@ -202,7 +202,7 @@ describe('GrepTool', () => {
             const tool = new GrepTool();
             const result = await tool.execute({
                 pattern: 'test',
-                path: env.getTestDir()
+                path: env.getTestDir(),
             });
 
             // If ripgrep is available, this should succeed
@@ -213,17 +213,19 @@ describe('GrepTool', () => {
         it('should return error for empty pattern', async () => {
             const tool = new GrepTool();
             // Zod schema validation now happens before execute, so we catch the error
-            await expect(tool.execute({
-                pattern: '',
-                path: env.getTestDir()
-            })).rejects.toThrow(); // Zod validation error
+            await expect(
+                tool.execute({
+                    pattern: '',
+                    path: env.getTestDir(),
+                })
+            ).rejects.toThrow(); // Zod validation error
         });
 
         it('should return error when search path does not exist', async () => {
             const tool = new GrepTool();
             const result = await tool.execute({
                 pattern: 'test',
-                path: '/nonexistent/path/that/does/not/exist'
+                path: '/nonexistent/path/that/does/not/exist',
             });
 
             expect(result.success).toBe(false);
@@ -235,7 +237,7 @@ describe('GrepTool', () => {
             const tool = new GrepTool();
             const result = await tool.execute({
                 pattern: 'THISWILLNEVERMATCHXYZ123',
-                path: env.getTestDir()
+                path: env.getTestDir(),
             });
 
             expect(result.success).toBe(true);
@@ -250,7 +252,7 @@ describe('GrepTool', () => {
             const tool = new GrepTool();
             const result = await tool.execute({
                 pattern: 'x',
-                path: env.getTestDir()
+                path: env.getTestDir(),
             });
 
             expect(result.success).toBe(true);
@@ -264,7 +266,7 @@ describe('GrepTool', () => {
             const tool = new GrepTool();
             const result = await tool.execute({
                 pattern: 'this exact text',
-                path: env.getTestDir()
+                path: env.getTestDir(),
             });
 
             expect(result.success).toBe(true);
@@ -277,7 +279,7 @@ describe('GrepTool', () => {
             const tool = new GrepTool();
             const result = await tool.execute({
                 pattern: 'content',
-                path: env.getTestDir()
+                path: env.getTestDir(),
             });
 
             expect(result.success).toBe(true);
@@ -299,7 +301,7 @@ describe('GrepTool', () => {
 
             const result = await tool.execute({
                 pattern: 'content',
-                path: env.getTestDir()
+                path: env.getTestDir(),
             });
 
             expect(result).toBeDefined();
@@ -315,7 +317,7 @@ describe('GrepTool', () => {
             const tool = new GrepTool();
             const result = await tool.execute({
                 pattern: 'match',
-                path: env.getTestDir()
+                path: env.getTestDir(),
             });
 
             expect(result.success).toBe(true);

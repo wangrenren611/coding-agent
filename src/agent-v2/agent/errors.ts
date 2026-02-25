@@ -1,6 +1,6 @@
 /**
  * Agent 错误类定义
- * 
+ *
  * 设计原则：
  * 1. 支持错误码（code）- 便于程序化区分错误类型
  * 2. 支持错误链（cause）- 便于追踪原始错误
@@ -17,26 +17,26 @@ import type { AgentFailureCode } from './types';
  * 与 AgentFailureCode 类型保持同步
  */
 export const AgentErrorCode = {
-  // Agent 状态错误
-  ABORTED: 'AGENT_ABORTED',
-  BUSY: 'AGENT_BUSY',
-  RUNTIME_ERROR: 'AGENT_RUNTIME_ERROR',
-  // 重试相关
-  MAX_RETRIES_EXCEEDED: 'AGENT_MAX_RETRIES_EXCEEDED',
-  COMPENSATION_RETRY_EXCEEDED: 'AGENT_COMPENSATION_RETRY_EXCEEDED',
-  LOOP_EXCEEDED: 'AGENT_LOOP_EXCEEDED',
-  // 配置和验证错误
-  CONFIGURATION_ERROR: 'AGENT_CONFIGURATION_ERROR',
-  VALIDATION_ERROR: 'AGENT_VALIDATION_ERROR',
-  // LLM 相关
-  LLM_TIMEOUT: 'LLM_TIMEOUT',
-  LLM_REQUEST_FAILED: 'LLM_REQUEST_FAILED',
-  LLM_RESPONSE_INVALID: 'LLM_RESPONSE_INVALID',
-  // 工具相关
-  TOOL_EXECUTION_FAILED: 'TOOL_EXECUTION_FAILED',
+    // Agent 状态错误
+    ABORTED: 'AGENT_ABORTED',
+    BUSY: 'AGENT_BUSY',
+    RUNTIME_ERROR: 'AGENT_RUNTIME_ERROR',
+    // 重试相关
+    MAX_RETRIES_EXCEEDED: 'AGENT_MAX_RETRIES_EXCEEDED',
+    COMPENSATION_RETRY_EXCEEDED: 'AGENT_COMPENSATION_RETRY_EXCEEDED',
+    LOOP_EXCEEDED: 'AGENT_LOOP_EXCEEDED',
+    // 配置和验证错误
+    CONFIGURATION_ERROR: 'AGENT_CONFIGURATION_ERROR',
+    VALIDATION_ERROR: 'AGENT_VALIDATION_ERROR',
+    // LLM 相关
+    LLM_TIMEOUT: 'LLM_TIMEOUT',
+    LLM_REQUEST_FAILED: 'LLM_REQUEST_FAILED',
+    LLM_RESPONSE_INVALID: 'LLM_RESPONSE_INVALID',
+    // 工具相关
+    TOOL_EXECUTION_FAILED: 'TOOL_EXECUTION_FAILED',
 } as const;
 
-export type AgentErrorCodeValue = typeof AgentErrorCode[keyof typeof AgentErrorCode];
+export type AgentErrorCodeValue = (typeof AgentErrorCode)[keyof typeof AgentErrorCode];
 
 // ==================== 基础错误接口 ====================
 
@@ -92,8 +92,8 @@ export class AgentAbortedError extends AgentError {
  */
 export class AgentBusyError extends AgentError {
     constructor(status: string) {
-        super(`Agent is not idle, current status: ${status}`, { 
-            code: AgentErrorCode.BUSY 
+        super(`Agent is not idle, current status: ${status}`, {
+            code: AgentErrorCode.BUSY,
         });
         this.name = 'AgentBusyError';
     }
@@ -106,7 +106,7 @@ export class AgentBusyError extends AgentError {
  */
 export class AgentMaxRetriesExceededError extends AgentError {
     constructor(reason?: string) {
-        const message = reason 
+        const message = reason
             ? `Agent failed after maximum retries. ${reason}`
             : 'Agent failed after maximum retries.';
         super(message, { code: AgentErrorCode.MAX_RETRIES_EXCEEDED });
@@ -119,8 +119,8 @@ export class AgentMaxRetriesExceededError extends AgentError {
  */
 export class AgentCompensationRetryExceededError extends AgentError {
     constructor() {
-        super('Agent failed after maximum compensation retries.', { 
-            code: AgentErrorCode.COMPENSATION_RETRY_EXCEEDED 
+        super('Agent failed after maximum compensation retries.', {
+            code: AgentErrorCode.COMPENSATION_RETRY_EXCEEDED,
         });
         this.name = 'AgentCompensationRetryExceededError';
     }
@@ -131,8 +131,8 @@ export class AgentCompensationRetryExceededError extends AgentError {
  */
 export class AgentLoopExceededError extends AgentError {
     constructor(maxLoops: number) {
-        super(`Agent exceeded maximum loop count (${maxLoops}).`, { 
-            code: AgentErrorCode.LOOP_EXCEEDED 
+        super(`Agent exceeded maximum loop count (${maxLoops}).`, {
+            code: AgentErrorCode.LOOP_EXCEEDED,
         });
         this.name = 'AgentLoopExceededError';
     }
@@ -238,12 +238,7 @@ export class LLMRetryableError extends Error {
     public readonly retryAfter?: number;
     public readonly errorType?: string;
 
-    constructor(
-        message: string,
-        retryAfter?: number,
-        errorType?: string,
-        options?: AgentErrorOptions
-    ) {
+    constructor(message: string, retryAfter?: number, errorType?: string, options?: AgentErrorOptions) {
         super(message, { cause: options?.cause });
         this.name = 'LLMRetryableError';
         this.code = options?.code ?? 'LLM_RETRYABLE';
@@ -257,22 +252,14 @@ export class LLMRetryableError extends Error {
      * 创建超时错误
      */
     static timeout(timeoutMs: number): LLMRetryableError {
-        return new LLMRetryableError(
-            `LLM request timed out after ${timeoutMs}ms`,
-            5000,
-            'TIMEOUT'
-        );
+        return new LLMRetryableError(`LLM request timed out after ${timeoutMs}ms`, 5000, 'TIMEOUT');
     }
 
     /**
      * 创建速率限制错误
      */
     static rateLimit(retryAfterMs: number): LLMRetryableError {
-        return new LLMRetryableError(
-            'Rate limit exceeded',
-            retryAfterMs,
-            'RATE_LIMIT'
-        );
+        return new LLMRetryableError('Rate limit exceeded', retryAfterMs, 'RATE_LIMIT');
     }
 }
 
@@ -336,7 +323,7 @@ export function isCompensationRetryError(error: unknown): error is CompensationR
 export function hasValidFailureCode(error: unknown): error is AgentError & { code: AgentFailureCode } {
     if (!(error instanceof AgentError)) return false;
     if (!error.code) return false;
-    
+
     const validCodes: readonly string[] = [
         AgentErrorCode.ABORTED,
         AgentErrorCode.BUSY,
@@ -351,6 +338,6 @@ export function hasValidFailureCode(error: unknown): error is AgentError & { cod
         AgentErrorCode.LLM_RESPONSE_INVALID,
         AgentErrorCode.TOOL_EXECUTION_FAILED,
     ];
-    
+
     return validCodes.includes(error.code);
 }

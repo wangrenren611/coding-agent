@@ -128,8 +128,9 @@ Another line with DIFFERENT_TEXT to replace.
 Final line.
 `;
 
-export const LARGE_FILE_CONTENT = Array.from({ length: 1000 }, (_, i) =>
-    `Line ${i + 1}: Some content here with repeated patterns.`
+export const LARGE_FILE_CONTENT = Array.from(
+    { length: 1000 },
+    (_, i) => `Line ${i + 1}: Some content here with repeated patterns.`
 ).join('\n');
 
 export const MULTILINE_CONTENT = `function calculateSum(a: number, b: number): number {

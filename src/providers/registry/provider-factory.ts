@@ -22,10 +22,7 @@ export class ProviderFactory {
      * @param overrides 可选的配置覆盖
      * @returns OpenAI Compatible Provider 实例
      */
-    static createFromEnv(
-        modelId: ModelId,
-        overrides?: Partial<ModelConfig>
-    ): OpenAICompatibleProvider {
+    static createFromEnv(modelId: ModelId, overrides?: Partial<ModelConfig>): OpenAICompatibleProvider {
         if (!modelId) {
             throw new Error('ModelId is required.');
         }
@@ -41,7 +38,7 @@ export class ProviderFactory {
         const baseConfig: Record<string, unknown> = {
             baseURL,
             model: modelConfig.model,
-            temperature: modelConfig.temperature||0.3,
+            temperature: modelConfig.temperature || 0.3,
             max_tokens: modelConfig.max_tokens,
             LLMMAX_TOKENS: modelConfig.LLMMAX_TOKENS,
             thinking: modelConfig.thinking,

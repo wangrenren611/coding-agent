@@ -25,8 +25,7 @@ export type ModelId =
     | 'glm-5'
     // Qwen 系列
     | 'qwen3.5-plus'
-    | 'qwen-kimi-k2.5'
-    ;
+    | 'qwen-kimi-k2.5';
 
 /**
  * 模型配置

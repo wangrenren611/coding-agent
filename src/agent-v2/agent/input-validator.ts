@@ -1,11 +1,11 @@
 /**
  * Agent 输入验证器
- * 
+ *
  * 负责验证用户输入的合法性
  */
 
-import { InputContentPart, MessageContent } from "../../providers";
-import { ValidationResult } from "./types-internal";
+import { InputContentPart, MessageContent } from '../../providers';
+import { ValidationResult } from './types-internal';
 
 /** 最大查询长度 */
 const MAX_QUERY_LENGTH = 100000;

@@ -48,16 +48,14 @@ export class StreamParser {
 
     /**
      * 处理可读流并返回 AsyncGenerator
-     * 
+     *
      * 注意：使用 try/finally 确保在生成器被提前终止时（如 break 或 return）
      * reader 能够被正确释放，避免流锁定问题
      *
      * @param reader - 可读流读取器
      * @returns 异步生成器，每次 yield 一个 chunk
      */
-    static async *parseAsync(
-        reader: ReadableStreamDefaultReader<Uint8Array>
-    ): AsyncGenerator<Chunk> {
+    static async *parseAsync(reader: ReadableStreamDefaultReader<Uint8Array>): AsyncGenerator<Chunk> {
         const decoder = new TextDecoder();
         let buffer = '';
         let shouldStop = false;

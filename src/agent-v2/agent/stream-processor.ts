@@ -303,8 +303,6 @@ export class StreamProcessor {
             return;
         }
 
-       
-
         // 触发开始事件
         if (!this.state.reasoningStarted) {
             this.state.reasoningStarted = true;
@@ -337,18 +335,15 @@ export class StreamProcessor {
             return;
         }
 
-
         // 触发开始事件
         if (!this.state.textStarted) {
-
-            if(this.state.reasoningStarted&&!this.state.reasoningCompleted){
-              this.state.reasoningCompleted = true;
-              this.options.onReasoningComplete?.(this.currentMessageId);
+            if (this.state.reasoningStarted && !this.state.reasoningCompleted) {
+                this.state.reasoningCompleted = true;
+                this.options.onReasoningComplete?.(this.currentMessageId);
             }
 
-            this.state.textStarted=true
+            this.state.textStarted = true;
             this.options.onTextStart(this.currentMessageId);
-
         }
 
         // 触发增量事件
@@ -380,16 +375,16 @@ export class StreamProcessor {
         // 标记工具调用开始
         if (!this.state.toolCallsStarted) {
             this.state.toolCallsStarted = true;
-            
+
             // 如果之前有文本内容，先触发完成
             if (this.state.textStarted && !this.state.textCompleted) {
                 this.state.textCompleted = true;
                 this.options.onTextComplete(this.currentMessageId);
             }
 
-            if(this.state.reasoningStarted&&!this.state.reasoningCompleted){
-              this.state.reasoningCompleted = true;
-              this.options.onReasoningComplete?.(this.currentMessageId);
+            if (this.state.reasoningStarted && !this.state.reasoningCompleted) {
+                this.state.reasoningCompleted = true;
+                this.options.onReasoningComplete?.(this.currentMessageId);
             }
         }
 
@@ -411,10 +406,7 @@ export class StreamProcessor {
      * 处理单独的 finish_reason
      * 当 chunk 只有 finish_reason 没有其他内容时调用
      */
-    private handleFinishReasonOnly(
-        finishReason: FinishReason,
-        chunkId: string | undefined
-    ): void {
+    private handleFinishReasonOnly(finishReason: FinishReason, chunkId: string | undefined): void {
         // 触发文本完成
         if (this.state.textStarted && !this.state.textCompleted) {
             this.state.textCompleted = true;
@@ -468,9 +460,7 @@ export class StreamProcessor {
      * 追加内容到缓冲区
      */
     private appendToBuffer(type: 'reasoning' | 'content', content: string): boolean {
-        const currentSize = type === 'reasoning'
-            ? this.buffers.reasoning.length
-            : this.buffers.content.length;
+        const currentSize = type === 'reasoning' ? this.buffers.reasoning.length : this.buffers.content.length;
 
         const projectedSize = currentSize + content.length;
 
@@ -531,11 +521,8 @@ export class StreamProcessor {
         if (chunk.model) this.metadata.model = chunk.model;
         if (chunk.created) this.metadata.created = chunk.created;
         if (finishReason) this.metadata.finish_reason = finishReason;
-
-
     }
 
-  
     /**
      * 对当前缓冲区内容进行完整验证
      */

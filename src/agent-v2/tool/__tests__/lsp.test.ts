@@ -58,7 +58,7 @@ console.log(result);`;
                 operation: 'documentSymbol',
                 filePath: testFile,
                 line: 1,
-                character: 1
+                character: 1,
             });
 
             expect(result.success).toBe(true);
@@ -80,7 +80,7 @@ console.log(result);`;
                 operation: 'documentSymbol',
                 filePath: testFile,
                 line: 1,
-                character: 1
+                character: 1,
             });
 
             expect(result.success).toBe(true);
@@ -89,18 +89,21 @@ console.log(result);`;
         });
 
         it('should extract function names correctly', async () => {
-            const testFile = await env.createFile('code.ts', `
+            const testFile = await env.createFile(
+                'code.ts',
+                `
 function myFunction() {}
 const arrowFunc = () => {};
 class MyClass {
     method() {}
-}`);
+}`
+            );
             const tool = new LspTool();
             const result = await tool.execute({
                 operation: 'documentSymbol',
                 filePath: testFile,
                 line: 1,
-                character: 1
+                character: 1,
             });
 
             expect(result.success).toBe(true);
@@ -116,7 +119,7 @@ class MyClass {
                 operation: 'documentSymbol',
                 filePath: testFile,
                 line: 1,
-                character: 1
+                character: 1,
             });
 
             expect(result.success).toBe(true);
@@ -139,7 +142,7 @@ const u: User = { id: 1 };`;
                 operation: 'goToDefinition',
                 filePath: testFile,
                 line: 5,
-                character: 10  // On 'User'
+                character: 10, // On 'User'
             });
 
             expect(result.success).toBe(true);
@@ -162,7 +165,7 @@ greet('World');`;
                 operation: 'goToDefinition',
                 filePath: testFile,
                 line: 5,
-                character: 1  // On 'greet'
+                character: 1, // On 'greet'
             });
 
             expect(result.success).toBe(true);
@@ -178,7 +181,7 @@ greet('World');`;
                 operation: 'goToDefinition',
                 filePath: testFile,
                 line: 1,
-                character: 10  // On 'undefinedVariable'
+                character: 10, // On 'undefinedVariable'
             });
 
             expect(result.success).toBe(true);
@@ -195,7 +198,7 @@ greet('World');`;
                 operation: 'hover',
                 filePath: testFile,
                 line: 1,
-                character: 7  // On 'x' (1-based, position 7)
+                character: 7, // On 'x' (1-based, position 7)
             });
 
             expect(result.success).toBe(true);
@@ -214,7 +217,7 @@ greet('World');`;
                 operation: 'hover',
                 filePath: testFile,
                 line: 1,
-                character: 10  // On 'add'
+                character: 10, // On 'add'
             });
 
             expect(result.success).toBe(true);
@@ -229,7 +232,7 @@ greet('World');`;
                 operation: 'hover',
                 filePath: testFile,
                 line: 1,
-                character: 1  // On 'const'
+                character: 1, // On 'const'
             });
 
             expect(result.success).toBe(true);
@@ -249,7 +252,7 @@ console.log(myVar);`;
                 operation: 'findReferences',
                 filePath: testFile,
                 line: 1,
-                character: 7  // On 'myVar'
+                character: 7, // On 'myVar'
             });
 
             // Debug output
@@ -273,7 +276,7 @@ test();`;
                 operation: 'findReferences',
                 filePath: testFile,
                 line: 4,
-                character: 1  // On 'test'
+                character: 1, // On 'test'
             });
 
             expect(result.success).toBe(true);
@@ -300,7 +303,7 @@ test();`;
                 operation: 'findReferences',
                 filePath: testFile,
                 line: 1,
-                character: 5
+                character: 5,
             });
 
             expect(result.success).toBe(true);
@@ -319,7 +322,7 @@ test();`;
                 operation: 'workspaceSymbol',
                 filePath: path.join(env.getTestDir(), 'file1.ts'),
                 line: 1,
-                character: 1
+                character: 1,
             });
 
             expect(result.success).toBe(true);
@@ -338,7 +341,7 @@ test();`;
                 operation: 'workspaceSymbol',
                 filePath: path.join(env.getTestDir(), 'file0.ts'),
                 line: 1,
-                character: 1
+                character: 1,
             });
 
             expect(result.success).toBe(true);
@@ -354,7 +357,7 @@ test();`;
                 operation: 'documentSymbol',
                 filePath: 'nonexistent.ts',
                 line: 1,
-                character: 1
+                character: 1,
             });
 
             expect(result.success).toBe(false);
@@ -368,7 +371,7 @@ test();`;
                 operation: 'documentSymbol',
                 filePath: testFile,
                 line: 1,
-                character: 1
+                character: 1,
             });
 
             expect(result.success).toBe(false);
@@ -382,7 +385,7 @@ test();`;
                 operation: 'goToDefinition',
                 filePath: testFile,
                 line: 1,
-                character: 100  // Past end of line
+                character: 100, // Past end of line
             });
 
             // Should handle gracefully
@@ -396,7 +399,7 @@ test();`;
                 operation: 'documentSymbol',
                 filePath: testFile,
                 line: 1,
-                character: 1
+                character: 1,
             });
 
             // Should handle gracefully
@@ -412,7 +415,7 @@ test();`;
                 operation: 'documentSymbol',
                 filePath: testFile,
                 line: 1,
-                character: 1
+                character: 1,
             });
 
             expect(result.success).toBe(true);
@@ -425,7 +428,7 @@ test();`;
                 operation: 'documentSymbol',
                 filePath: testFile,
                 line: 1,
-                character: 1
+                character: 1,
             });
 
             expect(result.success).toBe(true);
@@ -438,7 +441,7 @@ test();`;
                 operation: 'documentSymbol',
                 filePath: testFile,
                 line: 1,
-                character: 1
+                character: 1,
             });
 
             expect(result.success).toBe(true);
@@ -451,7 +454,7 @@ test();`;
                 operation: 'documentSymbol',
                 filePath: testFile,
                 line: 1,
-                character: 1
+                character: 1,
             });
 
             expect(result.success).toBe(true);
@@ -475,7 +478,7 @@ class Container {
                 operation: 'documentSymbol',
                 filePath: testFile,
                 line: 1,
-                character: 1
+                character: 1,
             });
 
             expect(result.success).toBe(true);
@@ -495,7 +498,7 @@ const result = identity<string>("test");`;
                 operation: 'goToDefinition',
                 filePath: testFile,
                 line: 5,
-                character: 16  // On 'identity' (adjusted position)
+                character: 16, // On 'identity' (adjusted position)
             });
 
             expect(result.success).toBe(true);
@@ -522,7 +525,7 @@ fetchData().then(console.log);`;
                 operation: 'documentSymbol',
                 filePath: testFile,
                 line: 1,
-                character: 1
+                character: 1,
             });
 
             expect(result.success).toBe(true);

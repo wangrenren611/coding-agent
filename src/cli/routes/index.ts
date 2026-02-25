@@ -1,4 +1,4 @@
 /**
  * Route exports
  */
-export { Home } from "./home";
+export { Home } from './home';

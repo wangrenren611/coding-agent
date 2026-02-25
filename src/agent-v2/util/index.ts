@@ -1,6 +1,5 @@
 export function safeParse(data: string): any | null {
-
-    if(!data){
+    if (!data) {
         return null;
     }
 

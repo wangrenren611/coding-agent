@@ -40,21 +40,26 @@ describe('ToolExecutor protocol events', () => {
         const patchSpy = vi.fn();
         const resultSpy = vi.fn();
         const registry = {
-            execute: vi.fn(async (_toolCalls: ToolCall[], context?: {
-                onToolStream?: (toolCallId: string, toolName: string, output: string) => void;
-            }) => {
-                context?.onToolStream?.('call-1', 'write_file', 'partial-output');
-                fs.writeFileSync(filePath, 'new-line\n', 'utf8');
-                return [
-                    {
-                        tool_call_id: 'call-1',
-                        result: {
-                            success: true,
-                            output: 'done',
+            execute: vi.fn(
+                async (
+                    _toolCalls: ToolCall[],
+                    context?: {
+                        onToolStream?: (toolCallId: string, toolName: string, output: string) => void;
+                    }
+                ) => {
+                    context?.onToolStream?.('call-1', 'write_file', 'partial-output');
+                    fs.writeFileSync(filePath, 'new-line\n', 'utf8');
+                    return [
+                        {
+                            tool_call_id: 'call-1',
+                            result: {
+                                success: true,
+                                output: 'done',
+                            },
                         },
-                    },
-                ];
-            }),
+                    ];
+                }
+            ),
         } as any;
 
         const executor = new ToolExecutor({
@@ -65,10 +70,7 @@ describe('ToolExecutor protocol events', () => {
             onToolCallResult: resultSpy,
         });
 
-        await executor.execute(
-            [createToolCall('call-1', 'write_file', { filePath, content: 'new-line\n' })],
-            'msg-1'
-        );
+        await executor.execute([createToolCall('call-1', 'write_file', { filePath, content: 'new-line\n' })], 'msg-1');
 
         expect(streamSpy).toHaveBeenCalledWith('call-1', 'partial-output', 'msg-1');
         expect(resultSpy).toHaveBeenCalledTimes(1);
@@ -103,10 +105,7 @@ describe('ToolExecutor protocol events', () => {
             onCodePatch: patchSpy,
         });
 
-        await executor.execute(
-            [createToolCall('call-2', 'write_file', { filePath, content: 'same\n' })],
-            'msg-2'
-        );
+        await executor.execute([createToolCall('call-2', 'write_file', { filePath, content: 'same\n' })], 'msg-2');
 
         expect(streamSpy).toHaveBeenCalledWith('call-2', 'noop', 'msg-2');
         expect(patchSpy).not.toHaveBeenCalled();

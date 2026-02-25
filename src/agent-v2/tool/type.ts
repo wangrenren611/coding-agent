@@ -1,4 +1,3 @@
-
 /** 工具 Schema */
 export interface ToolSchema {
     type: 'function';
@@ -9,9 +8,6 @@ export interface ToolSchema {
         parameters: Record<string, unknown>;
     };
 }
-
-
-
 
 /**
  * 工具分类
@@ -32,7 +28,3 @@ export enum ToolCategory {
     /** Git 操作 */
     GIT = 'git',
 }
-
-
-
-

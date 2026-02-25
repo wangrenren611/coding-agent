@@ -13,9 +13,9 @@ import { FileMemoryManager } from './file-memory';
  * 当前仅支持 file 实现。
  */
 export function createMemoryManager(options: MemoryManagerOptions): IMemoryManager {
-  if (options.type !== 'file') {
-    throw new Error(`Unsupported memory manager type: ${options.type}`);
-  }
+    if (options.type !== 'file') {
+        throw new Error(`Unsupported memory manager type: ${options.type}`);
+    }
 
-  return new FileMemoryManager(options);
+    return new FileMemoryManager(options);
 }

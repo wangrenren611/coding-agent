@@ -28,8 +28,6 @@ export type ToolContext = {
     emitOutput?: (chunk: string) => void;
 };
 
-
-
 /**
  * 工具基类
  *
@@ -62,19 +60,24 @@ export abstract class BaseTool<T extends z.ZodType> {
      */
     abstract execute(args?: z.infer<T>, context?: ToolContext): Promise<ToolResult> | ToolResult;
 
-
     /**
      * 创建成功结果
      */
-  protected result<T>({success, metadata, output }: { success: boolean, metadata: T, output: ToolResult['output'] }): ToolResult<T> {
+    protected result<T>({
+        success,
+        metadata,
+        output,
+    }: {
+        success: boolean;
+        metadata: T;
+        output: ToolResult['output'];
+    }): ToolResult<T> {
         return {
             success,
             metadata,
             output,
         };
-  }
-
-
+    }
 }
 
 export { z };

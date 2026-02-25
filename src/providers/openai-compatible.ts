@@ -33,8 +33,6 @@ import {
     LLMResponse,
 } from './types';
 
-
-
 /**
  * OpenAI 兼容 Provider 基类
  *
@@ -44,10 +42,6 @@ import {
  * - 各种兼容第三方服务（如 DeepSeek、Qwen、通义千问等）
  */
 export class OpenAICompatibleProvider extends LLMProvider {
-
-
-
-  
     readonly httpClient: HTTPClient;
     readonly adapter: BaseAPIAdapter;
     private timeout: number;
@@ -59,7 +53,7 @@ export class OpenAICompatibleProvider extends LLMProvider {
         const normalizedBaseURL = config.baseURL.replace(/\/$/, '');
         this.config = { ...config, baseURL: normalizedBaseURL };
         this.timeout = config.timeout ?? 1000 * 60 * 3; // 3 minutes (Agent 层控制实际超时)
-        
+
         // 初始化 HTTP 客户端
         this.httpClient = new HTTPClient({
             timeout: this.timeout,
@@ -67,10 +61,12 @@ export class OpenAICompatibleProvider extends LLMProvider {
         });
 
         // 初始化 Adapter（未提供则使用标准适配器）
-        this.adapter = adapter ?? new StandardAdapter({
-            defaultModel: config.model,
-            endpointPath: config.chatCompletionsPath ?? '/chat/completions',
-        });
+        this.adapter =
+            adapter ??
+            new StandardAdapter({
+                defaultModel: config.model,
+                endpointPath: config.chatCompletionsPath ?? '/chat/completions',
+            });
     }
 
     /**
@@ -209,13 +205,11 @@ export class OpenAICompatibleProvider extends LLMProvider {
     getLLMMaxTokens(): number {
         return this.config.LLMMAX_TOKENS;
     }
-    
+
     getMaxOutputTokens(): number {
-      return this.config.max_tokens;
+        return this.config.max_tokens;
     }
 }
-
-
 
 // 重新导出配置类型
 export type { OpenAICompatibleConfig } from './types';

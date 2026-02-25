@@ -24,7 +24,7 @@ export const MODEL_DEFINITIONS: Record<ModelId, Omit<ModelConfig, 'apiKey'>> = {
         LLMMAX_TOKENS: 200 * 1000,
         features: ['streaming', 'function-calling', 'vision'],
     },
-     // GLM 系列
+    // GLM 系列
     'glm-5': {
         id: 'glm-5',
         provider: 'glm',
@@ -83,30 +83,30 @@ export const MODEL_DEFINITIONS: Record<ModelId, Omit<ModelConfig, 'apiKey'>> = {
         features: ['streaming', 'function-calling'],
     },
     // Qwen 系列
-    "qwen3.5-plus": {
-        id: "qwen3.5-plus",
-        provider: "qwen",
-        name: "Qwen 3.5 Plus",
-        baseURL: "https://coding.dashscope.aliyuncs.com/v1",
-        endpointPath: "/chat/completions",
-        envApiKey: "QEPSEEK_API_KEY",
-        envBaseURL: "QEPSEEK_API_BASE",
-        model: "qwen3.5-plus",
+    'qwen3.5-plus': {
+        id: 'qwen3.5-plus',
+        provider: 'qwen',
+        name: 'Qwen 3.5 Plus',
+        baseURL: 'https://coding.dashscope.aliyuncs.com/v1',
+        endpointPath: '/chat/completions',
+        envApiKey: 'QEPSEEK_API_KEY',
+        envBaseURL: 'QEPSEEK_API_BASE',
+        model: 'qwen3.5-plus',
         max_tokens: 8000,
         LLMMAX_TOKENS: 1024 * 1000,
-        features: ["streaming", "function-calling"],
+        features: ['streaming', 'function-calling'],
     },
-    "qwen-kimi-k2.5":{
-        id: "qwen-kimi-k2.5",
-        provider: "qwen",
-        name: "qwen kimi k2.5",
-        baseURL: "https://coding.dashscope.aliyuncs.com/v1",
-        endpointPath: "/chat/completions",
-        envApiKey: "QEPSEEK_API_KEY",
-        envBaseURL: "QEPSEEK_API_BASE",
-        model: "kimi-k2.5",
+    'qwen-kimi-k2.5': {
+        id: 'qwen-kimi-k2.5',
+        provider: 'qwen',
+        name: 'qwen kimi k2.5',
+        baseURL: 'https://coding.dashscope.aliyuncs.com/v1',
+        endpointPath: '/chat/completions',
+        envApiKey: 'QEPSEEK_API_KEY',
+        envBaseURL: 'QEPSEEK_API_BASE',
+        model: 'kimi-k2.5',
         max_tokens: 8000,
         LLMMAX_TOKENS: 1024 * 1000,
-        features: ["streaming", "function-calling"],
-    }
+        features: ['streaming', 'function-calling'],
+    },
 };

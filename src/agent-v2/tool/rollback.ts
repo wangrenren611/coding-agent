@@ -132,7 +132,11 @@ export class CleanBackupsTool extends BaseTool<any> {
         if (!confirm) {
             return this.result({
                 success: false,
-                metadata: { error: 'CONFIRMATION_REQUIRED', code: 'CONFIRMATION_REQUIRED', message: 'Set confirm=true to proceed with deletion' } as any,
+                metadata: {
+                    error: 'CONFIRMATION_REQUIRED',
+                    code: 'CONFIRMATION_REQUIRED',
+                    message: 'Set confirm=true to proceed with deletion',
+                } as any,
                 output: 'CONFIRMATION_REQUIRED: Set confirm=true to proceed with deletion',
             });
         }

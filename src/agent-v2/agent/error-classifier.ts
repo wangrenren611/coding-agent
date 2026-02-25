@@ -1,12 +1,12 @@
 /**
  * Agent 错误分类器
- * 
+ *
  * 负责错误分类、识别和用户友好的错误消息转换
  */
 
-import { LLMError, isAbortedError } from "../../providers";
-import { 
-    AgentError, 
+import { LLMError, isAbortedError } from '../../providers';
+import {
+    AgentError,
     ToolError,
     AgentAbortedError,
     AgentBusyError,
@@ -18,9 +18,9 @@ import {
     LLMRequestError,
     LLMResponseInvalidError,
     hasValidFailureCode,
-} from "./errors";
-import { AgentFailure, AgentFailureCode, AgentStatus, AGENT_FAILURE_CODES } from "./types";
-import { SafeError } from "./types-internal";
+} from './errors';
+import { AgentFailure, AgentFailureCode, AgentStatus, AGENT_FAILURE_CODES } from './types';
+import { SafeError } from './types-internal';
 
 /**
  * 错误分类器
@@ -28,7 +28,7 @@ import { SafeError } from "./types-internal";
 export class ErrorClassifier {
     /**
      * 对错误进行分类，返回失败代码
-     * 
+     *
      * 分类优先级：
      * 1. 检查 Agent 状态（ABORTED）
      * 2. 检查专用错误子类（instanceof）
@@ -174,10 +174,10 @@ export class ErrorClassifier {
         if (!(error instanceof Error)) return false;
         const message = `${error.name} ${error.message}`.toLowerCase();
         return (
-            message.includes('timeout')
-            || message.includes('timed out')
-            || message.includes('time out')
-            || message.includes('signal timed out')
+            message.includes('timeout') ||
+            message.includes('timed out') ||
+            message.includes('time out') ||
+            message.includes('signal timed out')
         );
     }
 

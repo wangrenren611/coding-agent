@@ -13,7 +13,7 @@
  * - 事件发射 -> AgentEmitter
  */
 
-import { v4 as uuid } from "uuid";
+import { v4 as uuid } from 'uuid';
 
 import {
     FinishReason,
@@ -23,15 +23,14 @@ import {
     isRetryableError,
     MessageContent,
     Usage,
-} from "../../providers";
-import { Session } from "../session";
-import { ToolRegistry } from "../tool/registry";
-import { EventBus, EventType } from "../eventbus";
-import { Message } from "../session/types";
-import { createDefaultToolRegistry } from "../tool";
+} from '../../providers';
+import { Session } from '../session';
+import { ToolRegistry } from '../tool/registry';
+import { EventBus, EventType } from '../eventbus';
+import { Message } from '../session/types';
+import { createDefaultToolRegistry } from '../tool';
 
-import { 
-    AgentError, 
+import {
     CompensationRetryError,
     AgentAbortedError,
     AgentBusyError,
@@ -41,34 +40,17 @@ import {
     AgentValidationError,
     LLMRequestError,
     LLMResponseInvalidError,
-} from "./errors";
-import {
-    AgentExecutionResult,
-    AgentFailure,
-    AgentOptions,
-    AgentStatus,
-    StreamCallback,
-} from "./types";
-import { AgentState } from "./core/agent-state";
-import { LLMCaller } from "./core/llm-caller";
-import { ToolExecutor } from "./core/tool-executor";
-import { DefaultTimeProvider } from "./time-provider";
-import { InputValidator } from "./input-validator";
-import { ErrorClassifier } from "./error-classifier";
-import { AgentEmitter } from "./agent-emitter";
-import type { ResponseValidatorOptions } from "./response-validator";
-import {
-    ITimeProvider,
-    TaskFailedEvent,
-    ValidationResult,
-    contentToText,
-    hasContent,
-} from "./core-types";
-import {
-    getResponseFinishReason,
-    getResponseToolCalls,
-    responseHasToolCalls,
-} from "./types-internal";
+} from './errors';
+import { AgentExecutionResult, AgentOptions, AgentStatus, StreamCallback } from './types';
+import { AgentState } from './core/agent-state';
+import { LLMCaller } from './core/llm-caller';
+import { ToolExecutor } from './core/tool-executor';
+import { DefaultTimeProvider } from './time-provider';
+import { InputValidator } from './input-validator';
+import { ErrorClassifier } from './error-classifier';
+import { AgentEmitter } from './agent-emitter';
+import { ITimeProvider, TaskFailedEvent, ValidationResult, contentToText, hasContent } from './core-types';
+import { getResponseFinishReason, getResponseToolCalls, responseHasToolCalls } from './types-internal';
 
 // ==================== 常量 ====================
 
@@ -136,11 +118,9 @@ export class Agent {
             provider: this.provider,
         });
 
-        this.toolRegistry = config.toolRegistry ?? createDefaultToolRegistry(
-            { workingDirectory: process.cwd() },
-            this.provider
-        );
-      
+        this.toolRegistry =
+            config.toolRegistry ?? createDefaultToolRegistry({ workingDirectory: process.cwd() }, this.provider);
+
         this.agentState = new AgentState({
             maxLoops: config.maxLoops ?? AGENT_DEFAULTS.LOOP_MAX,
             maxRetries: config.maxRetries ?? AGENT_DEFAULTS.MAX_RETRIES,
@@ -185,7 +165,7 @@ export class Agent {
             sessionId: this.session.getSessionId(),
             memoryManager: this.session.getMemoryManager(),
             streamCallback: this.streamCallback,
-            onToolCallCreated: (toolCalls, messageId, content) => 
+            onToolCallCreated: (toolCalls, messageId, content) =>
                 this.emitter.emitToolCallCreated(toolCalls, messageId, content),
             onToolCallStream: (toolCallId, output, messageId) =>
                 this.emitter.emitToolCallStream(toolCallId, output, messageId),
@@ -229,10 +209,7 @@ export class Agent {
         }
     }
 
-    async executeWithResult(
-        query: MessageContent,
-        options?: LLMGenerateOptions
-    ): Promise<AgentExecutionResult> {
+    async executeWithResult(query: MessageContent, options?: LLMGenerateOptions): Promise<AgentExecutionResult> {
         try {
             const finalMessage = await this.execute(query, options);
             return {
@@ -243,8 +220,8 @@ export class Agent {
                 sessionId: this.session.getSessionId(),
             };
         } catch (error) {
-            const failure = this.agentState.lastFailure
-                ?? this.errorClassifier.buildFailure(error, this.agentState.status);
+            const failure =
+                this.agentState.lastFailure ?? this.errorClassifier.buildFailure(error, this.agentState.status);
             return {
                 status: this.agentState.status === AgentStatus.ABORTED ? 'aborted' : 'failed',
                 failure,
@@ -442,11 +419,7 @@ export class Agent {
         if (typeof withMeta.code === 'string' && withMeta.code) {
             tags.push(withMeta.code);
         }
-        if (
-            typeof withMeta.errorType === 'string'
-            && withMeta.errorType
-            && !tags.includes(withMeta.errorType)
-        ) {
+        if (typeof withMeta.errorType === 'string' && withMeta.errorType && !tags.includes(withMeta.errorType)) {
             tags.push(withMeta.errorType);
         }
 
@@ -499,16 +472,12 @@ export class Agent {
         }
 
         const hasToolCalls = Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
-        return message.type === 'text'
-            && hasContent(message.content)
-            && !hasToolCalls;
+        return message.type === 'text' && hasContent(message.content) && !hasToolCalls;
     }
 
     private isEmptyResponse(message: Message): boolean {
         const hasToolCalls = Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
-        return message.role === 'assistant'
-            && !hasToolCalls
-            && !hasContent(message.content);
+        return message.role === 'assistant' && !hasToolCalls && !hasContent(message.content);
     }
 
     // ==================== 内部方法：LLM 调用（委托给 LLMCaller） ====================
@@ -518,23 +487,18 @@ export class Agent {
         this.agentState.prepareLLMCall();
 
         const messages = this.getMessagesForLLM();
-        
+
         // 验证消息列表有效性
-        if (messages.length === 0 || messages.every(m => m.role === 'system')) {
+        if (messages.length === 0 || messages.every((m) => m.role === 'system')) {
             throw new LLMRequestError('No valid messages to send to LLM');
         }
-        
+
         const tools = this.toolRegistry.toLLMTools();
         const abortSignal = this.createAbortSignal();
-  
+
         try {
             // 传递 options 给 llmCaller，允许动态覆盖配置
-            const { response, messageId } = await this.llmCaller.execute(
-                messages,
-                tools,
-                abortSignal,
-                options
-            );
+            const { response, messageId } = await this.llmCaller.execute(messages, tools, abortSignal, options);
 
             if (!response) {
                 throw new LLMResponseInvalidError('LLM returned no response');
@@ -557,7 +521,7 @@ export class Agent {
     private createAbortSignal(): AbortSignal {
         const controller = this.agentState.abortController;
         const timeout = this.requestTimeoutMs ?? this.provider.getTimeTimeout();
-        
+
         if (!controller) {
             return AbortSignal.timeout(timeout);
         }
@@ -583,11 +547,7 @@ export class Agent {
 
         // abort 完成原因触发重试
         if (finishReason === 'abort') {
-            throw new LLMRetryableError(
-                'LLM request was aborted',
-                AGENT_DEFAULTS.ABORT_RETRY_DELAY_MS,
-                'LLM_ABORT'
-            );
+            throw new LLMRetryableError('LLM request was aborted', AGENT_DEFAULTS.ABORT_RETRY_DELAY_MS, 'LLM_ABORT');
         }
 
         if (responseHasToolCalls(response)) {
@@ -638,11 +598,7 @@ export class Agent {
         this.session.addMessage(message);
     }
 
-    private async handleToolCallResponse(
-        response: LLMResponse,
-        messageId: string,
-        usage?: Usage
-    ): Promise<void> {
+    private async handleToolCallResponse(response: LLMResponse, messageId: string, usage?: Usage): Promise<void> {
         const toolCalls = getResponseToolCalls(response);
         const finishReason = getResponseFinishReason(response);
 
@@ -669,7 +625,7 @@ export class Agent {
 
         // 委托给 ToolExecutor 执行工具
         const executionResult = await this.toolExecutor.execute(toolCalls, messageId, content);
-        
+
         // 检查工具执行结果
         if (!executionResult.success) {
             this.emitter.emitStatus(
@@ -682,7 +638,7 @@ export class Agent {
     // ==================== 内部方法：消息处理 ====================
 
     private getMessagesForLLM(): Message[] {
-        return this.session.getMessages().filter(msg => this.shouldSendMessage(msg));
+        return this.session.getMessages().filter((msg) => this.shouldSendMessage(msg));
     }
 
     private shouldSendMessage(message: Message): boolean {
@@ -719,7 +675,7 @@ export class Agent {
                 ...message,
                 finish_reason: finishReason || 'tool_calls',
                 tool_calls: message.tool_calls || toolCalls,
-                type: (message.tool_calls || toolCalls) ? 'tool-call' : message.type,
+                type: message.tool_calls || toolCalls ? 'tool-call' : message.type,
             });
         }
     }

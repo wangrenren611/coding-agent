@@ -1,6 +1,6 @@
 /**
  * CLI 场景测试：复现补偿重试超过限制后，重新发送消息仍然失败的问题
- * 
+ *
  * 问题描述：
  * 1. 用户发送消息，LLM 持续返回空响应，导致补偿重试超过限制
  * 2. 用户重新发送新消息，但仍然失败
@@ -13,7 +13,7 @@ import { createMemoryManager } from '../memory';
 import type { LLMResponse } from '../../providers/types';
 
 // 延迟函数，等待持久化完成
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Mock Provider
 class MockProvider {
@@ -42,19 +42,23 @@ class MockProvider {
             object: 'chat.completion',
             created: Date.now(),
             model: 'test-model',
-            choices: [{
-                index: 0,
-                message: {
-                    role: 'assistant',
-                    content: 'Hello! How can I help you?',
+            choices: [
+                {
+                    index: 0,
+                    message: {
+                        role: 'assistant',
+                        content: 'Hello! How can I help you?',
+                    },
+                    finish_reason: 'stop',
                 },
-                finish_reason: 'stop',
-            }],
+            ],
             usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
         };
     }
 
-    getTimeTimeout() { return 60000; }
+    getTimeTimeout() {
+        return 60000;
+    }
 
     reset() {
         this.callCount = 0;
@@ -86,18 +90,22 @@ describe('CLI 场景：补偿重试超过限制后重新发送消息', () => {
         // 场景 1：LLM 持续返回空响应，导致补偿重试超过限制
         mockProvider.customResponses = [
             {
-                choices: [{
-                    index: 0,
-                    message: { role: 'assistant', content: '' },
-                    finish_reason: 'stop',
-                }],
+                choices: [
+                    {
+                        index: 0,
+                        message: { role: 'assistant', content: '' },
+                        finish_reason: 'stop',
+                    },
+                ],
             },
             {
-                choices: [{
-                    index: 0,
-                    message: { role: 'assistant', content: '' },
-                    finish_reason: 'stop',
-                }],
+                choices: [
+                    {
+                        index: 0,
+                        message: { role: 'assistant', content: '' },
+                        finish_reason: 'stop',
+                    },
+                ],
             },
         ];
 
@@ -113,34 +121,42 @@ describe('CLI 场景：补偿重试超过限制后重新发送消息', () => {
         });
 
         const result1 = await agent1.executeWithResult('Hello');
-        
+
         // 第一次请求应该失败
         expect(result1.status).toBe('failed');
-        
+
         // 检查 Session 中的消息
         const messagesAfterFirst = agent1.getMessages();
-        const assistantMessagesAfterFirst = messagesAfterFirst.filter(m => m.role === 'assistant');
-        
-        console.log('第一次请求后的消息:', messagesAfterFirst.map(m => ({
-            role: m.role,
-            content: typeof m.content === 'string' ? m.content.substring(0, 50) : m.content,
-        })));
-        
+        const assistantMessagesAfterFirst = messagesAfterFirst.filter((m) => m.role === 'assistant');
+
+        console.log(
+            '第一次请求后的消息:',
+            messagesAfterFirst.map((m) => ({
+                role: m.role,
+                content: typeof m.content === 'string' ? m.content.substring(0, 50) : m.content,
+            }))
+        );
+
         // 关键检查：空响应消息是否被移除？
         // 如果问题存在，这里会有空响应消息
         // 如果问题已修复，这里应该没有空响应消息
         console.log('助手消息数量:', assistantMessagesAfterFirst.length);
-        console.log('助手消息内容:', assistantMessagesAfterFirst.map(m => m.content));
+        console.log(
+            '助手消息内容:',
+            assistantMessagesAfterFirst.map((m) => m.content)
+        );
 
         // 场景 2：用户重新发送新消息（使用同一个 sessionId）
         mockProvider.reset();
         mockProvider.customResponses = [
             {
-                choices: [{
-                    index: 0,
-                    message: { role: 'assistant', content: 'Normal response' },
-                    finish_reason: 'stop',
-                }],
+                choices: [
+                    {
+                        index: 0,
+                        message: { role: 'assistant', content: 'Normal response' },
+                        finish_reason: 'stop',
+                    },
+                ],
             },
         ];
 
@@ -156,25 +172,27 @@ describe('CLI 场景：补偿重试超过限制后重新发送消息', () => {
         });
 
         const result2 = await agent2.executeWithResult('New message');
-        
+
         console.log('第二次请求结果:', result2.status);
-        console.log('第二次请求后的消息:', agent2.getMessages().map(m => ({
-            role: m.role,
-            content: typeof m.content === 'string' ? m.content.substring(0, 50) : m.content,
-        })));
+        console.log(
+            '第二次请求后的消息:',
+            agent2.getMessages().map((m) => ({
+                role: m.role,
+                content: typeof m.content === 'string' ? m.content.substring(0, 50) : m.content,
+            }))
+        );
 
         // 第二次请求应该成功
         expect(result2.status).toBe('completed');
-        
+
         // 检查 Session 中是否有空响应消息残留
         const messagesAfterSecond = agent2.getMessages();
         const emptyAssistantMessages = messagesAfterSecond.filter(
-            m => m.role === 'assistant' && 
-                 (typeof m.content === 'string' ? m.content === '' : true)
+            (m) => m.role === 'assistant' && (typeof m.content === 'string' ? m.content === '' : true)
         );
-        
+
         console.log('空助手消息数量:', emptyAssistantMessages.length);
-        
+
         // 如果问题存在，这里会有空响应消息残留
         // 如果问题已修复，这里应该没有空响应消息
         expect(emptyAssistantMessages.length).toBe(0);
@@ -183,18 +201,22 @@ describe('CLI 场景：补偿重试超过限制后重新发送消息', () => {
     it('验证：补偿重试超过限制时，空响应消息应该被移除', async () => {
         mockProvider.customResponses = [
             {
-                choices: [{
-                    index: 0,
-                    message: { role: 'assistant', content: '' },
-                    finish_reason: 'stop',
-                }],
+                choices: [
+                    {
+                        index: 0,
+                        message: { role: 'assistant', content: '' },
+                        finish_reason: 'stop',
+                    },
+                ],
             },
             {
-                choices: [{
-                    index: 0,
-                    message: { role: 'assistant', content: '' },
-                    finish_reason: 'stop',
-                }],
+                choices: [
+                    {
+                        index: 0,
+                        message: { role: 'assistant', content: '' },
+                        finish_reason: 'stop',
+                    },
+                ],
             },
         ];
 
@@ -209,51 +231,55 @@ describe('CLI 场景：补偿重试超过限制后重新发送消息', () => {
         });
 
         const result = await agent.executeWithResult('Hello');
-        
+
         // 请求应该失败
         expect(result.status).toBe('failed');
-        
+
         // 检查 Session 中的消息
         const messages = agent.getMessages();
-        
+
         // 应该只有：系统消息 + 用户消息
         // 不应该有：空响应助手消息
-        const systemMessages = messages.filter(m => m.role === 'system');
-        const userMessages = messages.filter(m => m.role === 'user');
-        const assistantMessages = messages.filter(m => m.role === 'assistant');
-        
+        const systemMessages = messages.filter((m) => m.role === 'system');
+        const userMessages = messages.filter((m) => m.role === 'user');
+        const assistantMessages = messages.filter((m) => m.role === 'assistant');
+
         console.log('消息统计:', {
             total: messages.length,
             system: systemMessages.length,
             user: userMessages.length,
             assistant: assistantMessages.length,
         });
-        
+
         expect(systemMessages.length).toBe(1);
         expect(userMessages.length).toBe(1);
-        
+
         // 关键检查：空响应消息应该被移除
         expect(assistantMessages.length).toBe(0);
     }, 10000);
 
     it('深度测试：持久化场景 - 从持久化存储恢复后不应有空响应消息', async () => {
         const testSessionId = 'test-persist-session-' + Date.now();
-        
+
         // 场景 1：第一次请求失败（补偿重试超过限制）
         mockProvider.customResponses = [
             {
-                choices: [{
-                    index: 0,
-                    message: { role: 'assistant', content: '' },
-                    finish_reason: 'stop',
-                }],
+                choices: [
+                    {
+                        index: 0,
+                        message: { role: 'assistant', content: '' },
+                        finish_reason: 'stop',
+                    },
+                ],
             },
             {
-                choices: [{
-                    index: 0,
-                    message: { role: 'assistant', content: '' },
-                    finish_reason: 'stop',
-                }],
+                choices: [
+                    {
+                        index: 0,
+                        message: { role: 'assistant', content: '' },
+                        finish_reason: 'stop',
+                    },
+                ],
             },
         ];
 
@@ -269,7 +295,7 @@ describe('CLI 场景：补偿重试超过限制后重新发送消息', () => {
 
         const result1 = await agent1.executeWithResult('First message');
         expect(result1.status).toBe('failed');
-        
+
         // 等待持久化完成
         await delay(100);
 
@@ -277,11 +303,13 @@ describe('CLI 场景：补偿重试超过限制后重新发送消息', () => {
         mockProvider.reset();
         mockProvider.customResponses = [
             {
-                choices: [{
-                    index: 0,
-                    message: { role: 'assistant', content: 'Success response' },
-                    finish_reason: 'stop',
-                }],
+                choices: [
+                    {
+                        index: 0,
+                        message: { role: 'assistant', content: 'Success response' },
+                        finish_reason: 'stop',
+                    },
+                ],
             },
         ];
 
@@ -300,46 +328,49 @@ describe('CLI 场景：补偿重试超过限制后重新发送消息', () => {
 
         // 检查从持久化恢复的消息
         const restoredMessages = agent2.getMessages();
-        console.log('从持久化恢复的消息:', restoredMessages.map(m => ({
-            role: m.role,
-            content: typeof m.content === 'string' ? m.content.substring(0, 50) : m.content,
-        })));
+        console.log(
+            '从持久化恢复的消息:',
+            restoredMessages.map((m) => ({
+                role: m.role,
+                content: typeof m.content === 'string' ? m.content.substring(0, 50) : m.content,
+            }))
+        );
 
         // 关键检查：恢复的消息中不应该有空响应消息
         const emptyAssistantMessages = restoredMessages.filter(
-            m => m.role === 'assistant' && 
-                 (typeof m.content === 'string' ? m.content === '' : true)
+            (m) => m.role === 'assistant' && (typeof m.content === 'string' ? m.content === '' : true)
         );
         console.log('空助手消息数量（恢复后）:', emptyAssistantMessages.length);
 
         // 执行第二次请求
         const result2 = await agent2.executeWithResult('Second message');
         console.log('第二次请求结果:', result2.status);
-        
+
         // 第二次请求应该成功
         expect(result2.status).toBe('completed');
-        
+
         // 最终检查：所有消息中不应该有空响应
         const finalMessages = agent2.getMessages();
         const finalEmptyMessages = finalMessages.filter(
-            m => m.role === 'assistant' && 
-                 (typeof m.content === 'string' ? m.content === '' : true)
+            (m) => m.role === 'assistant' && (typeof m.content === 'string' ? m.content === '' : true)
         );
-        
+
         console.log('最终空助手消息数量:', finalEmptyMessages.length);
         expect(finalEmptyMessages.length).toBe(0);
     }, 15000);
 
     it('边界情况：如果 LLM 持续返回空响应，每次请求都会失败（这是预期行为）', async () => {
         const testSessionId = 'test-always-empty-' + Date.now();
-        
+
         // 场景：LLM 始终返回空响应（这是 LLM 的问题，不是代码问题）
         const emptyResponse = {
-            choices: [{
-                index: 0,
-                message: { role: 'assistant', content: '' },
-                finish_reason: 'stop',
-            }],
+            choices: [
+                {
+                    index: 0,
+                    message: { role: 'assistant', content: '' },
+                    finish_reason: 'stop',
+                },
+            ],
         };
 
         // 第一次请求
@@ -372,22 +403,22 @@ describe('CLI 场景：补偿重试超过限制后重新发送消息', () => {
         });
 
         const result2 = await agent2.executeWithResult('Second message');
-        
+
         // 这是预期行为：如果 LLM 持续返回空响应，每次请求都会失败
         // 但失败原因是"补偿重试超过限制"，不是"Session 状态问题"
         expect(result2.status).toBe('failed');
         expect(result2.failure?.code).toBe('AGENT_COMPENSATION_RETRY_EXCEEDED');
-        
+
         // 关键区别：Session 状态应该保持一致，不应该累积空响应消息
         const finalMessages = agent2.getMessages();
-        const userMessages = finalMessages.filter(m => m.role === 'user');
-        const assistantMessages = finalMessages.filter(m => m.role === 'assistant');
-        
+        const userMessages = finalMessages.filter((m) => m.role === 'user');
+        const assistantMessages = finalMessages.filter((m) => m.role === 'assistant');
+
         // 应该有 2 条用户消息（两次请求）
         expect(userMessages.length).toBe(2);
         // 不应该有空响应消息残留
         expect(assistantMessages.length).toBe(0);
-        
+
         console.log('最终消息统计:', {
             total: finalMessages.length,
             user: userMessages.length,

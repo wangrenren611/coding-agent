@@ -9,7 +9,10 @@
 // =============================================================================
 
 export class LLMError extends Error {
-    constructor(message: string, public code?: string) {
+    constructor(
+        message: string,
+        public code?: string
+    ) {
         super(message);
         this.name = 'LLMError';
     }
@@ -47,7 +50,11 @@ export class LLMRateLimitError extends LLMRetryableError {
 // =============================================================================
 
 export class LLMPermanentError extends LLMError {
-    constructor(message: string, public statusCode?: number, code?: string) {
+    constructor(
+        message: string,
+        public statusCode?: number,
+        code?: string
+    ) {
         super(message, code);
         this.name = 'LLMPermanentError';
     }
@@ -61,14 +68,20 @@ export class LLMAuthError extends LLMPermanentError {
 }
 
 export class LLMNotFoundError extends LLMPermanentError {
-    constructor(message: string, public resourceType?: 'model' | 'endpoint' | 'resource') {
+    constructor(
+        message: string,
+        public resourceType?: 'model' | 'endpoint' | 'resource'
+    ) {
         super(message, 404, 'NOT_FOUND');
         this.name = 'LLMNotFoundError';
     }
 }
 
 export class LLMBadRequestError extends LLMPermanentError {
-    constructor(message: string, public validationErrors?: Record<string, string>) {
+    constructor(
+        message: string,
+        public validationErrors?: Record<string, string>
+    ) {
         super(message, 400, 'BAD_REQUEST');
         this.name = 'LLMBadRequestError';
     }
@@ -89,11 +102,7 @@ export class LLMAbortedError extends LLMError {
 // 工具函数
 // =============================================================================
 
-export function createErrorFromStatus(
-    status: number,
-    statusText: string,
-    errorText: string
-): LLMError {
+export function createErrorFromStatus(status: number, statusText: string, errorText: string): LLMError {
     let details = errorText;
     try {
         const parsed = JSON.parse(errorText);
@@ -101,7 +110,6 @@ export function createErrorFromStatus(
     } catch {
         // 使用原始文本
     }
-
 
     const message = `${status} ${statusText}${details ? ` - ${details}` : ''}`;
 

@@ -137,7 +137,6 @@ export class BackupManager {
             await this.cleanOldBackups(normalizedPath);
 
             return backupId;
-
         } catch (error) {
             return null;
         }
@@ -164,7 +163,7 @@ export class BackupManager {
                 return false;
             }
 
-            const backupInfo = backups.find(b => b.id === backupId);
+            const backupInfo = backups.find((b) => b.id === backupId);
             if (!backupInfo) {
                 return false;
             }
@@ -176,7 +175,6 @@ export class BackupManager {
             await fs.writeFile(normalizedPath, content, 'utf-8');
 
             return true;
-
         } catch (error) {
             return false;
         }
@@ -191,9 +189,7 @@ export class BackupManager {
     getBackups(filePath: string): BackupInfo[] {
         const normalizedPath = this.normalizePathKey(filePath);
         const backups = this.backupIndex.get(normalizedPath);
-        return backups
-            ? [...backups].sort((a, b) => b.createdAt - a.createdAt)
-            : [];
+        return backups ? [...backups].sort((a, b) => b.createdAt - a.createdAt) : [];
     }
 
     /**
@@ -207,7 +203,7 @@ export class BackupManager {
         const backups = this.backupIndex.get(normalizedPath);
         if (!backups) return;
 
-        const backupInfo = backups.find(b => b.id === backupId);
+        const backupInfo = backups.find((b) => b.id === backupId);
         if (backupInfo) {
             await fs.unlink(backupInfo.backupPath).catch(() => {});
             this.removeFromIndex(normalizedPath, backupId);
@@ -279,7 +275,7 @@ export class BackupManager {
         const backups = this.backupIndex.get(filePath);
         if (!backups) return;
 
-        const index = backups.findIndex(b => b.id === backupId);
+        const index = backups.findIndex((b) => b.id === backupId);
         if (index !== -1) {
             backups.splice(index, 1);
         }

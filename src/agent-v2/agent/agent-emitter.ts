@@ -1,6 +1,6 @@
 /**
  * Agent 事件发射器
- * 
+ *
  * 统一管理所有 Agent 消息事件的发射逻辑，消除重复代码
  */
 
@@ -44,7 +44,7 @@ type EmitMessage = {
 
 /**
  * Agent 事件发射器
- * 
+ *
  * 封装所有流式消息的发射逻辑，提供统一的 API
  */
 export class AgentEmitter {
@@ -158,11 +158,7 @@ export class AgentEmitter {
 
     // ==================== 工具调用事件 ====================
 
-    emitToolCallCreated(
-        toolCalls: ToolCall[],
-        messageId: string,
-        content?: string
-    ): void {
+    emitToolCallCreated(toolCalls: ToolCall[], messageId: string, content?: string): void {
         this.emit({
             type: AgentMessageType.TOOL_CALL_CREATED,
             payload: {
@@ -177,12 +173,7 @@ export class AgentEmitter {
         });
     }
 
-    emitToolCallResult(
-        toolCallId: string,
-        result: unknown,
-        status: 'success' | 'error',
-        messageId: string
-    ): void {
+    emitToolCallResult(toolCallId: string, result: unknown, status: 'success' | 'error', messageId: string): void {
         this.emit({
             type: AgentMessageType.TOOL_CALL_RESULT,
             payload: {
@@ -194,11 +185,7 @@ export class AgentEmitter {
         });
     }
 
-    emitToolCallStream(
-        toolCallId: string,
-        output: string,
-        messageId?: string
-    ): void {
+    emitToolCallStream(toolCallId: string, output: string, messageId?: string): void {
         this.emit({
             type: AgentMessageType.TOOL_CALL_STREAM,
             payload: {
@@ -209,12 +196,7 @@ export class AgentEmitter {
         });
     }
 
-    emitCodePatch(
-        filePath: string,
-        diff: string,
-        messageId: string,
-        language?: string
-    ): void {
+    emitCodePatch(filePath: string, diff: string, messageId: string, language?: string): void {
         this.emit({
             type: AgentMessageType.CODE_PATCH,
             payload: {
@@ -233,8 +215,7 @@ export class AgentEmitter {
         this.cumulativeUsage.prompt_tokens += usage.prompt_tokens;
         this.cumulativeUsage.completion_tokens += usage.completion_tokens;
         // total_tokens 用累加后的值计算，确保一致性
-        this.cumulativeUsage.total_tokens =
-            this.cumulativeUsage.prompt_tokens + this.cumulativeUsage.completion_tokens;
+        this.cumulativeUsage.total_tokens = this.cumulativeUsage.prompt_tokens + this.cumulativeUsage.completion_tokens;
 
         this.emit({
             type: AgentMessageType.USAGE_UPDATE,

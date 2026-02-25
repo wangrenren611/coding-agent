@@ -28,10 +28,10 @@ async function demo() {
         sessionId: '7fe1f1cd-fc93-4133-aa66-bcc850f7686c',
         enableCompaction: true,
         compactionConfig: {
-            maxTokens: 4000,        // 设置较低的阈值以便演示
+            maxTokens: 4000, // 设置较低的阈值以便演示
             maxOutputTokens: 1000,
             keepMessagesNum: 10,
-            triggerRatio: 0.8,      // 80% 触发
+            triggerRatio: 0.8, // 80% 触发
         },
         stream: true,
         streamCallback: (msg) => {
