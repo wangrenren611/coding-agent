@@ -20,3 +20,4 @@ apps/agent-cli-ink-v2/data/*
 
 data
 data/agent-memory
+request.json
