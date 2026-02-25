@@ -87,7 +87,13 @@ export interface AgentOptions {
     toolRegistry?: ToolRegistry;
     /** 最大重试次数（默认 10） */
     maxRetries?: number;
-    /** 单次 LLM 请求超时时间（毫秒，默认 3 分钟，由 Provider 配置） */
+    /**
+     * 单次 LLM 请求超时时间（毫秒）
+     *
+     * - 默认值：3 分钟（180,000ms）
+     * - 如果不设置，使用 Provider.getTimeTimeout() 的返回值
+     * - 超时后会触发重试机制（最多 maxRetries 次）
+     */
     requestTimeout?: number;
     /** 重试等待时间（毫秒，默认 5000） */
     retryDelayMs?: number;

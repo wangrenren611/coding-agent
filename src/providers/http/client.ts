@@ -6,39 +6,32 @@
  * - Abort 信号支持（超时由上层 Agent/LLMCaller 控制）
  * - 与 LLM 错误类型集成的错误处理
  *
- * 设计原则：
- * - 超时控制由上层 Agent 层统一管理
- * - HTTPClient 只负责执行请求和错误归一化
- * - 不在 HTTP 层创建额外的超时信号，避免多层超时叠加
+ * 超时控制设计：
+ * - 本层不创建超时信号，完全依赖外部传入的 signal
+ * - Agent 层通过 LLMCaller 创建 AbortSignal.timeout() 控制超时
+ * - 这样确保超时行为统一、可预测
  */
 
 import { LLMError, LLMAbortedError, LLMRetryableError, createErrorFromStatus } from '../types';
 
 export interface HttpClientOptions {
-    /** 请求超时时间（毫秒）- 仅作为默认值，实际超时由 signal 控制 */
-    timeout: number;
     /** 启用调试日志 */
     debug?: boolean;
 }
 
 export interface RequestInitWithOptions extends RequestInit {
-    timeout?: number;
+    // 预留扩展
 }
 
 /**
  * HTTP 客户端
  *
- * 超时控制说明：
- * - 本层不再创建独立的超时信号
- * - 超时由上层通过 options.signal 传入（已包含超时逻辑）
- * - 这样确保 Agent 层完全控制超时行为和错误消息
+ * 超时由调用方通过 options.signal 传入（通常已包含 AbortSignal.timeout）
  */
 export class HTTPClient {
-    readonly defaultTimeout: number;
     readonly debug: boolean;
 
-    constructor(options: HttpClientOptions) {
-        this.defaultTimeout = options.timeout;
+    constructor(options: HttpClientOptions = {}) {
         this.debug = options.debug ?? false;
     }
 
@@ -49,7 +42,6 @@ export class HTTPClient {
      * @param options - 请求选项，signal 应已包含超时逻辑
      */
     async fetch(url: string, options: RequestInitWithOptions = {}): Promise<Response> {
-        const timeout = options.timeout ?? this.defaultTimeout;
         try {
             const response = await this.executeFetch(url, options);
 
@@ -61,14 +53,14 @@ export class HTTPClient {
 
             return response;
         } catch (rawError) {
-            throw this.normalizeError(rawError, timeout, options.signal ?? undefined);
+            throw this.normalizeError(rawError, options.signal ?? undefined);
         }
     }
 
     /**
      * 执行 Fetch 请求
      *
-     * 不再创建额外的超时信号，直接使用传入的 signal
+     * 直接使用传入的 signal，不创建额外的超时信号
      */
     private async executeFetch(url: string, options: RequestInit): Promise<Response> {
         const upstreamSignal = options.signal;
@@ -95,10 +87,9 @@ export class HTTPClient {
 
             // 检查是否为超时或中止错误
             if (upstreamSignal?.aborted) {
-                // 判断是超时还是用户中止
                 const reason = this.getAbortReason(upstreamSignal);
                 if (reason === 'timeout') {
-                    throw new LLMRetryableError(`Request timeout`, undefined, 'TIMEOUT');
+                    throw new LLMRetryableError('Request timeout', undefined, 'TIMEOUT');
                 }
                 throw new LLMAbortedError('Request was cancelled by upstream signal');
             }
@@ -131,7 +122,7 @@ export class HTTPClient {
     /**
      * 归一化错误
      */
-    private normalizeError(error: unknown, timeout: number, signal?: AbortSignal): Error {
+    private normalizeError(error: unknown, signal?: AbortSignal): Error {
         // 已经是 LLM 错误，直接返回
         if (error instanceof LLMError) {
             return error;
@@ -141,14 +132,14 @@ export class HTTPClient {
         if (signal?.aborted) {
             const reason = this.getAbortReason(signal);
             if (reason === 'timeout') {
-                return new LLMRetryableError(`Request timeout`, undefined, 'TIMEOUT');
+                return new LLMRetryableError('Request timeout', undefined, 'TIMEOUT');
             }
             return new LLMAbortedError('Request was cancelled');
         }
 
         // Body 超时类错误
         if (this.isBodyTimeoutLikeError(error)) {
-            return new LLMRetryableError(`Response body timeout`, undefined, 'BODY_TIMEOUT');
+            return new LLMRetryableError('Response body timeout', undefined, 'BODY_TIMEOUT');
         }
 
         // 网络类错误

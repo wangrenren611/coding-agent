@@ -56,13 +56,20 @@ import { getResponseFinishReason, getResponseToolCalls, responseHasToolCalls } f
 
 /**
  * Agent 默认配置
+ *
+ * 超时控制说明：
+ * - Agent.requestTimeout 优先使用
+ * - 如果未设置，回退到 Provider.getTimeTimeout()
+ * - 默认值：3 分钟（180,000ms）
  */
 const AGENT_DEFAULTS = {
+    /** 单次 LLM 请求超时（毫秒）- 3 分钟 */
+    REQUEST_TIMEOUT: 1000 * 60 * 3,
     /** 最大循环次数 */
     LOOP_MAX: 3000,
     /** 最大重试次数 */
     MAX_RETRIES: 10,
-    /** 默认重试延迟（毫秒）- 5 秒 */
+    /** 默认重试延迟（毫秒）- 10 秒 */
     RETRY_DELAY_MS: 10 * 1000,
     /** 最大补偿重试次数 */
     MAX_COMPENSATION_RETRIES: 1,

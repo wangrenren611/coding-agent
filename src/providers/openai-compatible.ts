@@ -3,6 +3,11 @@
  *
  * 提供统一的请求/流处理逻辑，配合不同 Adapter 与元数据即可支持多家兼容服务。
  *
+ * 超时控制说明：
+ * - Provider 的 timeout 属性仅作为 Agent.requestTimeout 的默认回退值
+ * - 实际超时信号由 Agent/LLMCaller 层创建，通过 options.abortSignal 传入
+ * - HTTPClient 不再创建额外的超时信号
+ *
  * @example
  * ```typescript
  * const provider = new OpenAICompatibleProvider({
@@ -33,6 +38,9 @@ import {
     LLMResponse,
 } from './types';
 
+/** Provider 默认超时时间（毫秒），作为 Agent.requestTimeout 的回退值 */
+const PROVIDER_DEFAULT_TIMEOUT = 1000 * 60 * 3; // 3 分钟
+
 /**
  * OpenAI 兼容 Provider 基类
  *
@@ -44,7 +52,12 @@ import {
 export class OpenAICompatibleProvider extends LLMProvider {
     readonly httpClient: HTTPClient;
     readonly adapter: BaseAPIAdapter;
-    private timeout: number;
+
+    /**
+     * 默认请求超时（毫秒）
+     * 作为 Agent.requestTimeout 的回退值，实际超时由 Agent 层控制
+     */
+    private readonly defaultTimeout: number;
 
     constructor(config: OpenAICompatibleConfig, adapter?: BaseAPIAdapter) {
         super(config);
@@ -52,11 +65,12 @@ export class OpenAICompatibleProvider extends LLMProvider {
         // 规范化 baseURL（移除末尾斜杠）
         const normalizedBaseURL = config.baseURL.replace(/\/$/, '');
         this.config = { ...config, baseURL: normalizedBaseURL };
-        this.timeout = config.timeout ?? 1000 * 60 * 3; // 3 minutes (Agent 层控制实际超时)
 
-        // 初始化 HTTP 客户端
+        // 保存默认超时（供 Agent 回退使用）
+        this.defaultTimeout = config.timeout ?? PROVIDER_DEFAULT_TIMEOUT;
+
+        // 初始化 HTTP 客户端（不再传递 timeout）
         this.httpClient = new HTTPClient({
-            timeout: this.timeout,
             debug: config.debug ?? false,
         });
 
@@ -198,8 +212,13 @@ export class OpenAICompatibleProvider extends LLMProvider {
         yield* StreamParser.parseAsync(response.body.getReader());
     }
 
+    /**
+     * 获取默认请求超时时间
+     *
+     * 作为 Agent.requestTimeout 的回退值
+     */
     getTimeTimeout(): number {
-        return this.timeout;
+        return this.defaultTimeout;
     }
 
     getLLMMaxTokens(): number {

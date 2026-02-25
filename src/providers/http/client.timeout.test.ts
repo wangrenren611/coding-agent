@@ -35,7 +35,8 @@ describe('HTTPClient timeout behavior', () => {
             throw new Error('should not reach successful fetch path');
         });
 
-        const client = new HTTPClient({ timeout: 10000 }); // 客户端默认超时 10 秒，但不会使用
+        // HTTPClient 不再需要 timeout 参数
+        const client = new HTTPClient({ debug: false });
 
         // 模拟 Agent 层创建的超时信号
         const timeoutSignal = AbortSignal.timeout(timeoutMs);
@@ -85,7 +86,7 @@ describe('HTTPClient timeout behavior', () => {
             throw new Error('should not reach successful fetch path');
         });
 
-        const client = new HTTPClient({ timeout: 10000 });
+        const client = new HTTPClient();
         const abortController = new AbortController();
 
         // 在 50ms 后中止（用户主动取消，不是超时）
@@ -111,7 +112,7 @@ describe('HTTPClient timeout behavior', () => {
             throw llmError;
         });
 
-        const client = new HTTPClient({ timeout: 10000 });
+        const client = new HTTPClient();
 
         const error = await client.fetch('https://example.test/error').then(
             () => null,
@@ -130,10 +131,28 @@ describe('HTTPClient timeout behavior', () => {
             });
         });
 
-        const client = new HTTPClient({ timeout: 10000 });
+        const client = new HTTPClient();
 
         const response = await client.fetch('https://example.test/ok');
 
         expect(response.ok).toBe(true);
+    });
+
+    it('should normalize network errors to LLMRetryableError', async () => {
+        vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+            const error = new Error('connect ECONNREFUSED');
+            (error as Error & { code: string }).code = 'ECONNREFUSED';
+            throw error;
+        });
+
+        const client = new HTTPClient();
+
+        const error = await client.fetch('https://example.test/error').then(
+            () => null,
+            (err) => err
+        );
+
+        expect(error).toBeInstanceOf(LLMRetryableError);
+        expect((error as LLMRetryableError).code).toBe('NETWORK_ERROR');
     });
 });
