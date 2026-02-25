@@ -23,7 +23,6 @@ export const AgentErrorCode = {
     RUNTIME_ERROR: 'AGENT_RUNTIME_ERROR',
     // 重试相关
     MAX_RETRIES_EXCEEDED: 'AGENT_MAX_RETRIES_EXCEEDED',
-    COMPENSATION_RETRY_EXCEEDED: 'AGENT_COMPENSATION_RETRY_EXCEEDED',
     LOOP_EXCEEDED: 'AGENT_LOOP_EXCEEDED',
     // 配置和验证错误
     CONFIGURATION_ERROR: 'AGENT_CONFIGURATION_ERROR',
@@ -115,18 +114,6 @@ export class AgentMaxRetriesExceededError extends AgentError {
 }
 
 /**
- * 超过补偿重试次数错误
- */
-export class AgentCompensationRetryExceededError extends AgentError {
-    constructor() {
-        super('Agent failed after maximum compensation retries.', {
-            code: AgentErrorCode.COMPENSATION_RETRY_EXCEEDED,
-        });
-        this.name = 'AgentCompensationRetryExceededError';
-    }
-}
-
-/**
  * 超过最大循环次数错误
  */
 export class AgentLoopExceededError extends AgentError {
@@ -211,24 +198,6 @@ export class ToolError extends Error {
 // ==================== 特殊错误 ====================
 
 /**
- * 补偿重试请求错误（内部使用）
- * 用于触发空响应补偿重试
- */
-export class CompensationRetryError extends Error {
-    public readonly code?: string;
-    public readonly cause?: unknown;
-    public readonly context?: Record<string, unknown>;
-
-    constructor(message: string = 'Compensation retry requested.', options?: AgentErrorOptions) {
-        super(message, { cause: options?.cause });
-        this.name = 'CompensationRetryError';
-        this.code = options?.code ?? 'COMPENSATION_RETRY';
-        this.cause = options?.cause;
-        this.context = options?.context;
-    }
-}
-
-/**
  * LLM 可重试错误（Agent 层）
  */
 export class LLMRetryableError extends Error {
@@ -281,10 +250,6 @@ export function isAgentMaxRetriesExceededError(error: unknown): error is AgentMa
     return error instanceof AgentMaxRetriesExceededError;
 }
 
-export function isAgentCompensationRetryExceededError(error: unknown): error is AgentCompensationRetryExceededError {
-    return error instanceof AgentCompensationRetryExceededError;
-}
-
 export function isAgentLoopExceededError(error: unknown): error is AgentLoopExceededError {
     return error instanceof AgentLoopExceededError;
 }
@@ -313,10 +278,6 @@ export function isLLMRetryableError(error: unknown): error is LLMRetryableError 
     return error instanceof LLMRetryableError;
 }
 
-export function isCompensationRetryError(error: unknown): error is CompensationRetryError {
-    return error instanceof CompensationRetryError;
-}
-
 /**
  * 检查错误是否有有效的失败码
  */
@@ -329,7 +290,6 @@ export function hasValidFailureCode(error: unknown): error is AgentError & { cod
         AgentErrorCode.BUSY,
         AgentErrorCode.RUNTIME_ERROR,
         AgentErrorCode.MAX_RETRIES_EXCEEDED,
-        AgentErrorCode.COMPENSATION_RETRY_EXCEEDED,
         AgentErrorCode.LOOP_EXCEEDED,
         AgentErrorCode.CONFIGURATION_ERROR,
         AgentErrorCode.VALIDATION_ERROR,

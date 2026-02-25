@@ -1,8 +1,8 @@
 import { v4 as uuid } from 'uuid';
 import { Message } from './types';
-import type { IMemoryManager } from '../memory/types';
+import type { ContextExclusionReason, IMemoryManager } from '../memory/types';
 import { Compaction, CompactionConfig, CompactionResult } from './compaction';
-import { LLMProvider } from '../../providers';
+import { LLMProvider, type MessageContent, type ToolCall } from '../../providers';
 import { ToolCallRepairer } from './tool-call-repairer';
 
 export interface SessionConfig {
@@ -116,6 +116,9 @@ export class Session {
             await this.memoryManager.createSession(this.sessionId, this.systemPrompt);
         }
 
+        // 启动时修复 context 协议脏数据（仅更新 context，不触碰 history）
+        await this.repairContextToolProtocol();
+
         this.initialized = true;
     }
 
@@ -183,18 +186,34 @@ export class Session {
     }
 
     /**
-     * 移除最后一条消息
-     * 用于补偿重试时移除空响应消息
-     * 注意：此方法只在内存中移除，不会更新持久化存储
-     * @returns 被移除的消息，如果没有消息则返回 undefined
+     * 删除指定消息（内存 + 持久化）
+     * reason 用于标记该消息为何从 context 排除（history 保留）
+     * @returns 被删除的消息；消息不存在或是 system 消息时返回 undefined
      */
-    removeLastMessage(): Message | undefined {
-        // 不移除系统消息
-        const lastMessage = this.getLastMessage();
-        if (!lastMessage || lastMessage.role === 'system') {
+    async removeMessageById(
+        messageId: string,
+        reason: ContextExclusionReason = 'manual'
+    ): Promise<Message | undefined> {
+        const index = this.findLastMessageIndex(messageId);
+        if (index === -1) {
             return undefined;
         }
-        return this.messages.pop();
+
+        const target = this.messages[index];
+        if (!target || target.role === 'system') {
+            return undefined;
+        }
+
+        this.messages.splice(index, 1);
+
+        this.persistQueue = this.persistQueue
+            .then(() => this.doRemovePersist(messageId, reason))
+            .catch((error) => {
+                console.error(`[Session] Failed to remove message (${messageId}):`, error);
+            });
+
+        await this.persistQueue;
+        return target;
     }
 
     /**
@@ -216,8 +235,12 @@ export class Session {
      * 4. 如果需要，执行压缩
      */
     async compactBeforeLLMCall(): Promise<boolean> {
-        // 先修复中断的工具调用
-        this.repairInterruptedToolCalls();
+        if (this.memoryManager) {
+            await this.persistQueue;
+        }
+
+        // 先修复中断/异常的 tool 协议（仅更新 context，不触碰 history）
+        await this.repairContextToolProtocol();
 
         if (!this.compaction) {
             return false;
@@ -316,15 +339,157 @@ export class Session {
         }
     }
 
+    private async doRemovePersist(messageId: string, reason: ContextExclusionReason): Promise<void> {
+        if (!this.memoryManager) return;
+        await this.memoryManager.removeMessageFromContext(this.sessionId, messageId, reason);
+    }
+
+    private findLastMessageIndex(messageId: string): number {
+        for (let index = this.messages.length - 1; index >= 0; index -= 1) {
+            if (this.messages[index].messageId === messageId) {
+                return index;
+            }
+        }
+        return -1;
+    }
+
     // ==================== 工具调用修复 ====================
 
     /**
-     * 修复异常中断导致的未闭合 tool call
+     * 修复异常中断导致的 tool 协议脏数据（仅修复 context）
      */
-    private repairInterruptedToolCalls(): void {
-        // 使用 ToolCallRepairer 进行修复
-        this.repairer.repairInPlace(this.messages, (msg) => {
-            this.schedulePersist(msg, 'add');
+    private async repairContextToolProtocol(): Promise<void> {
+        const { messages, changed } = this.normalizeContextToolProtocol(this.messages);
+        if (!changed) {
+            return;
+        }
+
+        this.messages = messages;
+        await this.persistContextOnly();
+    }
+
+    private async persistContextOnly(): Promise<void> {
+        if (!this.memoryManager) return;
+
+        const context = await this.memoryManager.getCurrentContext(this.sessionId);
+        if (!context) return;
+
+        await this.memoryManager.saveCurrentContext({
+            ...context,
+            version: (context.version ?? 0) + 1,
+            messages: [...this.messages],
+        });
+    }
+
+    private normalizeContextToolProtocol(messages: Message[]): { messages: Message[]; changed: boolean } {
+        const normalized: Message[] = [];
+        let changed = false;
+
+        for (let index = 0; index < messages.length; ) {
+            const message = messages[index];
+
+            if (message.role === 'assistant' && Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
+                const validToolCalls = this.getValidToolCalls(message.tool_calls);
+
+                if (validToolCalls.length === 0) {
+                    if (this.hasAssistantOutput(message)) {
+                        const { tool_calls: _ignored, ...rest } = message;
+                        normalized.push({
+                            ...rest,
+                            type: rest.type === 'tool-call' ? 'text' : rest.type,
+                        });
+                    }
+                    changed = true;
+                    index += 1;
+                    continue;
+                }
+
+                if (validToolCalls.length !== message.tool_calls.length) {
+                    changed = true;
+                    normalized.push({ ...message, tool_calls: validToolCalls, type: 'tool-call' });
+                } else {
+                    normalized.push(message);
+                }
+
+                const expectedToolCallIds = new Set(validToolCalls.map((call) => call.id));
+                const respondedToolCallIds = new Set<string>();
+                let cursor = index + 1;
+
+                while (cursor < messages.length && messages[cursor].role === 'tool') {
+                    const toolMessage = messages[cursor];
+                    const toolCallId =
+                        typeof toolMessage.tool_call_id === 'string' ? toolMessage.tool_call_id.trim() : '';
+
+                    if (expectedToolCallIds.has(toolCallId) && !respondedToolCallIds.has(toolCallId)) {
+                        normalized.push(toolMessage);
+                        respondedToolCallIds.add(toolCallId);
+                    } else {
+                        changed = true;
+                    }
+                    cursor += 1;
+                }
+
+                for (const call of validToolCalls) {
+                    if (!respondedToolCallIds.has(call.id)) {
+                        normalized.push(this.repairer.createInterruptedResult(call.id));
+                        changed = true;
+                    }
+                }
+
+                index = cursor;
+                continue;
+            }
+
+            if (message.role === 'tool') {
+                // 丢弃游离 tool 消息（不在 assistant tool_calls 连续块之后）
+                changed = true;
+                index += 1;
+                continue;
+            }
+
+            if (message.role === 'assistant' && !this.hasAssistantOutput(message)) {
+                // 丢弃空 assistant 消息，避免上下文污染
+                changed = true;
+                index += 1;
+                continue;
+            }
+
+            normalized.push(message);
+            index += 1;
+        }
+
+        return { messages: normalized, changed };
+    }
+
+    private hasAssistantOutput(message: Pick<Message, 'content' | 'reasoning_content'>): boolean {
+        return this.hasContent(message.content) || this.hasReasoningOutput(message.reasoning_content);
+    }
+
+    private hasReasoningOutput(reasoning: unknown): reasoning is string {
+        return typeof reasoning === 'string' && reasoning.trim().length > 0;
+    }
+
+    private hasContent(content: MessageContent): boolean {
+        if (typeof content === 'string') {
+            return content.trim().length > 0;
+        }
+        if (Array.isArray(content)) {
+            return content.length > 0;
+        }
+        return content !== undefined && content !== null;
+    }
+
+    private getValidToolCalls(toolCalls: ToolCall[]): ToolCall[] {
+        return toolCalls.filter((toolCall) => {
+            if (!toolCall || typeof toolCall !== 'object') return false;
+            const hasValidId = typeof toolCall.id === 'string' && toolCall.id.trim().length > 0;
+            const hasValidType = toolCall.type === 'function';
+            const hasValidFunction =
+                !!toolCall.function &&
+                typeof toolCall.function.name === 'string' &&
+                toolCall.function.name.trim().length > 0 &&
+                typeof toolCall.function.arguments === 'string';
+            return hasValidId && hasValidType && hasValidFunction;
         });
     }
 }

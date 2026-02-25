@@ -154,6 +154,22 @@ export interface CodePatchMessage extends BaseAgentMessage {
     msgId: string; // 你后端生成的唯一逻辑 ID
 }
 
+export interface StatusRetryInfo {
+    type: 'normal' | 'compensation';
+    attempt: number;
+    max?: number;
+    delayMs?: number;
+    nextRetryAt?: number;
+    reason?: string;
+    errorCode?: string;
+}
+
+export interface StatusMeta {
+    source?: 'agent' | 'llm-caller' | 'tool-executor' | 'session';
+    phase?: 'lifecycle' | 'thinking' | 'retry' | 'tool' | 'completion' | 'failure';
+    retry?: StatusRetryInfo;
+}
+
 /**
  * 状态消息
  */
@@ -162,6 +178,7 @@ export interface StatusMessage extends BaseAgentMessage {
     payload: {
         state: AgentStatus;
         message?: string;
+        meta?: StatusMeta;
     };
     msgId?: string; // 你后端生成的唯一逻辑 ID
 }

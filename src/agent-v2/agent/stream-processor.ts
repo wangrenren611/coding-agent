@@ -43,6 +43,8 @@ export { ProcessorState, ContentType } from './processor-state';
 interface InternalProcessorState {
     /** 是否已中止 */
     aborted: boolean;
+    /** 中止原因 */
+    abortReason?: 'manual' | 'buffer_overflow';
     /** 推理内容是否已开始 */
     reasoningStarted: boolean;
     /** 普通文本是否已开始 */
@@ -158,6 +160,7 @@ export class StreamProcessor {
      */
     abort(): void {
         this.state.aborted = true;
+        this.state.abortReason = 'manual';
     }
 
     /**
@@ -179,7 +182,7 @@ export class StreamProcessor {
      */
     processChunk(chunk: Chunk): void {
         if (this.state.aborted) return;
-
+     
         const finishReason = getFinishReason(chunk);
 
         // 1. 更新元数据
@@ -267,11 +270,16 @@ export class StreamProcessor {
         return this.state.aborted;
     }
 
+    getAbortReason(): 'manual' | 'buffer_overflow' | undefined {
+        return this.state.abortReason;
+    }
+
     // ==================== 私有方法：状态初始化 ====================
 
     private createInitialState(): InternalProcessorState {
         return {
             aborted: false,
+            abortReason: undefined,
             reasoningStarted: false,
             textStarted: false,
             toolCallsStarted: false,
@@ -465,7 +473,8 @@ export class StreamProcessor {
         const projectedSize = currentSize + content.length;
 
         if (projectedSize > this.maxBufferSize) {
-            this.abort();
+            this.state.aborted = true;
+            this.state.abortReason = 'buffer_overflow';
             return false;
         }
 

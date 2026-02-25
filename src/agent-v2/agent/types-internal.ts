@@ -124,13 +124,17 @@ export function getResponseToolCalls(response: LLMResponse): import('./core-type
  */
 export function getResponseContent(response: LLMResponse): string {
     const content = response.choices?.[0]?.message?.content;
-    if (!content) return '';
-    if (typeof content === 'string') return content;
+    if (content) {
+        if (typeof content === 'string') return content;
 
-    return content
-        .map((part) => stringifyContentPart(part as InputContentPart))
-        .filter(Boolean)
-        .join('\n');
+        return content
+            .map((part) => stringifyContentPart(part as InputContentPart))
+            .filter(Boolean)
+            .join('\n');
+    }
+
+    const reasoning = response.choices?.[0]?.message?.reasoning_content;
+    return typeof reasoning === 'string' ? reasoning : '';
 }
 
 /**
@@ -157,7 +161,7 @@ export function isTextDeltaMessage(message: AgentMessage): message is AgentMessa
  */
 export function isStatusMessage(message: AgentMessage): message is AgentMessage & {
     type: AgentMessageType.STATUS;
-    payload: { state: string; message?: string };
+    payload: { state: string; message?: string; meta?: unknown };
 } {
     return message.type === AgentMessageType.STATUS;
 }

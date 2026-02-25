@@ -4,7 +4,7 @@
  * 统一管理所有 Agent 消息事件的发射逻辑，消除重复代码
  */
 
-import { AgentMessageType, AgentMessage } from './stream-types';
+import { AgentMessageType, AgentMessage, StatusMeta } from './stream-types';
 import { AgentStatus } from './types';
 import type { StreamCallback } from './types';
 import type { Usage } from '../../providers';
@@ -86,10 +86,14 @@ export class AgentEmitter {
 
     // ==================== 状态事件 ====================
 
-    emitStatus(state: AgentStatus, message: string, msgId?: string): void {
+    emitStatus(state: AgentStatus, message: string, msgId?: string, meta?: StatusMeta): void {
         this.emit({
             type: AgentMessageType.STATUS,
-            payload: { state, message },
+            payload: {
+                state,
+                message,
+                ...(meta ? { meta } : {}),
+            },
             ...(msgId && { msgId }),
         });
     }

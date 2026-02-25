@@ -22,20 +22,17 @@ import {
     AgentAbortedError,
     AgentBusyError,
     AgentMaxRetriesExceededError,
-    AgentCompensationRetryExceededError,
     AgentLoopExceededError,
     AgentConfigurationError,
     AgentValidationError,
     LLMRequestError,
     LLMResponseInvalidError,
     ToolError,
-    CompensationRetryError,
     LLMRetryableError,
     isAgentError,
     isAgentAbortedError,
     isAgentBusyError,
     isAgentMaxRetriesExceededError,
-    isAgentCompensationRetryExceededError,
     isAgentLoopExceededError,
     isAgentConfigurationError,
     isAgentValidationError,
@@ -43,7 +40,6 @@ import {
     isLLMResponseInvalidError,
     isToolError,
     isLLMRetryableError,
-    isCompensationRetryError,
     hasValidFailureCode,
 } from './errors';
 
@@ -120,7 +116,6 @@ describe('AgentErrorCode 常量测试', () => {
         expect(AgentErrorCode.BUSY).toBe('AGENT_BUSY');
         expect(AgentErrorCode.RUNTIME_ERROR).toBe('AGENT_RUNTIME_ERROR');
         expect(AgentErrorCode.MAX_RETRIES_EXCEEDED).toBe('AGENT_MAX_RETRIES_EXCEEDED');
-        expect(AgentErrorCode.COMPENSATION_RETRY_EXCEEDED).toBe('AGENT_COMPENSATION_RETRY_EXCEEDED');
         expect(AgentErrorCode.LOOP_EXCEEDED).toBe('AGENT_LOOP_EXCEEDED');
         expect(AgentErrorCode.CONFIGURATION_ERROR).toBe('AGENT_CONFIGURATION_ERROR');
         expect(AgentErrorCode.VALIDATION_ERROR).toBe('AGENT_VALIDATION_ERROR');
@@ -135,7 +130,6 @@ describe('AgentErrorCode 常量测试', () => {
         expect(AGENT_FAILURE_CODES).toContain('AGENT_BUSY');
         expect(AGENT_FAILURE_CODES).toContain('AGENT_RUNTIME_ERROR');
         expect(AGENT_FAILURE_CODES).toContain('AGENT_MAX_RETRIES_EXCEEDED');
-        expect(AGENT_FAILURE_CODES).toContain('AGENT_COMPENSATION_RETRY_EXCEEDED');
         expect(AGENT_FAILURE_CODES).toContain('AGENT_LOOP_EXCEEDED');
         expect(AGENT_FAILURE_CODES).toContain('AGENT_CONFIGURATION_ERROR');
         expect(AGENT_FAILURE_CODES).toContain('AGENT_VALIDATION_ERROR');
@@ -201,20 +195,6 @@ describe('专用错误子类测试', () => {
         it('应该是 AgentError 的实例', () => {
             const error = new AgentMaxRetriesExceededError();
             expect(isAgentMaxRetriesExceededError(error)).toBe(true);
-        });
-    });
-
-    describe('AgentCompensationRetryExceededError', () => {
-        it('应该有正确的 name、code 和消息', () => {
-            const error = new AgentCompensationRetryExceededError();
-            expect(error.name).toBe('AgentCompensationRetryExceededError');
-            expect(error.code).toBe('AGENT_COMPENSATION_RETRY_EXCEEDED');
-            expect(error.message).toBe('Agent failed after maximum compensation retries.');
-        });
-
-        it('应该是 AgentError 的实例', () => {
-            const error = new AgentCompensationRetryExceededError();
-            expect(isAgentCompensationRetryExceededError(error)).toBe(true);
         });
     });
 
@@ -306,21 +286,6 @@ describe('专用错误子类测试', () => {
         });
     });
 
-    describe('CompensationRetryError', () => {
-        it('应该有正确的默认值', () => {
-            const error = new CompensationRetryError();
-            expect(error.name).toBe('CompensationRetryError');
-            expect(error.code).toBe('COMPENSATION_RETRY');
-            expect(error.message).toBe('Compensation retry requested.');
-        });
-
-        it('应该是 Error 的实例', () => {
-            const error = new CompensationRetryError();
-            expect(isCompensationRetryError(error)).toBe(true);
-            expect(error instanceof AgentError).toBe(false);
-        });
-    });
-
     describe('LLMRetryableError', () => {
         it('应该有正确的属性', () => {
             const error = new LLMRetryableError('Server error', 5000, 'TIMEOUT');
@@ -372,11 +337,6 @@ describe('类型守卫函数测试', () => {
         expect(isAgentMaxRetriesExceededError(new AgentError('maximum retries'))).toBe(false);
     });
 
-    it('isAgentCompensationRetryExceededError 应该正确识别', () => {
-        expect(isAgentCompensationRetryExceededError(new AgentCompensationRetryExceededError())).toBe(true);
-        expect(isAgentCompensationRetryExceededError(new AgentError('compensation'))).toBe(false);
-    });
-
     it('isToolError 应该正确识别', () => {
         expect(isToolError(new ToolError('test'))).toBe(true);
         expect(isToolError(new AgentError('test'))).toBe(false);
@@ -385,11 +345,6 @@ describe('类型守卫函数测试', () => {
     it('isLLMRetryableError 应该正确识别', () => {
         expect(isLLMRetryableError(new LLMRetryableError('test'))).toBe(true);
         expect(isLLMRetryableError(new Error('test'))).toBe(false);
-    });
-
-    it('isCompensationRetryError 应该正确识别', () => {
-        expect(isCompensationRetryError(new CompensationRetryError())).toBe(true);
-        expect(isCompensationRetryError(new Error('test'))).toBe(false);
     });
 
     describe('hasValidFailureCode', () => {
@@ -417,7 +372,6 @@ describe('类型守卫函数测试', () => {
             expect(hasValidFailureCode(new AgentAbortedError())).toBe(true);
             expect(hasValidFailureCode(new AgentBusyError('RUNNING'))).toBe(true);
             expect(hasValidFailureCode(new AgentMaxRetriesExceededError())).toBe(true);
-            expect(hasValidFailureCode(new AgentCompensationRetryExceededError())).toBe(true);
         });
     });
 });
@@ -445,11 +399,6 @@ describe('ErrorClassifier 测试', () => {
         it('应该识别 AgentMaxRetriesExceededError', () => {
             const code = classifier.classifyFailureCode(new AgentMaxRetriesExceededError());
             expect(code).toBe('AGENT_MAX_RETRIES_EXCEEDED');
-        });
-
-        it('应该识别 AgentCompensationRetryExceededError', () => {
-            const code = classifier.classifyFailureCode(new AgentCompensationRetryExceededError());
-            expect(code).toBe('AGENT_COMPENSATION_RETRY_EXCEEDED');
         });
 
         it('应该识别 AgentLoopExceededError', () => {
@@ -728,8 +677,8 @@ describe('Agent 错误抛出测试', () => {
         }, 10000);
     });
 
-    describe('补偿重试超过限制错误', () => {
-        it('超过最大补偿重试次数应该返回正确的错误码', async () => {
+    describe('空响应持续重试超过限制错误', () => {
+        it('在未完成时达到 maxLoops 应该返回 AGENT_LOOP_EXCEEDED', async () => {
             mockProvider.customResponses = [
                 {
                     choices: [
@@ -757,12 +706,11 @@ describe('Agent 错误抛出测试', () => {
                 stream: false,
                 memoryManager,
                 maxLoops: 10,
-                maxCompensationRetries: 1,
             });
 
             const result = await agent.executeWithResult('Hello');
             expect(result.status).toBe('failed');
-            expect(result.failure?.code).toBe('AGENT_COMPENSATION_RETRY_EXCEEDED');
+            expect(result.failure?.code).toBe('AGENT_LOOP_EXCEEDED');
         }, 10000);
     });
 
@@ -824,12 +772,6 @@ describe('向后兼容性测试', () => {
         const error = new AgentError('Task was aborted by user');
         const code = classifier.classifyFailureCode(error);
         expect(code).toBe('AGENT_ABORTED');
-    });
-
-    it('旧的 AgentError 包含 compensation 应该返回正确的 code', () => {
-        const error = new AgentError('Agent failed after maximum compensation retries.');
-        const code = classifier.classifyFailureCode(error);
-        expect(code).toBe('AGENT_COMPENSATION_RETRY_EXCEEDED');
     });
 
     it('旧的 AgentError 包含 "not idle" 应该返回 AGENT_BUSY', () => {

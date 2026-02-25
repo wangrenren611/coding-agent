@@ -334,9 +334,7 @@ export class Compaction {
             ? `${SUMMARY_PROMPT}\n\n<previous_summary>\n${previousSummary}\n</previous_summary>\n\n<current_message_history>\n${historyText}\n</current_message_history>`
             : `${SUMMARY_PROMPT}\n\n<current_message_history>\n${historyText}\n</current_message_history>`;
 
-        const response = await this.llmProvider.generate([{ role: 'user', content: userContent }], {
-            temperature: 0.3,
-        });
+        const response = await this.llmProvider.generate([{ role: 'user', content: userContent }]);
 
         console.log('[Compaction] 摘要生成完成');
 
@@ -413,11 +411,22 @@ export class Compaction {
         return messages
             .map((m) => {
                 const prefix = m.type ? `[${m.role}:${m.type}]` : `[${m.role}]`;
-                const content = this.contentToText(m.content);
+                const content = this.resolveMessageText(m);
                 const truncated = content.length > 2000 ? content.slice(0, 1000) + '...(省略)...' : content;
                 return `${prefix}: ${truncated}`;
             })
             .join('\n');
+    }
+
+    /**
+     * 提取消息文本：优先 content，若为空则回退 reasoning_content
+     */
+    private resolveMessageText(message: Message): string {
+        const contentText = this.contentToText(message.content);
+        if (contentText) return contentText;
+
+        const reasoning = (message as Message & { reasoning_content?: unknown }).reasoning_content;
+        return typeof reasoning === 'string' ? reasoning : '';
     }
 
     /**

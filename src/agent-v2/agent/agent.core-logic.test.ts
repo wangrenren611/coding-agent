@@ -108,7 +108,6 @@ describe('AgentState 状态管理测试', () => {
     const defaultConfig = {
         maxLoops: 10,
         maxRetries: 3,
-        maxCompensationRetries: 1,
         defaultRetryDelayMs: 1000,
     };
 
@@ -129,9 +128,6 @@ describe('AgentState 状态管理测试', () => {
             expect(state.retryCount).toBe(0);
         });
 
-        it('初始补偿重试计数应该是 0', () => {
-            expect(state.compensationRetryCount).toBe(0);
-        });
     });
 
     describe('canContinue 逻辑', () => {
@@ -199,36 +195,16 @@ describe('AgentState 状态管理测试', () => {
         });
     });
 
-    describe('补偿重试逻辑', () => {
-        it('isCompensationRetryExceeded 在达到最大次数时返回 true', () => {
-            state.startTask();
-            expect(state.isCompensationRetryExceeded()).toBe(false);
-            state.recordCompensationRetry();
-            expect(state.isCompensationRetryExceeded()).toBe(true);
-        });
-
-        it('recordSuccess 应该重置重试计数但不重置补偿重试计数', () => {
-            state.startTask();
-            state.recordRetryableError();
-            state.recordCompensationRetry();
-            state.recordSuccess();
-            expect(state.retryCount).toBe(0);
-            expect(state.compensationRetryCount).toBe(1); // 不重置，累计空响应次数
-        });
-    });
-
     describe('状态转换', () => {
         it('startTask 应该重置所有状态', () => {
             state.startTask();
             state.incrementLoop();
             state.recordRetryableError();
-            state.recordCompensationRetry();
             state.failTask({ code: 'TEST', userMessage: 'test' });
 
             state.startTask();
             expect(state.loopCount).toBe(0);
             expect(state.retryCount).toBe(0);
-            expect(state.compensationRetryCount).toBe(0);
             expect(state.status).toBe(AgentStatus.RUNNING);
             expect(state.lastFailure).toBeUndefined();
         });
@@ -416,7 +392,7 @@ describe('Agent 完成条件判断测试', () => {
             expect(['completed', 'failed']).toContain(result.status);
         }, 10000);
 
-        it('stream 模式空内容应触发补偿重试，避免仅 thinking 空转', async () => {
+        it('stream 模式空内容应触发可重试错误并在重试上限后失败', async () => {
             let callCount = 0;
             mockProvider.generate = async () => {
                 callCount++;
@@ -438,7 +414,8 @@ describe('Agent 完成条件判断测试', () => {
                 stream: true,
                 memoryManager,
                 maxLoops: 20,
-                maxCompensationRetries: 1,
+                maxRetries: 1,
+                retryDelayMs: 1,
             });
 
             const result = await agent.executeWithResult('Hello');
@@ -461,6 +438,160 @@ describe('Agent 完成条件判断测试', () => {
             // 验证消息被正确处理
             const messages = agent.getMessages();
             expect(messages.length).toBeGreaterThan(0);
+        });
+
+        it('应过滤掉被中断留下的无效 assistant tool_calls 消息', async () => {
+            const sessionId = `malformed-tool-calls-${Date.now()}`;
+            await memoryManager.createSession(sessionId, 'Test');
+            await memoryManager.addMessageToContext(sessionId, {
+                messageId: 'user-before',
+                role: 'user',
+                content: '前置消息',
+                type: 'text',
+            } as Message);
+            await memoryManager.addMessageToContext(sessionId, {
+                messageId: 'assistant-partial-tool-call',
+                role: 'assistant',
+                content: '',
+                type: 'tool-call',
+                finish_reason: 'tool_calls',
+                tool_calls: [
+                    {
+                        id: '',
+                        type: 'function',
+                        function: {
+                            name: 'bash',
+                            arguments: '{"command":"npm run dev"}',
+                        },
+                    },
+                ],
+            } as Message);
+
+            let capturedMessages: any[] = [];
+            mockProvider.generate = async (messages: any[]) => {
+                capturedMessages = messages;
+                return {
+                    id: 'filtered-test',
+                    object: 'chat.completion',
+                    created: Date.now(),
+                    model: 'test-model',
+                    choices: [
+                        {
+                            index: 0,
+                            message: { role: 'assistant', content: 'ok' },
+                            finish_reason: 'stop',
+                        },
+                    ],
+                } as LLMResponse;
+            };
+
+            const agent = new Agent({
+                provider: mockProvider as any,
+                systemPrompt: 'Test',
+                stream: false,
+                memoryManager,
+                sessionId,
+            });
+
+            const result = await agent.executeWithResult('继续');
+            expect(result.status).toBe('completed');
+
+            const malformedAssistant = capturedMessages.find(
+                (m) =>
+                    m?.role === 'assistant' &&
+                    Array.isArray(m?.tool_calls) &&
+                    m.tool_calls.some((call: any) => typeof call?.id !== 'string' || call.id.trim().length === 0)
+            );
+            expect(malformedAssistant).toBeUndefined();
+        });
+
+        it('应在发送前补齐中断的 tool 结果并移除游离 tool 消息', async () => {
+            const sessionId = `interrupted-tool-protocol-${Date.now()}`;
+            await memoryManager.createSession(sessionId, 'Test');
+            await memoryManager.addMessageToContext(sessionId, {
+                messageId: 'user-before',
+                role: 'user',
+                content: '先执行命令',
+                type: 'text',
+            } as Message);
+            await memoryManager.addMessageToContext(sessionId, {
+                messageId: 'assistant-tool-call',
+                role: 'assistant',
+                content: '',
+                type: 'tool-call',
+                finish_reason: 'tool_calls',
+                tool_calls: [
+                    {
+                        id: 'call_1',
+                        type: 'function',
+                        function: {
+                            name: 'bash',
+                            arguments: '{"command":"npm run dev"}',
+                        },
+                    },
+                ],
+            } as Message);
+            await memoryManager.addMessageToContext(sessionId, {
+                messageId: 'user-interleaved',
+                role: 'user',
+                content: '中途又发了一条消息',
+                type: 'text',
+            } as Message);
+            await memoryManager.addMessageToContext(sessionId, {
+                messageId: 'late-tool-result',
+                role: 'tool',
+                tool_call_id: 'call_1',
+                content: '{"success":true}',
+                type: 'tool-result',
+            } as Message);
+
+            let capturedMessages: any[] = [];
+            mockProvider.generate = async (messages: any[]) => {
+                capturedMessages = messages;
+                return {
+                    id: 'tool-protocol-fixed',
+                    object: 'chat.completion',
+                    created: Date.now(),
+                    model: 'test-model',
+                    choices: [
+                        {
+                            index: 0,
+                            message: { role: 'assistant', content: 'ok' },
+                            finish_reason: 'stop',
+                        },
+                    ],
+                } as LLMResponse;
+            };
+
+            const agent = new Agent({
+                provider: mockProvider as any,
+                systemPrompt: 'Test',
+                stream: false,
+                memoryManager,
+                sessionId,
+            });
+
+            const result = await agent.executeWithResult('继续');
+            expect(result.status).toBe('completed');
+
+            const assistantIndex = capturedMessages.findIndex(
+                (m) => m?.role === 'assistant' && Array.isArray(m?.tool_calls) && m.tool_calls.some((c: any) => c.id === 'call_1')
+            );
+            expect(assistantIndex).toBeGreaterThanOrEqual(0);
+
+            const nextMessage = capturedMessages[assistantIndex + 1];
+            expect(nextMessage?.role).toBe('tool');
+            expect(nextMessage?.tool_call_id).toBe('call_1');
+            expect(String(nextMessage?.content || '')).toContain('TOOL_CALL_INTERRUPTED');
+
+            const strayToolAfterUser = capturedMessages.find(
+                (m, idx) =>
+                    idx > assistantIndex + 1 &&
+                    m?.role === 'tool' &&
+                    m?.tool_call_id === 'call_1' &&
+                    String(m?.content || '').includes('"success":true')
+            );
+            expect(strayToolAfterUser).toBeUndefined();
         });
     });
 });

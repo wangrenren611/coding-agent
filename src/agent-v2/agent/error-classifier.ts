@@ -11,7 +11,6 @@ import {
     AgentAbortedError,
     AgentBusyError,
     AgentMaxRetriesExceededError,
-    AgentCompensationRetryExceededError,
     AgentLoopExceededError,
     AgentConfigurationError,
     AgentValidationError,
@@ -52,9 +51,6 @@ export class ErrorClassifier {
         }
         if (error instanceof AgentMaxRetriesExceededError) {
             return 'AGENT_MAX_RETRIES_EXCEEDED';
-        }
-        if (error instanceof AgentCompensationRetryExceededError) {
-            return 'AGENT_COMPENSATION_RETRY_EXCEEDED';
         }
         if (error instanceof AgentLoopExceededError) {
             return 'AGENT_LOOP_EXCEEDED';
@@ -99,9 +95,6 @@ export class ErrorClassifier {
             }
             if (message.includes('maximum retries') && !message.includes('compensation')) {
                 return 'AGENT_MAX_RETRIES_EXCEEDED';
-            }
-            if (message.includes('maximum compensation retries')) {
-                return 'AGENT_COMPENSATION_RETRY_EXCEEDED';
             }
             if (message.includes('not idle') || message.includes('current status')) {
                 return 'AGENT_BUSY';
@@ -156,15 +149,6 @@ export class ErrorClassifier {
             userMessage: safeError.userMessage,
             internalMessage: safeError.internalMessage,
         };
-    }
-
-    /**
-     * 检查是否为中止类错误
-     */
-    private isAbortLikeError(error: unknown): boolean {
-        if (!(error instanceof Error)) return false;
-        const message = `${error.name} ${error.message}`.toLowerCase();
-        return message.includes('abort') || message.includes('aborted');
     }
 
     /**

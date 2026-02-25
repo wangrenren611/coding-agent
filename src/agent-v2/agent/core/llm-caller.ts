@@ -10,10 +10,20 @@
  */
 
 import { v4 as uuid } from 'uuid';
-import type { LLMProvider, LLMGenerateOptions, LLMResponse, Tool, Usage } from '../../../providers';
+import {
+    LLMRetryableError,
+    LLMPermanentError,
+    type Chunk,
+    type LLMProvider,
+    type LLMGenerateOptions,
+    type LLMResponse,
+    type Tool,
+    type Usage,
+} from '../../../providers';
 import type { Message } from '../../session/types';
 import { StreamProcessor } from '../stream-processor';
 import { AgentStatus } from '../types';
+import type { StatusMeta } from '../stream-types';
 import type { ITimeProvider } from '../core-types';
 import { DefaultTimeProvider } from '../time-provider';
 import type { ResponseValidatorOptions, ValidationResult } from '../response-validator';
@@ -61,7 +71,7 @@ export interface LLMCallerConfig {
     /** Token 使用量更新回调 */
     onUsageUpdate?: (usage: Usage, messageId: string) => void;
     /** 状态变更回调 */
-    onStatusChange?: (status: AgentStatus, message: string, messageId?: string) => void;
+    onStatusChange?: (status: AgentStatus, message: string, messageId?: string, meta?: StatusMeta) => void;
 }
 
 /**
@@ -146,7 +156,10 @@ export class LLMCaller {
         options: LLMGenerateOptions,
         messageId: string
     ): Promise<LLMResponse> {
-        this.config.onStatusChange?.(AgentStatus.THINKING, 'Agent is thinking...', messageId);
+        this.config.onStatusChange?.(AgentStatus.THINKING, 'Agent is thinking...', messageId, {
+            source: 'llm-caller',
+            phase: 'thinking',
+        });
 
         options.stream = true;
         const streamResult = await this.config.provider.generate(messages, options);
@@ -157,10 +170,27 @@ export class LLMCaller {
             return streamResult as LLMResponse;
         }
 
-        const stream = streamResult as AsyncIterable<unknown>;
+        const stream = streamResult as AsyncIterable<Chunk>;
 
         for await (const chunk of stream) {
-            this.streamProcessor.processChunk(chunk as Parameters<typeof this.streamProcessor.processChunk>[0]);
+            const streamError = this.extractStreamChunkError(chunk);
+            if (streamError) {
+                throw this.createStreamChunkError(streamError, chunk.id);
+            }
+
+            this.streamProcessor.processChunk(chunk);
+
+            if (this.streamProcessor.isAborted()) {
+                const abortReason = this.streamProcessor.getAbortReason();
+                if (abortReason === 'buffer_overflow') {
+                    throw new LLMPermanentError(
+                        `Stream response exceeded max buffer size (${this.config.maxBufferSize})`,
+                        undefined,
+                        'STREAM_BUFFER_OVERFLOW'
+                    );
+                }
+                throw new LLMRetryableError('Stream processor aborted unexpectedly', undefined, 'STREAM_ABORTED');
+            }
         }
 
         return this.streamProcessor.buildResponse();
@@ -215,5 +245,54 @@ export class LLMCaller {
      */
     getAbortController(): AbortController | null {
         return this.abortController;
+    }
+
+    private extractStreamChunkError(chunk: Chunk): NonNullable<Chunk['error']> | null {
+        if (!chunk.error || typeof chunk.error !== 'object') {
+            return null;
+        }
+        return chunk.error;
+    }
+
+    private createStreamChunkError(chunkError: NonNullable<Chunk['error']>, chunkId?: string): Error {
+        console.log('[LLMCaller] createStreamChunkError', chunkError, chunkId);
+        const rawMessage =
+            typeof chunkError.message === 'string' && chunkError.message.trim().length > 0
+                ? chunkError.message.trim()
+                : 'LLM stream returned an error chunk';
+
+        const message = chunkId ? `${rawMessage} (chunk: ${chunkId})` : rawMessage;
+
+        const rawCode =
+            typeof chunkError.code === 'string' && chunkError.code
+                ? chunkError.code
+                : typeof chunkError.type === 'string' && chunkError.type
+                  ? chunkError.type
+                  : 'STREAM_CHUNK_ERROR';
+
+        const signature = `${rawCode} ${message}`.toLowerCase();
+        if (this.isPermanentStreamError(signature)) {
+            return new LLMPermanentError(message, undefined, rawCode);
+        }
+        return new LLMRetryableError(message, undefined, rawCode);
+    }
+
+    private isPermanentStreamError(signature: string): boolean {
+        const permanentIndicators = [
+            'invalid_request',
+            'bad_request',
+            'authentication',
+            'auth',
+            'permission',
+            'forbidden',
+            'not_found',
+            'unsupported',
+            'context_length',
+            'content_filter',
+            'safety',
+            'invalid_parameter_error'
+        ];
+
+        return permanentIndicators.some((indicator) => signature.includes(indicator));
     }
 }

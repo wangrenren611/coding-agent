@@ -27,7 +27,7 @@ Before executing the command, please follow these steps:
 Usage notes:
 - The command argument is required.
 - You can specify an optional timeout in milliseconds (up to 600000ms / 10 minutes).
-  If not specified, commands timeout after 120000ms (2 minutes).
+  If not specified, commands timeout after 60000ms (1 minute).
 - It's very helpful if you write a clear, concise description of what the command does.
   For simple commands (git, npm, standard CLI tools), keep it brief (5-10 words):
     - ls → List files in current directory

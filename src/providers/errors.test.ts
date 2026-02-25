@@ -175,6 +175,12 @@ describe('createErrorFromStatus', () => {
         expect(error.code).toBe('SERVER_500');
     });
 
+    it('should return LLMRetryableError for 408', () => {
+        const error = createErrorFromStatus(408, 'Request Timeout', 'RequestTimeOut');
+        expect(error).toBeInstanceOf(LLMRetryableError);
+        expect(error.code).toBe('TIMEOUT');
+    });
+
     it('should return LLMRetryableError for 502', () => {
         const error = createErrorFromStatus(502, 'Bad Gateway', 'Upstream error');
         expect(error).toBeInstanceOf(LLMRetryableError);

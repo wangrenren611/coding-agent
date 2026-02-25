@@ -10,6 +10,7 @@
 import type { Message } from '../session/types';
 
 export type { Message };
+export type ContextExclusionReason = 'empty_response' | 'invalid_response' | 'manual';
 
 /**
  * 存储项的基础接口
@@ -32,6 +33,10 @@ export interface HistoryMessage extends Message {
     isSummary?: boolean;
     /** 被哪个压缩记录归档 */
     archivedBy?: string;
+    /** 是否从 current context 中排除（但历史保留） */
+    excludedFromContext?: boolean;
+    /** 排除原因 */
+    excludedReason?: ContextExclusionReason;
 }
 
 /**
@@ -279,6 +284,17 @@ export interface IMemoryManager {
      * 更新当前上下文中的消息
      */
     updateMessageInContext(sessionId: string, messageId: string, updates: Partial<Message>): Promise<void>;
+
+    /**
+     * 从当前上下文中删除指定消息
+     * 注意：不会删除完整历史，历史会保留并标记为 excludedFromContext
+     * @returns true 表示上下文中消息被删除，false 表示消息不存在
+     */
+    removeMessageFromContext(
+        sessionId: string,
+        messageId: string,
+        reason?: ContextExclusionReason
+    ): Promise<boolean>;
 
     /**
      * 清空当前上下文（保留系统消息）

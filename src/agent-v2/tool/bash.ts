@@ -14,11 +14,25 @@ import { execaCommand } from 'execa';
 import { parse } from 'shell-quote';
 import stripAnsi from 'strip-ansi';
 import iconv from 'iconv-lite';
+import { spawn } from 'child_process';
+import { randomUUID } from 'crypto';
+import fs from 'fs';
+import path from 'path';
+import { tmpdir } from 'os';
+
+const runInBackgroundSchema = z.preprocess((value) => {
+    if (typeof value === 'string') {
+        const normalized = value.trim().toLowerCase();
+        if (normalized === 'true') return true;
+        if (normalized === 'false') return false;
+    }
+    return value;
+}, z.boolean());
 
 const schema = z.object({
     command: z.string().min(1).describe('The bash command to run').optional(),
     timeout: z.number().int().min(0).max(600000).describe('Command timeout in milliseconds').optional(),
-    // run_in_background: z.boolean().describe('Run in background').optional(),
+    run_in_background: runInBackgroundSchema.optional().describe('Run command in background'),
 });
 
 type BashPolicyMode = 'guarded' | 'permissive';
@@ -52,6 +66,7 @@ const DANGEROUS_COMMANDS = new Set([
 ]);
 
 const ALLOWED_COMMANDS = new Set([
+    "agent-browser",
     'ls',
     'pwd',
     'cat',
@@ -265,39 +280,66 @@ export default class BashTool extends BaseTool<typeof schema> {
             stderr: 'pipe',
         });
 
-        let killedByTimeout = false;
-        const timer = setTimeout(() => {
-            killedByTimeout = true;
-            try {
-                child.kill();
-            } catch {
-                // ignore kill errors
-            }
-        }, timeoutMs);
-
+        let timer: ReturnType<typeof setTimeout> | null = null;
         try {
-            const [stdoutAb, stderrAb, exitCode] = await Promise.all([
-                new Response(child.stdout).arrayBuffer(),
-                new Response(child.stderr).arrayBuffer(),
-                child.exited,
+            const exitState = await Promise.race([
+                child.exited.then((exitCode: number) => ({ timedOut: false as const, exitCode })),
+                new Promise<{ timedOut: true }>((resolve) => {
+                    timer = setTimeout(() => {
+                        try {
+                            child.kill();
+                        } catch {
+                            // ignore kill errors
+                        }
+                        resolve({ timedOut: true });
+                    }, timeoutMs);
+                }),
             ]);
 
-            const all = Buffer.concat([Buffer.from(stdoutAb), Buffer.from(stderrAb)]);
-            if (killedByTimeout) {
+            if (exitState.timedOut) {
                 return {
                     exitCode: 124,
-                    all: Buffer.concat([all, Buffer.from(`\nCommand timed out after ${timeoutMs}ms`)]),
+                    all: Buffer.from(`Command timed out after ${timeoutMs}ms`),
                     streamed: false,
                 };
             }
 
+            const [stdoutAb, stderrAb] = await Promise.all([
+                new Response(child.stdout).arrayBuffer(),
+                new Response(child.stderr).arrayBuffer(),
+            ]);
+            const all = Buffer.concat([Buffer.from(stdoutAb), Buffer.from(stderrAb)]);
+
             return {
-                exitCode: typeof exitCode === 'number' ? exitCode : 1,
+                exitCode: typeof exitState.exitCode === 'number' ? exitState.exitCode : 1,
                 all,
                 streamed: false,
             };
         } finally {
-            clearTimeout(timer);
+            if (timer) clearTimeout(timer);
+        }
+    }
+
+    private runInBackground(command: string): { pid: number | undefined; logPath: string } {
+        const logPath = path.join(tmpdir(), `agent-bash-bg-${Date.now()}-${randomUUID().slice(0, 8)}.log`);
+        const logFd = fs.openSync(logPath, 'a');
+
+        try {
+            const shellCommand =
+                process.platform === 'win32' ? ['cmd.exe', '/d', '/s', '/c', command] : ['/bin/bash', '-lc', command];
+
+            const child = spawn(shellCommand[0], shellCommand.slice(1), {
+                cwd: process.cwd(),
+                env: process.env,
+                detached: true,
+                stdio: ['ignore', logFd, logFd],
+                windowsHide: true,
+            });
+
+            child.unref();
+            return { pid: child.pid, logPath };
+        } finally {
+            fs.closeSync(logFd);
         }
     }
 
@@ -380,7 +422,7 @@ export default class BashTool extends BaseTool<typeof schema> {
      * - 底层异常（执行失败）→ throw 供 Registry 捕获
      */
     async execute(args: z.infer<typeof this.schema>, _context?: ToolContext): Promise<ToolResult> {
-        const { command, timeout } = args;
+        const { command, timeout, run_in_background } = args;
 
         if (!command) {
             return this.result({
@@ -397,6 +439,29 @@ export default class BashTool extends BaseTool<typeof schema> {
                 metadata: { error: 'COMMAND_BLOCKED_BY_POLICY' } as any,
                 output: `COMMAND_BLOCKED_BY_POLICY: ${policy.reason || 'Command not allowed'}`,
             });
+        }
+
+        if (run_in_background) {
+            try {
+                const { pid, logPath } = this.runInBackground(command);
+                const pidText = typeof pid === 'number' ? String(pid) : 'unknown';
+                return this.result({
+                    success: true,
+                    metadata: {
+                        command,
+                        pid,
+                        logPath,
+                        run_in_background: true,
+                    } as any,
+                    output: `BACKGROUND_STARTED: pid=${pidText}, log=${logPath}`,
+                });
+            } catch (error) {
+                return this.result({
+                    success: false,
+                    metadata: { error: 'BACKGROUND_START_FAILED' } as any,
+                    output: `BACKGROUND_START_FAILED: ${String(error)}`,
+                });
+            }
         }
 
         const timeoutMs = this.getEffectiveTimeout(timeout);

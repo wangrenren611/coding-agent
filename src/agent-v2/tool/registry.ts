@@ -15,6 +15,16 @@ interface ExecutionContext {
 }
 
 /**
+ * 工具调用校验错误（来自 LLM 返回的 tool_calls 结构非法）
+ */
+export class ToolCallValidationError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = 'ToolCallValidationError';
+    }
+}
+
+/**
  * 工具注册表配置
  */
 export interface ToolRegistryConfig {
@@ -103,6 +113,42 @@ export class ToolRegistry {
 
             this.tools.set(tool.name, tool);
         });
+    }
+
+    /**
+     * 验证 tool_calls 的基础结构
+     */
+    validateToolCalls(toolCalls: ToolCall[]): void {
+        if (!Array.isArray(toolCalls) || toolCalls.length === 0) {
+            throw new ToolCallValidationError('LLM response contains empty tool_calls');
+        }
+
+        for (let i = 0; i < toolCalls.length; i += 1) {
+            const toolCall = toolCalls[i] as ToolCall | undefined;
+            if (!toolCall || typeof toolCall !== 'object') {
+                throw new ToolCallValidationError(`LLM response tool_calls[${i}] is invalid`);
+            }
+
+            if (typeof toolCall.id !== 'string' || toolCall.id.trim() === '') {
+                throw new ToolCallValidationError(`LLM response tool_calls[${i}].id is missing`);
+            }
+
+            if (toolCall.type !== 'function') {
+                throw new ToolCallValidationError(`LLM response tool_calls[${i}].type must be "function"`);
+            }
+
+            if (!toolCall.function || typeof toolCall.function !== 'object') {
+                throw new ToolCallValidationError(`LLM response tool_calls[${i}].function is missing`);
+            }
+
+            if (typeof toolCall.function.name !== 'string' || toolCall.function.name.trim() === '') {
+                throw new ToolCallValidationError(`LLM response tool_calls[${i}].function.name is missing`);
+            }
+
+            if (typeof toolCall.function.arguments !== 'string') {
+                throw new ToolCallValidationError(`LLM response tool_calls[${i}].function.arguments is invalid`);
+            }
+        }
     }
 
     /**

@@ -11,6 +11,7 @@ function createMockMemoryManager(overrides: Partial<IMemoryManager> = {}): IMemo
         saveCurrentContext: vi.fn(async () => undefined),
         addMessageToContext: vi.fn(async () => undefined),
         updateMessageInContext: vi.fn(async () => undefined),
+        removeMessageFromContext: vi.fn(async () => false),
         clearContext: vi.fn(async () => undefined),
         compactContext: vi.fn(async () => {
             throw new Error('not implemented');

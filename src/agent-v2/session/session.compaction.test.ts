@@ -27,6 +27,7 @@ interface ToolCallShape {
  */
 class MockSummaryProvider extends LLMProvider {
     public generateCallCount = 0;
+    public lastSummaryInput = '';
 
     constructor() {
         super({
@@ -44,6 +45,8 @@ class MockSummaryProvider extends LLMProvider {
         _options?: LLMGenerateOptions
     ): Promise<LLMResponse | null> | AsyncGenerator<Chunk> {
         this.generateCallCount++;
+        const first = _messages[0];
+        this.lastSummaryInput = typeof first?.content === 'string' ? first.content : JSON.stringify(first?.content);
         return Promise.resolve({
             id: `summary-${this.generateCallCount}`,
             object: 'chat.completion',
@@ -261,6 +264,62 @@ describe('Session Compaction', () => {
             expect(records.length).toBe(1);
             expect(records[0].reason).toBe('token_limit');
             expect(records[0].archivedMessageIds.length).toBeGreaterThan(0);
+        });
+
+        it('should include reasoning_content in summary source when content is empty', async () => {
+            const provider = new MockSummaryProvider();
+            const session = new Session({
+                systemPrompt: '你是测试助手',
+                enableCompaction: true,
+                provider,
+                compactionConfig: {
+                    maxTokens: 260,
+                    maxOutputTokens: 120,
+                    keepMessagesNum: 3,
+                    triggerRatio: 0.9,
+                },
+            });
+
+            seedSession(session);
+            session.addMessage({
+                messageId: 'assistant-reasoning-only',
+                role: 'assistant',
+                content: '',
+                reasoning_content: '仅推理内容也应进入压缩摘要',
+                type: 'text',
+                finish_reason: 'stop',
+            });
+            session.addMessage({
+                messageId: 'user-after-1',
+                role: 'user',
+                content: '后续消息 1',
+                type: 'text',
+            });
+            session.addMessage({
+                messageId: 'assistant-after-1',
+                role: 'assistant',
+                content: '后续回复 1',
+                type: 'text',
+                finish_reason: 'stop',
+            });
+            session.addMessage({
+                messageId: 'user-after-2',
+                role: 'user',
+                content: '后续消息 2',
+                type: 'text',
+            });
+            session.addMessage({
+                messageId: 'assistant-after-2',
+                role: 'assistant',
+                content: '后续回复 2',
+                type: 'text',
+                finish_reason: 'stop',
+            });
+
+            const compacted = await session.compactBeforeLLMCall();
+            expect(compacted).toBe(true);
+            expect(provider.generateCallCount).toBe(1);
+            expect(provider.lastSummaryInput).toContain('仅推理内容也应进入压缩摘要');
         });
     });
 

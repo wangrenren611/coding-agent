@@ -3,6 +3,8 @@ import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ToolExecutor } from './core/tool-executor';
+import { LLMResponseInvalidError } from './errors';
+import { ToolCallValidationError } from '../tool/registry';
 import type { ToolCall } from './core-types';
 
 function createToolCall(callId: string, toolName: string, args: Record<string, unknown>): ToolCall {
@@ -40,6 +42,7 @@ describe('ToolExecutor protocol events', () => {
         const patchSpy = vi.fn();
         const resultSpy = vi.fn();
         const registry = {
+            validateToolCalls: vi.fn(),
             execute: vi.fn(
                 async (
                     _toolCalls: ToolCall[],
@@ -90,6 +93,7 @@ describe('ToolExecutor protocol events', () => {
         const streamSpy = vi.fn();
         const patchSpy = vi.fn();
         const registry = {
+            validateToolCalls: vi.fn(),
             execute: vi.fn(async () => [
                 {
                     tool_call_id: 'call-2',
@@ -109,5 +113,27 @@ describe('ToolExecutor protocol events', () => {
 
         expect(streamSpy).toHaveBeenCalledWith('call-2', 'noop', 'msg-2');
         expect(patchSpy).not.toHaveBeenCalled();
+    });
+
+    it('should map invalid tool calls to LLMResponseInvalidError', async () => {
+        const registry = {
+            validateToolCalls: vi.fn(() => {
+                throw new ToolCallValidationError('LLM response tool_calls[0].id is missing');
+            }),
+            execute: vi.fn(),
+        } as any;
+
+        const createdSpy = vi.fn();
+        const executor = new ToolExecutor({
+            toolRegistry: registry,
+            sessionId: 's-1',
+            onToolCallCreated: createdSpy,
+        });
+
+        await expect(executor.execute([createToolCall('call-3', 'read_file', { filePath: 'x' })], 'msg-3')).rejects.toThrow(
+            LLMResponseInvalidError
+        );
+        expect(createdSpy).not.toHaveBeenCalled();
+        expect(registry.execute).not.toHaveBeenCalled();
     });
 });

@@ -90,6 +90,40 @@ describe('AgentEmitter', () => {
             // 确保没有 msgId 字段
             expect(mockCallback).toHaveBeenCalledWith(expect.not.objectContaining({ msgId: expect.anything() }));
         });
+
+        it('emitStatus 应该支持结构化 meta', () => {
+            emitter.emitStatus(AgentStatus.RETRYING, 'Retrying...', 'msg-2', {
+                source: 'agent',
+                phase: 'retry',
+                retry: {
+                    type: 'normal',
+                    attempt: 1,
+                    max: 3,
+                    delayMs: 1000,
+                },
+            });
+
+            expect(mockCallback).toHaveBeenCalledWith({
+                type: AgentMessageType.STATUS,
+                payload: {
+                    state: AgentStatus.RETRYING,
+                    message: 'Retrying...',
+                    meta: {
+                        source: 'agent',
+                        phase: 'retry',
+                        retry: {
+                            type: 'normal',
+                            attempt: 1,
+                            max: 3,
+                            delayMs: 1000,
+                        },
+                    },
+                },
+                msgId: 'msg-2',
+                sessionId,
+                timestamp,
+            });
+        });
     });
 
     describe('错误事件', () => {

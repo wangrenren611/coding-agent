@@ -12,13 +12,14 @@
 import { v4 as uuid } from 'uuid';
 import fs from 'fs';
 import path from 'path';
-import type { ToolRegistry } from '../../tool/registry';
+import { ToolCallValidationError, ToolRegistry } from '../../tool/registry';
 import type { ToolContext } from '../../tool/base';
 import type { ToolCall, ToolExecutionResult } from '../core-types';
 import type { Message } from '../../session/types';
 import { createToolResultMessage } from '../message-builder';
 import { sanitizeToolResult as sanitizeToolResultUtil, toolResultToString } from '../../security';
 import { safeParse } from '../../util';
+import { LLMResponseInvalidError } from '../errors';
 
 const PATCH_PATH_KEYS = new Set(['filePath', 'path', 'targetPath', 'fromPath', 'toPath']);
 const MAX_SNAPSHOT_BYTES = 300 * 1024;
@@ -83,6 +84,16 @@ export class ToolExecutor {
      * 执行工具调用
      */
     async execute(toolCalls: ToolCall[], messageId: string, messageContent?: string): Promise<ToolExecutionOutput> {
+        // tool_calls 校验下沉到 ToolRegistry，Agent 仅负责协调调用。
+        try {
+            this.config.toolRegistry.validateToolCalls(toolCalls);
+        } catch (error) {
+            if (error instanceof ToolCallValidationError) {
+                throw new LLMResponseInvalidError(error.message);
+            }
+            throw error;
+        }
+
         // 触发工具调用创建回调
         this.config.onToolCallCreated?.(toolCalls, messageId, messageContent);
 

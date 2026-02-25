@@ -119,6 +119,8 @@ export function createErrorFromStatus(status: number, statusText: string, errorT
             return new LLMAuthError(message);
         case 404:
             return new LLMNotFoundError(message, 'resource');
+        case 408:
+            return new LLMRetryableError(message, undefined, 'TIMEOUT');
         case 429:
             return new LLMRateLimitError(message);
         case 400:

@@ -15,6 +15,7 @@ import type { Message } from '../session/types';
 import {
     CompactContextOptions,
     CompactionRecord,
+    ContextExclusionReason,
     CurrentContext,
     HistoryFilter,
     HistoryMessage,
@@ -322,6 +323,61 @@ export class FileMemoryManager implements IMemoryManager {
         }
 
         await Promise.all(writes);
+    }
+
+    async removeMessageFromContext(
+        sessionId: string,
+        messageId: string,
+        reason: ContextExclusionReason = 'manual'
+    ): Promise<boolean> {
+        this.ensureInitialized();
+
+        const session = this.requireSession(sessionId);
+        const context = this.requireContext(sessionId);
+        const history = this.cache.histories.get(sessionId);
+
+        const contextIndex = this.findLastContextIndex(context.messages, messageId);
+        const historyIndex = history ? this.findLastHistoryIndex(history, messageId) : -1;
+
+        if (contextIndex === -1) {
+            return false;
+        }
+
+        const target = context.messages[contextIndex];
+        if (!target || target.role === 'system') {
+            return false;
+        }
+
+        context.messages.splice(contextIndex, 1);
+        context.version += 1;
+
+        let historyChanged = false;
+        if (history && historyIndex !== -1) {
+            const historyItem = history[historyIndex];
+            if (historyItem.role !== 'system') {
+                history[historyIndex] = {
+                    ...historyItem,
+                    excludedFromContext: true,
+                    excludedReason: reason,
+                };
+                historyChanged = true;
+            }
+        }
+
+        const now = Date.now();
+        context.updatedAt = now;
+        session.updatedAt = now;
+        if (context.stats) {
+            context.stats.totalMessagesInHistory = history ? history.length : context.messages.length;
+        }
+        session.totalMessages = history ? history.length : context.messages.length;
+
+        const writes: Promise<void>[] = [this.saveContextFile(sessionId), this.saveSessionFile(sessionId)];
+        if (historyChanged) {
+            writes.push(this.saveHistoryFile(sessionId));
+        }
+        await Promise.all(writes);
+        return true;
     }
 
     async clearContext(sessionId: string): Promise<void> {
@@ -751,13 +807,15 @@ export class FileMemoryManager implements IMemoryManager {
                 const repairedContextId = session.currentContextId || uuid();
                 const history = this.cache.histories.get(sessionId) || [];
                 const activeMessages: Message[] = history
-                    .filter((item) => !item.archivedBy)
+                    .filter((item) => !item.archivedBy && !item.excludedFromContext)
                     .map((item) => {
                         const {
                             sequence: _sequence,
                             turn: _turn,
                             isSummary: _isSummary,
                             archivedBy: _archivedBy,
+                            excludedFromContext: _excludedFromContext,
+                            excludedReason: _excludedReason,
                             ...message
                         } = item;
                         return this.clone(message);

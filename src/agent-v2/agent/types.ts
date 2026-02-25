@@ -30,7 +30,6 @@ export type AgentFailureCode =
     | 'AGENT_RUNTIME_ERROR'
     // 重试相关
     | 'AGENT_MAX_RETRIES_EXCEEDED'
-    | 'AGENT_COMPENSATION_RETRY_EXCEEDED'
     | 'AGENT_LOOP_EXCEEDED'
     // 配置和验证错误
     | 'AGENT_CONFIGURATION_ERROR'
@@ -50,7 +49,6 @@ export const AGENT_FAILURE_CODES: readonly AgentFailureCode[] = [
     'AGENT_BUSY',
     'AGENT_RUNTIME_ERROR',
     'AGENT_MAX_RETRIES_EXCEEDED',
-    'AGENT_COMPENSATION_RETRY_EXCEEDED',
     'AGENT_LOOP_EXCEEDED',
     'AGENT_CONFIGURATION_ERROR',
     'AGENT_VALIDATION_ERROR',
@@ -121,6 +119,4 @@ export interface AgentOptions {
     onValidationViolation?: (result: ValidationResult) => void;
     /** 最大循环次数（默认 3000） */
     maxLoops?: number;
-    /** 最大补偿重试次数（默认 1） */
-    maxCompensationRetries?: number;
 }

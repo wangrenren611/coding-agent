@@ -117,7 +117,8 @@ describe('CLI 场景：补偿重试超过限制后重新发送消息', () => {
             memoryManager,
             sessionId,
             maxLoops: 10,
-            maxCompensationRetries: 1, // 只允许 1 次补偿重试
+            maxRetries: 1,
+            retryDelayMs: 1,
         });
 
         const result1 = await agent1.executeWithResult('Hello');
@@ -146,6 +147,14 @@ describe('CLI 场景：补偿重试超过限制后重新发送消息', () => {
             assistantMessagesAfterFirst.map((m) => m.content)
         );
 
+        const historyAfterFirst = await memoryManager.getFullHistory({ sessionId });
+        const emptyAssistantInHistoryAfterFirst = historyAfterFirst.filter(
+            (m) => m.role === 'assistant' && (typeof m.content === 'string' ? m.content === '' : true)
+        );
+        expect(emptyAssistantInHistoryAfterFirst.length).toBeGreaterThan(0);
+        expect(emptyAssistantInHistoryAfterFirst.every((m: any) => m.excludedFromContext === true)).toBe(true);
+        expect(emptyAssistantInHistoryAfterFirst.every((m: any) => m.excludedReason === 'empty_response')).toBe(true);
+
         // 场景 2：用户重新发送新消息（使用同一个 sessionId）
         mockProvider.reset();
         mockProvider.customResponses = [
@@ -168,7 +177,8 @@ describe('CLI 场景：补偿重试超过限制后重新发送消息', () => {
             memoryManager,
             sessionId, // 复用 sessionId
             maxLoops: 10,
-            maxCompensationRetries: 1,
+            maxRetries: 1,
+            retryDelayMs: 1,
         });
 
         const result2 = await agent2.executeWithResult('New message');
@@ -196,6 +206,14 @@ describe('CLI 场景：补偿重试超过限制后重新发送消息', () => {
         // 如果问题存在，这里会有空响应消息残留
         // 如果问题已修复，这里应该没有空响应消息
         expect(emptyAssistantMessages.length).toBe(0);
+
+        const historyAfterSecond = await memoryManager.getFullHistory({ sessionId });
+        const emptyAssistantInHistoryAfterSecond = historyAfterSecond.filter(
+            (m) => m.role === 'assistant' && (typeof m.content === 'string' ? m.content === '' : true)
+        );
+        expect(emptyAssistantInHistoryAfterSecond.length).toBeGreaterThan(0);
+        expect(emptyAssistantInHistoryAfterSecond.every((m: any) => m.excludedFromContext === true)).toBe(true);
+        expect(emptyAssistantInHistoryAfterSecond.every((m: any) => m.excludedReason === 'empty_response')).toBe(true);
     }, 15000);
 
     it('验证：补偿重试超过限制时，空响应消息应该被移除', async () => {
@@ -227,7 +245,8 @@ describe('CLI 场景：补偿重试超过限制后重新发送消息', () => {
             memoryManager,
             sessionId: 'test-remove-empty-' + Date.now(),
             maxLoops: 10,
-            maxCompensationRetries: 1,
+            maxRetries: 1,
+            retryDelayMs: 1,
         });
 
         const result = await agent.executeWithResult('Hello');
@@ -256,6 +275,14 @@ describe('CLI 场景：补偿重试超过限制后重新发送消息', () => {
 
         // 关键检查：空响应消息应该被移除
         expect(assistantMessages.length).toBe(0);
+
+        const history = await memoryManager.getFullHistory({ sessionId: agent.getSessionId() });
+        const emptyAssistantInHistory = history.filter(
+            (m) => m.role === 'assistant' && (typeof m.content === 'string' ? m.content === '' : true)
+        );
+        expect(emptyAssistantInHistory.length).toBeGreaterThan(0);
+        expect(emptyAssistantInHistory.every((m: any) => m.excludedFromContext === true)).toBe(true);
+        expect(emptyAssistantInHistory.every((m: any) => m.excludedReason === 'empty_response')).toBe(true);
     }, 10000);
 
     it('深度测试：持久化场景 - 从持久化存储恢复后不应有空响应消息', async () => {
@@ -290,7 +317,8 @@ describe('CLI 场景：补偿重试超过限制后重新发送消息', () => {
             memoryManager,
             sessionId: testSessionId,
             maxLoops: 10,
-            maxCompensationRetries: 1,
+            maxRetries: 1,
+            retryDelayMs: 1,
         });
 
         const result1 = await agent1.executeWithResult('First message');
@@ -320,7 +348,8 @@ describe('CLI 场景：补偿重试超过限制后重新发送消息', () => {
             memoryManager,
             sessionId: testSessionId, // 复用 sessionId
             maxLoops: 10,
-            maxCompensationRetries: 1,
+            maxRetries: 1,
+            retryDelayMs: 1,
         });
 
         // 等待 Session 初始化（从持久化加载）
@@ -341,6 +370,13 @@ describe('CLI 场景：补偿重试超过限制后重新发送消息', () => {
             (m) => m.role === 'assistant' && (typeof m.content === 'string' ? m.content === '' : true)
         );
         console.log('空助手消息数量（恢复后）:', emptyAssistantMessages.length);
+        const restoredHistory = await memoryManager.getFullHistory({ sessionId: testSessionId });
+        const emptyAssistantInRestoredHistory = restoredHistory.filter(
+            (m) => m.role === 'assistant' && (typeof m.content === 'string' ? m.content === '' : true)
+        );
+        expect(emptyAssistantInRestoredHistory.length).toBeGreaterThan(0);
+        expect(emptyAssistantInRestoredHistory.every((m: any) => m.excludedFromContext === true)).toBe(true);
+        expect(emptyAssistantInRestoredHistory.every((m: any) => m.excludedReason === 'empty_response')).toBe(true);
 
         // 执行第二次请求
         const result2 = await agent2.executeWithResult('Second message');
@@ -357,6 +393,14 @@ describe('CLI 场景：补偿重试超过限制后重新发送消息', () => {
 
         console.log('最终空助手消息数量:', finalEmptyMessages.length);
         expect(finalEmptyMessages.length).toBe(0);
+
+        const finalHistory = await memoryManager.getFullHistory({ sessionId: testSessionId });
+        const finalEmptyInHistory = finalHistory.filter(
+            (m) => m.role === 'assistant' && (typeof m.content === 'string' ? m.content === '' : true)
+        );
+        expect(finalEmptyInHistory.length).toBeGreaterThan(0);
+        expect(finalEmptyInHistory.every((m: any) => m.excludedFromContext === true)).toBe(true);
+        expect(finalEmptyInHistory.every((m: any) => m.excludedReason === 'empty_response')).toBe(true);
     }, 15000);
 
     it('边界情况：如果 LLM 持续返回空响应，每次请求都会失败（这是预期行为）', async () => {
@@ -382,12 +426,13 @@ describe('CLI 场景：补偿重试超过限制后重新发送消息', () => {
             memoryManager,
             sessionId: testSessionId,
             maxLoops: 10,
-            maxCompensationRetries: 1,
+            maxRetries: 1,
+            retryDelayMs: 1,
         });
 
         const result1 = await agent1.executeWithResult('First message');
         expect(result1.status).toBe('failed');
-        expect(result1.failure?.code).toBe('AGENT_COMPENSATION_RETRY_EXCEEDED');
+        expect(result1.failure?.code).toBe('AGENT_MAX_RETRIES_EXCEEDED');
 
         // 第二次请求 - 即使 Session 状态正确，如果 LLM 还是返回空响应，仍然会失败
         mockProvider.reset();
@@ -399,15 +444,16 @@ describe('CLI 场景：补偿重试超过限制后重新发送消息', () => {
             memoryManager,
             sessionId: testSessionId,
             maxLoops: 10,
-            maxCompensationRetries: 1,
+            maxRetries: 1,
+            retryDelayMs: 1,
         });
 
         const result2 = await agent2.executeWithResult('Second message');
 
         // 这是预期行为：如果 LLM 持续返回空响应，每次请求都会失败
-        // 但失败原因是"补偿重试超过限制"，不是"Session 状态问题"
+        // 但失败原因是普通重试超限，不是 Session 状态问题
         expect(result2.status).toBe('failed');
-        expect(result2.failure?.code).toBe('AGENT_COMPENSATION_RETRY_EXCEEDED');
+        expect(result2.failure?.code).toBe('AGENT_MAX_RETRIES_EXCEEDED');
 
         // 关键区别：Session 状态应该保持一致，不应该累积空响应消息
         const finalMessages = agent2.getMessages();
@@ -418,6 +464,14 @@ describe('CLI 场景：补偿重试超过限制后重新发送消息', () => {
         expect(userMessages.length).toBe(2);
         // 不应该有空响应消息残留
         expect(assistantMessages.length).toBe(0);
+
+        const finalHistory = await memoryManager.getFullHistory({ sessionId: testSessionId });
+        const finalEmptyInHistory = finalHistory.filter(
+            (m) => m.role === 'assistant' && (typeof m.content === 'string' ? m.content === '' : true)
+        );
+        expect(finalEmptyInHistory.length).toBeGreaterThan(0);
+        expect(finalEmptyInHistory.every((m: any) => m.excludedFromContext === true)).toBe(true);
+        expect(finalEmptyInHistory.every((m: any) => m.excludedReason === 'empty_response')).toBe(true);
 
         console.log('最终消息统计:', {
             total: finalMessages.length,

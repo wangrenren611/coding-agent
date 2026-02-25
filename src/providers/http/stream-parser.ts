@@ -19,8 +19,8 @@ export class StreamParser {
         if (!trimmed || trimmed.startsWith(':')) {
             return null;
         }
-        if (trimmed.startsWith('data: ')) {
-            return trimmed.slice(6).trim();
+        if (trimmed.startsWith('data:')) {
+            return trimmed.slice(5).trim();
         }
         if (trimmed.startsWith('{')) {
             return trimmed;

@@ -109,7 +109,6 @@ describe('AgentState 重试机制测试', () => {
     const defaultConfig = {
         maxLoops: 10,
         maxRetries: 3,
-        maxCompensationRetries: 1,
         defaultRetryDelayMs: 1000,
     };
 
@@ -174,17 +173,13 @@ describe('AgentState 重试机制测试', () => {
             state.incrementLoop();
             state.recordRetryableError();
             state.recordRetryableError();
-            state.recordCompensationRetry();
-
             // 开始新任务
             state.startTask();
 
             expect(state.loopCount).toBe(0);
             expect(state.retryCount).toBe(0);
             expect(state.totalRetryCount).toBe(0);
-            expect(state.compensationRetryCount).toBe(0);
             expect(state.isRetryExceeded()).toBe(false);
-            expect(state.isCompensationRetryExceeded()).toBe(false);
         });
 
         it('startTask 应该重置 lastFailure', () => {
@@ -203,37 +198,6 @@ describe('AgentState 重试机制测试', () => {
 
             state.startTask();
             expect(state.nextRetryDelayMs).toBe(defaultConfig.defaultRetryDelayMs);
-        });
-    });
-
-    describe('补偿重试逻辑', () => {
-        it('isCompensationRetryExceeded 在达到 maxCompensationRetries 时返回 true', () => {
-            state.startTask();
-            expect(state.isCompensationRetryExceeded()).toBe(false);
-
-            state.recordCompensationRetry();
-            expect(state.isCompensationRetryExceeded()).toBe(true);
-        });
-
-        it('补偿重试次数在任务期间累计，不被 recordSuccess 重置', () => {
-            state.startTask();
-            state.recordCompensationRetry();
-            expect(state.compensationRetryCount).toBe(1);
-
-            state.recordSuccess();
-            expect(state.compensationRetryCount).toBe(1); // 不重置
-
-            state.recordCompensationRetry();
-            expect(state.compensationRetryCount).toBe(2);
-        });
-
-        it('startTask 会重置补偿重试计数', () => {
-            state.startTask();
-            state.recordCompensationRetry();
-            state.recordCompensationRetry();
-
-            state.startTask();
-            expect(state.compensationRetryCount).toBe(0);
         });
     });
 
@@ -511,8 +475,8 @@ describe('Agent 各类错误重试测试', () => {
         }, 10000);
     });
 
-    describe('补偿重试（空响应）', () => {
-        it('空响应应该触发补偿重试', async () => {
+    describe('空响应重试（普通重试通道）', () => {
+        it('空响应应该触发普通重试', async () => {
             let callCount = 0;
 
             mockProvider.generate = async () => {
@@ -547,7 +511,8 @@ describe('Agent 各类错误重试测试', () => {
                 stream: false,
                 memoryManager,
                 maxLoops: 10,
-                maxCompensationRetries: 2,
+                maxRetries: 3,
+                retryDelayMs: 1,
             });
 
             const result = await agent.execute('Hello');
@@ -555,7 +520,7 @@ describe('Agent 各类错误重试测试', () => {
             expect(callCount).toBe(3);
         }, 10000);
 
-        it('超过最大补偿重试次数应该失败', async () => {
+        it('超过最大重试次数应该失败', async () => {
             mockProvider.generate = async () => {
                 return {
                     id: 'empty',
@@ -575,17 +540,17 @@ describe('Agent 各类错误重试测试', () => {
                 stream: false,
                 memoryManager,
                 maxLoops: 10,
-                maxCompensationRetries: 1,
+                maxRetries: 1,
+                retryDelayMs: 1,
             });
 
             const result = await agent.executeWithResult('Hello');
             expect(result.status).toBe('failed');
-            // 补偿重试超过限制时应该有特定的错误码
-            expect(result.failure?.code).toBe('AGENT_COMPENSATION_RETRY_EXCEEDED');
-            expect(result.failure?.userMessage).toContain('maximum compensation retries');
+            expect(result.failure?.code).toBe('AGENT_MAX_RETRIES_EXCEEDED');
+            expect(result.failure?.userMessage).toContain('maximum retries');
         }, 10000);
 
-        it('补偿重试超过限制时应移除空响应消息', async () => {
+        it('空响应重试超过限制时应移除空响应消息', async () => {
             mockProvider.generate = async () => {
                 return {
                     id: 'empty',
@@ -605,19 +570,20 @@ describe('Agent 各类错误重试测试', () => {
                 stream: false,
                 memoryManager,
                 maxLoops: 10,
-                maxCompensationRetries: 1,
+                maxRetries: 1,
+                retryDelayMs: 1,
             });
 
             await agent.executeWithResult('Hello');
 
-            // 补偿重试超过限制后，空响应消息应该被移除
+            // 重试超过限制后，空响应消息应该被移除
             // Session 中应该只有：系统消息 + 用户消息（没有助手空响应）
             const messages = agent.getMessages();
             const assistantMessages = messages.filter((m) => m.role === 'assistant');
             expect(assistantMessages.length).toBe(0); // 没有助手消息（空响应被移除）
         }, 10000);
 
-        it('补偿重试次数与普通重试次数独立计算', async () => {
+        it('空响应重试与其他可重试错误共享普通重试计数', async () => {
             const { LLMRetryableError } = await import('../../providers');
             let callCount = 0;
 
@@ -628,7 +594,7 @@ describe('Agent 各类错误重试测试', () => {
                     throw new LLMRetryableError('Server error', 10, 'SERVER_500');
                 }
                 if (callCount <= 3) {
-                    // 第 2、3 次：空响应（触发补偿重试）
+                    // 第 2、3 次：空响应（触发普通重试）
                     return {
                         id: `empty-${callCount}`,
                         choices: [
@@ -660,7 +626,6 @@ describe('Agent 各类错误重试测试', () => {
                 memoryManager,
                 maxLoops: 10,
                 maxRetries: 3,
-                maxCompensationRetries: 2,
                 retryDelayMs: 10,
             });
 
@@ -1286,7 +1251,7 @@ describe('Agent 流式模式重试测试', () => {
         expect(failCount).toBe(1);
     }, 10000);
 
-    it('流式模式空响应应该触发补偿重试', async () => {
+    it('流式模式空响应应该触发普通重试', async () => {
         let callCount = 0;
 
         mockProvider.generate = async () => {
@@ -1321,7 +1286,8 @@ describe('Agent 流式模式重试测试', () => {
             stream: true,
             memoryManager,
             maxLoops: 10,
-            maxCompensationRetries: 2,
+            maxRetries: 2,
+            retryDelayMs: 1,
         });
 
         const result = await agent.execute('Hello');

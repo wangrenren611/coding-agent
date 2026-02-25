@@ -23,6 +23,7 @@ const RESET = '\x1b[0m';
 // 状态追踪
 let isReasoning = false;
 let isTexting = false;
+let lastStatusSignature = '';
 
 // 子 Agent 缩进前缀
 const SUBAGENT_PREFIX = '  '; // 2 空格缩进
@@ -107,6 +108,11 @@ function handleSingleMessage(message: BaseAgentEvent, indent: string = '') {
         // ==================== 状态更新 ====================
         case AgentMessageType.STATUS:
             const state = message.payload.state;
+            const signature = `${indent}|${state}|${message.payload.message || ''}|${message.payload.meta?.retry?.attempt || 0}`;
+            if (signature === lastStatusSignature) {
+                break;
+            }
+            lastStatusSignature = signature;
             const statusIcons: Record<string, string> = {
                 idle: '⏸️',
                 thinking: '🤔',
@@ -244,7 +250,7 @@ async function demo1() {
     let agent: Agent | undefined;
     try {
         agent = new Agent({
-            provider: ProviderRegistry.createFromEnv('qwen-glm-5', {
+            provider: ProviderRegistry.createFromEnv('qwen3.5-plus', {
                 temperature: 0.3,
             }),
             systemPrompt: operatorPrompt({
@@ -252,11 +258,11 @@ async function demo1() {
                 language: 'Chinese',
             }),
             // 单次 LLM 请求超时（5 分钟）
-            requestTimeout: 1000 * 60 * 5,
+            requestTimeout: 1000 * 60 * 3,
             // 如需恢复会话，请取消注释并填入有效 sessionId
             //    sessionId: 'agent-7',
             // sessionId: 'agent-8',
-            sessionId: 'agent-27',
+            sessionId: 'agent-30',
             //   sessionId:'18a09614-bb1e-4f06-b685-d040ff08c3aa',
 
             stream: true,
@@ -304,7 +310,7 @@ async function demo1() {
         console.log(`消息数: ${agent.getMessages().length}`);
     } catch (error) {
         console.error('\n❌ demo1 执行失败:', error);
-        process.exitCode = 1;
+        // process.exitCode = 1;
     } finally {
         await memoryManager.close();
     }

@@ -22,6 +22,7 @@ export type {
     LLMRequestMessage,
     FinishReason,
     LLMResponse,
+    StreamChunkError,
     Chunk,
     StreamCallback,
     Tool,

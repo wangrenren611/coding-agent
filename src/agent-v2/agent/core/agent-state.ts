@@ -22,8 +22,6 @@ export interface AgentStateConfig {
     maxLoops: number;
     /** 最大重试次数 */
     maxRetries: number;
-    /** 最大补偿重试次数 */
-    maxCompensationRetries: number;
     /** 默认重试延迟（毫秒） */
     defaultRetryDelayMs: number;
     /** 时间提供者 */
@@ -38,7 +36,6 @@ export interface AgentStateSnapshot {
     loopCount: number;
     retryCount: number;
     totalRetryCount: number;
-    compensationRetryCount: number;
     taskStartTime: number;
     nextRetryDelayMs: number;
     lastFailure?: AgentFailure;
@@ -57,7 +54,6 @@ export class AgentState {
     private _loopCount: number = 0;
     private _retryCount: number = 0;
     private _totalRetryCount: number = 0;
-    private _compensationRetryCount: number = 0;
     private _taskStartTime: number = 0;
     private _nextRetryDelayMs: number;
     private _lastFailure?: AgentFailure;
@@ -87,10 +83,6 @@ export class AgentState {
 
     get totalRetryCount(): number {
         return this._totalRetryCount;
-    }
-
-    get compensationRetryCount(): number {
-        return this._compensationRetryCount;
     }
 
     get taskStartTime(): number {
@@ -126,13 +118,6 @@ export class AgentState {
     }
 
     /**
-     * 检查是否超过最大补偿重试次数
-     */
-    isCompensationRetryExceeded(): boolean {
-        return this._compensationRetryCount >= this.config.maxCompensationRetries;
-    }
-
-    /**
      * 检查是否处于忙碌状态
      */
     isBusy(): boolean {
@@ -163,7 +148,6 @@ export class AgentState {
         this._loopCount = 0;
         this._retryCount = 0;
         this._totalRetryCount = 0;
-        this._compensationRetryCount = 0;
         this._nextRetryDelayMs = this.config.defaultRetryDelayMs;
         this._lastFailure = undefined;
         this._abortController = new AbortController();
@@ -182,8 +166,6 @@ export class AgentState {
      */
     recordSuccess(): void {
         this._retryCount = 0;
-        // 注意：不重置 compensationRetryCount
-        // 补偿重试次数在整个任务期间累计，防止 LLM 持续返回空响应
         this._nextRetryDelayMs = this.config.defaultRetryDelayMs;
     }
 
@@ -194,13 +176,6 @@ export class AgentState {
         this._retryCount++;
         this._totalRetryCount++;
         this._nextRetryDelayMs = retryDelayMs ?? this.config.defaultRetryDelayMs;
-    }
-
-    /**
-     * 记录补偿重试
-     */
-    recordCompensationRetry(): void {
-        this._compensationRetryCount++;
     }
 
     /**
@@ -258,7 +233,6 @@ export class AgentState {
             loopCount: this._loopCount,
             retryCount: this._retryCount,
             totalRetryCount: this._totalRetryCount,
-            compensationRetryCount: this._compensationRetryCount,
             taskStartTime: this._taskStartTime,
             nextRetryDelayMs: this._nextRetryDelayMs,
             lastFailure: this._lastFailure,

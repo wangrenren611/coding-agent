@@ -372,6 +372,36 @@ describe('OpenAICompatibleProvider', () => {
             expect(hasStop).toBe(true);
         });
 
+        it('should parse SSE data lines without a space after data colon', async () => {
+            const mockChunks = [
+                'data:{"id":"c1","index":0,"choices":[{"index":0,"delta":{"content":"Hello"}}]}\n\n',
+                'data:{"id":"c2","index":0,"choices":[{"index":0,"delta":{"content":" world"}}]}\n\n',
+                'data:[DONE]\n\n',
+            ];
+
+            const stream = new ReadableStream({
+                async start(controller) {
+                    for (const chunk of mockChunks) {
+                        controller.enqueue(new TextEncoder().encode(chunk));
+                    }
+                    controller.close();
+                },
+            });
+
+            vi.spyOn(provider.httpClient, 'fetch').mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                body: stream,
+            } as Response);
+
+            const streamResult = provider.generate([{ role: 'user', content: 'Hi' }], {
+                stream: true,
+            }) as AsyncGenerator<Chunk>;
+            const chunks = await collectChunks(streamResult);
+
+            expect(collectTextFromChunks(chunks)).toBe('Hello world');
+        });
+
         it('should update metadata from stream chunks', async () => {
             const mockChunks = [
                 'data: {"id": "test-id", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4", "index": 0, "choices": [{"index": 0, "delta": {"content": "Hi"}}]}\n\n',
