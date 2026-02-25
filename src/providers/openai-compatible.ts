@@ -58,7 +58,7 @@ export class OpenAICompatibleProvider extends LLMProvider {
         // 规范化 baseURL（移除末尾斜杠）
         const normalizedBaseURL = config.baseURL.replace(/\/$/, '');
         this.config = { ...config, baseURL: normalizedBaseURL };
-        this.timeout = config.timeout ?? 1000 * 60 * 10; // 10 minutes
+        this.timeout = config.timeout ?? 1000 * 60 * 3; // 3 minutes (Agent 层控制实际超时)
         
         // 初始化 HTTP 客户端
         this.httpClient = new HTTPClient({

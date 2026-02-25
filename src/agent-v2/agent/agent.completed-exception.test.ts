@@ -301,7 +301,8 @@ describe('Agent completed and exception scenarios', () => {
     const result = await agent.executeWithResult('hello');
 
     expect(result.status).toBe('failed');
-    expect(result.failure?.code).toBe('AGENT_RUNTIME_ERROR');
+    // LLM 返回无效响应时，应该返回 LLM_RESPONSE_INVALID 错误码
+    expect(result.failure?.code).toBe('LLM_RESPONSE_INVALID');
 
     const hasErrorEvent = events.some(
       (e) =>

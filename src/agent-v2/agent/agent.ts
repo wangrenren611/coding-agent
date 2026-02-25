@@ -30,7 +30,18 @@ import { EventBus, EventType } from "../eventbus";
 import { Message } from "../session/types";
 import { createDefaultToolRegistry } from "../tool";
 
-import { AgentError, CompensationRetryError } from "./errors";
+import { 
+    AgentError, 
+    CompensationRetryError,
+    AgentAbortedError,
+    AgentBusyError,
+    AgentMaxRetriesExceededError,
+    AgentCompensationRetryExceededError,
+    AgentConfigurationError,
+    AgentValidationError,
+    LLMRequestError,
+    LLMResponseInvalidError,
+} from "./errors";
 import {
     AgentExecutionResult,
     AgentFailure,
@@ -204,7 +215,7 @@ export class Agent {
         try {
             await this.runLoop(options);
             if (this.agentState.isAborted()) {
-                throw new AgentError('Task was aborted.');
+                throw new AgentAbortedError();
             }
             this.completeTask();
             return this.getFinalMessage();
@@ -278,7 +289,7 @@ export class Agent {
 
     private validateAndGetProvider(config: AgentOptions): AgentOptions['provider'] {
         if (!config.provider) {
-            throw new AgentError('Provider is required');
+            throw new AgentConfigurationError('Provider is required');
         }
         return config.provider;
     }
@@ -286,13 +297,13 @@ export class Agent {
     private validateInput(query: MessageContent): void {
         const result = this.inputValidator.validate(query);
         if (!result.valid) {
-            throw new AgentError(result.error || 'Invalid input');
+            throw new AgentValidationError(result.error || 'Invalid input');
         }
     }
 
     private ensureIdle(): void {
         if (this.agentState.isBusy()) {
-            throw new AgentError(`Agent is not idle, current status: ${this.agentState.status}`);
+            throw new AgentBusyError(this.agentState.status);
         }
     }
 
@@ -315,7 +326,7 @@ export class Agent {
 
             if (this.agentState.isRetryExceeded()) {
                 const reasonSuffix = this.pendingRetryReason ? ` Last error: ${this.pendingRetryReason}` : '';
-                throw new AgentError(`Agent failed after maximum retries.${reasonSuffix}`);
+                throw new AgentMaxRetriesExceededError(reasonSuffix || undefined);
             }
 
             if (this.checkComplete()) {
@@ -350,9 +361,9 @@ export class Agent {
         // 补偿重试：空响应
         if (error instanceof CompensationRetryError) {
             if (this.agentState.isCompensationRetryExceeded()) {
-                throw new AgentError('Agent failed after maximum compensation retries.');
+                throw new AgentCompensationRetryExceededError();
             }
-            this.session.removeLastMessage();
+            // 空响应已在 executeLLMCall 中移除，这里只需记录状态
             this.agentState.recordCompensationRetry();
             this.agentState.setStatus(AgentStatus.RETRYING);
             this.emitter.emitStatus(
@@ -510,7 +521,7 @@ export class Agent {
         
         // 验证消息列表有效性
         if (messages.length === 0 || messages.every(m => m.role === 'system')) {
-            throw new AgentError('No valid messages to send to LLM');
+            throw new LLMRequestError('No valid messages to send to LLM');
         }
         
         const tools = this.toolRegistry.toLLMTools();
@@ -526,7 +537,7 @@ export class Agent {
             );
 
             if (!response) {
-                throw new AgentError('LLM returned no response');
+                throw new LLMResponseInvalidError('LLM returned no response');
             }
 
             await this.handleResponse(response, messageId);
@@ -534,6 +545,8 @@ export class Agent {
             // 检查是否为空响应（在 session 添加消息后检查）
             const lastMessage = this.session.getLastMessage();
             if (lastMessage && this.isEmptyResponse(lastMessage)) {
+                // 空响应没有保留价值，立即移除，保证 Session 始终干净
+                this.session.removeLastMessage();
                 throw new CompensationRetryError('Empty response');
             }
         } finally {
@@ -563,7 +576,7 @@ export class Agent {
     private async handleResponse(response: LLMResponse, messageId: string): Promise<void> {
         const choice = response.choices?.[0];
         if (!choice) {
-            throw new AgentError('LLM response missing choices');
+            throw new LLMResponseInvalidError('LLM response missing choices');
         }
 
         const finishReason = getResponseFinishReason(response);
