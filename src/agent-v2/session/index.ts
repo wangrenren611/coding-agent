@@ -116,7 +116,7 @@ export class Session {
             await this.memoryManager.createSession(this.sessionId, this.systemPrompt);
         }
 
-        // 启动时修复 context 协议脏数据（仅更新 context，不触碰 history）
+        // 启动时修复 tool 协议脏数据（同时更新 context + history）
         await this.repairContextToolProtocol();
 
         this.initialized = true;
@@ -239,7 +239,7 @@ export class Session {
             await this.persistQueue;
         }
 
-        // 先修复中断/异常的 tool 协议（仅更新 context，不触碰 history）
+        // 先修复中断/异常的 tool 协议（同时更新 context + history）
         await this.repairContextToolProtocol();
 
         if (!this.compaction) {
@@ -356,19 +356,28 @@ export class Session {
     // ==================== 工具调用修复 ====================
 
     /**
-     * 修复异常中断导致的 tool 协议脏数据（仅修复 context）
+     * 修复异常中断导致的 tool 协议脏数据（修复 context，并同步 history）
      */
     private async repairContextToolProtocol(): Promise<void> {
+        const originalMessages = [...this.messages];
         const { messages, changed } = this.normalizeContextToolProtocol(this.messages);
         if (!changed) {
             return;
         }
 
         this.messages = messages;
-        await this.persistContextOnly();
+        await this.persistProtocolRepair(originalMessages, messages);
     }
 
-    private async persistContextOnly(): Promise<void> {
+    private async persistProtocolRepair(originalMessages: Message[], normalizedMessages: Message[]): Promise<void> {
+        if (!this.memoryManager) return;
+
+        // 先同步 history（新增/更新/排除），最后再强制回写 context 顺序。
+        await this.syncRepairIntoHistory(originalMessages, normalizedMessages);
+        await this.persistContextSnapshot(normalizedMessages);
+    }
+
+    private async persistContextSnapshot(messages: Message[]): Promise<void> {
         if (!this.memoryManager) return;
 
         const context = await this.memoryManager.getCurrentContext(this.sessionId);
@@ -377,8 +386,40 @@ export class Session {
         await this.memoryManager.saveCurrentContext({
             ...context,
             version: (context.version ?? 0) + 1,
-            messages: [...this.messages],
+            messages: [...messages],
         });
+    }
+
+    private async syncRepairIntoHistory(originalMessages: Message[], normalizedMessages: Message[]): Promise<void> {
+        if (!this.memoryManager) return;
+
+        const originalById = new Map(originalMessages.map((message) => [message.messageId, message]));
+        const normalizedById = new Map(normalizedMessages.map((message) => [message.messageId, message]));
+
+        // 1) 更新已有消息（会同时更新 context + history）
+        for (const [messageId, normalized] of normalizedById.entries()) {
+            const original = originalById.get(messageId);
+            if (!original) continue;
+            if (this.isMessageEquivalent(original, normalized)) continue;
+            const { messageId: _ignored, ...updates } = normalized;
+            await this.memoryManager.updateMessageInContext(this.sessionId, messageId, updates);
+        }
+
+        // 2) 排除已移除消息（history 会标记 excludedFromContext）
+        for (const [messageId] of originalById.entries()) {
+            if (normalizedById.has(messageId)) continue;
+            await this.memoryManager.removeMessageFromContext(this.sessionId, messageId, 'invalid_response');
+        }
+
+        // 3) 新增修复消息（写入 context + history）
+        for (const [messageId, normalized] of normalizedById.entries()) {
+            if (originalById.has(messageId)) continue;
+            await this.memoryManager.addMessageToContext(this.sessionId, normalized);
+        }
+    }
+
+    private isMessageEquivalent(left: Message, right: Message): boolean {
+        return JSON.stringify(left) === JSON.stringify(right);
     }
 
     private normalizeContextToolProtocol(messages: Message[]): { messages: Message[]; changed: boolean } {

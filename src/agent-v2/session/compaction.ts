@@ -334,7 +334,11 @@ export class Compaction {
             ? `${SUMMARY_PROMPT}\n\n<previous_summary>\n${previousSummary}\n</previous_summary>\n\n<current_message_history>\n${historyText}\n</current_message_history>`
             : `${SUMMARY_PROMPT}\n\n<current_message_history>\n${historyText}\n</current_message_history>`;
 
-        const response = await this.llmProvider.generate([{ role: 'user', content: userContent }]);
+        const summaryAbortSignal = this.createSummaryAbortSignal();
+        const response = await this.llmProvider.generate(
+            [{ role: 'user', content: userContent }],
+            summaryAbortSignal ? { abortSignal: summaryAbortSignal } : undefined
+        );
 
         console.log('[Compaction] 摘要生成完成');
 
@@ -402,6 +406,24 @@ export class Compaction {
     private estimateTokens(text: string): number {
         if (!text) return 0;
         return Math.ceil(text.length / 4);
+    }
+
+    private createSummaryAbortSignal(): AbortSignal | undefined {
+        const timeoutMs = this.normalizeTimeoutMs(this.llmProvider.getTimeTimeout());
+        if (!timeoutMs) return undefined;
+
+        try {
+            return AbortSignal.timeout(timeoutMs);
+        } catch {
+            return undefined;
+        }
+    }
+
+    private normalizeTimeoutMs(value: number | undefined): number | undefined {
+        if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+            return undefined;
+        }
+        return value;
     }
 
     /**

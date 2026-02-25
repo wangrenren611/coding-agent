@@ -28,6 +28,7 @@ interface ToolCallShape {
 class MockSummaryProvider extends LLMProvider {
     public generateCallCount = 0;
     public lastSummaryInput = '';
+    public lastOptions?: LLMGenerateOptions;
 
     constructor() {
         super({
@@ -45,6 +46,7 @@ class MockSummaryProvider extends LLMProvider {
         _options?: LLMGenerateOptions
     ): Promise<LLMResponse | null> | AsyncGenerator<Chunk> {
         this.generateCallCount++;
+        this.lastOptions = _options;
         const first = _messages[0];
         this.lastSummaryInput = typeof first?.content === 'string' ? first.content : JSON.stringify(first?.content);
         return Promise.resolve({
@@ -220,6 +222,28 @@ describe('Session Compaction', () => {
             expect(messages.findIndex((m) => m.messageId === 'assistant-tool-1')).toBeLessThan(
                 messages.findIndex((m) => m.messageId === 'tool-result-1')
             );
+        });
+
+        it('压缩摘要请求应携带 abortSignal', async () => {
+            const provider = new MockSummaryProvider();
+            const session = new Session({
+                systemPrompt: '你是测试助手',
+                enableCompaction: true,
+                provider,
+                compactionConfig: {
+                    maxTokens: 260,
+                    maxOutputTokens: 120,
+                    keepMessagesNum: 3,
+                    triggerRatio: 0.9,
+                },
+            });
+
+            seedSession(session);
+            const compacted = await session.compactBeforeLLMCall();
+
+            expect(compacted).toBe(true);
+            expect(provider.generateCallCount).toBe(1);
+            expect(provider.lastOptions?.abortSignal).toBeInstanceOf(AbortSignal);
         });
 
         it('持久化后的消息结构有效', async () => {

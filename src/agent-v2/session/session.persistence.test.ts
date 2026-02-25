@@ -130,7 +130,8 @@ describe('Session persistence queue', () => {
         const interruptedToolInHistory = historyAfterRepair.filter(
             (msg) => msg.role === 'tool' && String(msg.content || '').includes('TOOL_CALL_INTERRUPTED')
         );
-        expect(interruptedToolInHistory).toHaveLength(0);
+        expect(interruptedToolInHistory).toHaveLength(2);
+        expect(interruptedToolInHistory.every((msg) => msg.excludedFromContext !== true)).toBe(true);
     });
 
     it('should only repair missing tool results when some tool calls are already completed', async () => {
@@ -193,12 +194,13 @@ describe('Session persistence queue', () => {
 
         const historyAfterRepair = await memoryManager.getFullHistory({ sessionId });
         const toolHistory = historyAfterRepair.filter((msg) => msg.role === 'tool');
-        expect(toolHistory).toHaveLength(1);
-        expect(toolHistory[0].tool_call_id).toBe('call_a');
-        expect(String(toolHistory[0].content || '')).not.toContain('TOOL_CALL_INTERRUPTED');
+        expect(toolHistory).toHaveLength(2);
+        expect(toolHistory.map((msg) => msg.tool_call_id)).toEqual(['call_a', 'call_b']);
+        expect(String(toolHistory[0].content || '')).toContain('"output":"ok"');
+        expect(String(toolHistory[1].content || '')).toContain('TOOL_CALL_INTERRUPTED');
     });
 
-    it('should repair interleaved tool result in context only and keep history untouched', async () => {
+    it('should repair interleaved tool result in context and keep raw history via exclusion markers', async () => {
         const sessionId = 'session-repair-interleaved-tool-result';
         const session = new Session({
             sessionId,
@@ -254,13 +256,19 @@ describe('Session persistence queue', () => {
 
         const fullHistory = await memoryManager.getFullHistory({ sessionId });
         const historyTools = fullHistory.filter((msg) => msg.role === 'tool');
-        expect(historyTools).toHaveLength(1);
-        expect(historyTools[0].tool_call_id).toBe('call_ctx_1');
-        expect(String(historyTools[0].content || '')).toContain('"output":"late"');
-        expect(String(historyTools[0].content || '')).not.toContain('TOOL_CALL_INTERRUPTED');
+        expect(historyTools).toHaveLength(2);
+
+        const repairedInHistory = historyTools.find((msg) => String(msg.content || '').includes('TOOL_CALL_INTERRUPTED'));
+        expect(repairedInHistory?.tool_call_id).toBe('call_ctx_1');
+        expect(repairedInHistory?.excludedFromContext).not.toBe(true);
+
+        const lateRawInHistory = historyTools.find((msg) => String(msg.content || '').includes('"output":"late"'));
+        expect(lateRawInHistory?.tool_call_id).toBe('call_ctx_1');
+        expect(lateRawInHistory?.excludedFromContext).toBe(true);
+        expect(lateRawInHistory?.excludedReason).toBe('invalid_response');
     });
 
-    it('should drop duplicate/unexpected tool results in context and keep raw history', async () => {
+    it('should drop duplicate/unexpected tool results in context and keep raw history as excluded entries', async () => {
         const sessionId = 'session-repair-duplicate-tool-results';
         const session = new Session({
             sessionId,
@@ -328,9 +336,20 @@ describe('Session persistence queue', () => {
 
         const fullHistory = await memoryManager.getFullHistory({ sessionId });
         const historyTools = fullHistory.filter((msg) => msg.role === 'tool');
-        expect(historyTools).toHaveLength(3);
-        expect(historyTools.map((msg) => msg.tool_call_id)).toEqual(['call_keep', 'call_keep', 'call_unknown']);
-        expect(historyTools.some((msg) => String(msg.content || '').includes('TOOL_CALL_INTERRUPTED'))).toBe(false);
+        expect(historyTools).toHaveLength(4);
+        expect(historyTools.map((msg) => msg.tool_call_id)).toEqual(['call_keep', 'call_keep', 'call_unknown', 'call_missing']);
+
+        const duplicateRaw = historyTools.find((msg) => String(msg.content || '').includes('"output":"duplicate"'));
+        expect(duplicateRaw?.excludedFromContext).toBe(true);
+        expect(duplicateRaw?.excludedReason).toBe('invalid_response');
+
+        const unexpectedRaw = historyTools.find((msg) => String(msg.content || '').includes('"output":"unknown"'));
+        expect(unexpectedRaw?.excludedFromContext).toBe(true);
+        expect(unexpectedRaw?.excludedReason).toBe('invalid_response');
+
+        const repaired = historyTools.find((msg) => String(msg.content || '').includes('TOOL_CALL_INTERRUPTED'));
+        expect(repaired?.tool_call_id).toBe('call_missing');
+        expect(repaired?.excludedFromContext).not.toBe(true);
     });
 
     it('should remove message from context while preserving full history', async () => {

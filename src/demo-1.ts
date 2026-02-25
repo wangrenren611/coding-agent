@@ -262,7 +262,7 @@ async function demo1() {
             // 如需恢复会话，请取消注释并填入有效 sessionId
             //    sessionId: 'agent-7',
             // sessionId: 'agent-8',
-            sessionId: 'agent-30',
+            sessionId: 'agent-31',
             //   sessionId:'18a09614-bb1e-4f06-b685-d040ff08c3aa',
 
             stream: true,

@@ -59,6 +59,98 @@ describe('HTTPClient timeout behavior', () => {
         expect(elapsedMs).toBeLessThan(simulatedSlowFetchMs);
     });
 
+    it('should apply defaultTimeoutMs when upstream signal is not provided', async () => {
+        const timeoutMs = 80;
+        const simulatedSlowFetchMs = 1000;
+
+        vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
+            const signal = init?.signal;
+            await new Promise<void>((resolve, reject) => {
+                const timer = setTimeout(resolve, simulatedSlowFetchMs);
+                if (signal) {
+                    if (signal.aborted) {
+                        clearTimeout(timer);
+                        reject(new DOMException('Aborted', 'AbortError'));
+                        return;
+                    }
+
+                    signal.addEventListener(
+                        'abort',
+                        () => {
+                            clearTimeout(timer);
+                            reject(new DOMException('Aborted', 'AbortError'));
+                        },
+                        { once: true }
+                    );
+                }
+            });
+            throw new Error('should not reach successful fetch path');
+        });
+
+        const client = new HTTPClient({ defaultTimeoutMs: timeoutMs });
+
+        const startedAt = Date.now();
+        const error = await client.fetch('https://example.test/default-timeout').then(
+            () => null,
+            (err) => err
+        );
+        const elapsedMs = Date.now() - startedAt;
+
+        expect(error).toBeInstanceOf(LLMRetryableError);
+        expect((error as LLMRetryableError).code).toBe('TIMEOUT');
+        expect(elapsedMs).toBeGreaterThanOrEqual(40);
+        expect(elapsedMs).toBeLessThan(simulatedSlowFetchMs);
+    });
+
+    it('should not apply defaultTimeoutMs when upstream signal is provided', async () => {
+        const defaultTimeoutMs = 20;
+        const userAbortMs = 80;
+        const simulatedSlowFetchMs = 1000;
+
+        vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
+            const signal = init?.signal;
+            await new Promise<void>((resolve, reject) => {
+                const timer = setTimeout(resolve, simulatedSlowFetchMs);
+                if (signal) {
+                    if (signal.aborted) {
+                        clearTimeout(timer);
+                        reject(new DOMException('Aborted', 'AbortError'));
+                        return;
+                    }
+
+                    signal.addEventListener(
+                        'abort',
+                        () => {
+                            clearTimeout(timer);
+                            reject(new DOMException('Aborted', 'AbortError'));
+                        },
+                        { once: true }
+                    );
+                }
+            });
+            throw new Error('should not reach successful fetch path');
+        });
+
+        const client = new HTTPClient({ defaultTimeoutMs });
+        const controller = new AbortController();
+        setTimeout(() => controller.abort(), userAbortMs);
+
+        const startedAt = Date.now();
+        const error = await client
+            .fetch('https://example.test/user-abort', {
+                signal: controller.signal,
+            })
+            .then(
+                () => null,
+                (err) => err
+            );
+        const elapsedMs = Date.now() - startedAt;
+
+        expect(error).toBeInstanceOf(LLMAbortedError);
+        expect(elapsedMs).toBeGreaterThanOrEqual(50);
+        expect(elapsedMs).toBeLessThan(simulatedSlowFetchMs);
+    });
+
     it('should handle user abort signal (not timeout)', async () => {
         const simulatedSlowFetchMs = 1000;
 

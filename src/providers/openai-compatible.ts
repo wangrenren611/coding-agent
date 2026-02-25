@@ -5,8 +5,8 @@
  *
  * 超时控制说明：
  * - Provider 的 timeout 属性仅作为 Agent.requestTimeout 的默认回退值
- * - 实际超时信号由 Agent/LLMCaller 层创建，通过 options.abortSignal 传入
- * - HTTPClient 不再创建额外的超时信号
+ * - 实际超时信号通常由 Agent/LLMCaller 层创建，通过 options.abortSignal 传入
+ * - standalone 调用未传 abortSignal 时，HTTPClient 使用 provider timeout 作为兜底
  *
  * @example
  * ```typescript
@@ -69,9 +69,10 @@ export class OpenAICompatibleProvider extends LLMProvider {
         // 保存默认超时（供 Agent 回退使用）
         this.defaultTimeout = config.timeout ?? PROVIDER_DEFAULT_TIMEOUT;
 
-        // 初始化 HTTP 客户端（不再传递 timeout）
+        // 初始化 HTTP 客户端（standalone 调用时使用 provider timeout 兜底）
         this.httpClient = new HTTPClient({
             debug: config.debug ?? false,
+            defaultTimeoutMs: this.defaultTimeout,
         });
 
         // 初始化 Adapter（未提供则使用标准适配器）

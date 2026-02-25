@@ -3,13 +3,14 @@
  *
  * 提供统一的 HTTP 客户端，具有以下功能：
  * - 单次请求执行（不包含重试）
- * - Abort 信号支持（超时由上层 Agent/LLMCaller 控制）
+ * - Abort 信号支持（优先使用上层传入 signal）
+ * - 可选默认超时兜底（调用方未传 signal 时生效）
  * - 与 LLM 错误类型集成的错误处理
  *
  * 超时控制设计：
- * - 本层不创建超时信号，完全依赖外部传入的 signal
- * - Agent 层通过 LLMCaller 创建 AbortSignal.timeout() 控制超时
- * - 这样确保超时行为统一、可预测
+ * - Agent 层通过 LLMCaller 创建 AbortSignal.timeout() 控制主链路超时
+ * - 当调用方未传 signal 且配置了 defaultTimeoutMs，本层会创建兜底超时信号
+ * - 这样兼顾统一控制与 standalone 调用安全性
  */
 
 import { LLMError, LLMAbortedError, LLMRetryableError, createErrorFromStatus } from '../types';
@@ -17,6 +18,8 @@ import { LLMError, LLMAbortedError, LLMRetryableError, createErrorFromStatus } f
 export interface HttpClientOptions {
     /** 启用调试日志 */
     debug?: boolean;
+    /** 默认超时（毫秒，仅在调用方未传 signal 时生效） */
+    defaultTimeoutMs?: number;
 }
 
 export interface RequestInitWithOptions extends RequestInit {
@@ -26,13 +29,16 @@ export interface RequestInitWithOptions extends RequestInit {
 /**
  * HTTP 客户端
  *
- * 超时由调用方通过 options.signal 传入（通常已包含 AbortSignal.timeout）
+ * 超时优先由调用方通过 options.signal 传入；
+ * 如未传入且配置了 defaultTimeoutMs，会自动应用默认超时信号。
  */
 export class HTTPClient {
     readonly debug: boolean;
+    readonly defaultTimeoutMs?: number;
 
     constructor(options: HttpClientOptions = {}) {
         this.debug = options.debug ?? false;
+        this.defaultTimeoutMs = this.normalizeTimeoutMs(options.defaultTimeoutMs);
     }
 
     /**
@@ -42,8 +48,9 @@ export class HTTPClient {
      * @param options - 请求选项，signal 应已包含超时逻辑
      */
     async fetch(url: string, options: RequestInitWithOptions = {}): Promise<Response> {
+        const requestOptions = this.applyDefaultSignal(options);
         try {
-            const response = await this.executeFetch(url, options);
+            const response = await this.executeFetch(url, requestOptions);
 
             // 检查 HTTP 错误
             if (!response.ok) {
@@ -53,7 +60,7 @@ export class HTTPClient {
 
             return response;
         } catch (rawError) {
-            throw this.normalizeError(rawError, options.signal ?? undefined);
+            throw this.normalizeError(rawError, requestOptions.signal ?? undefined);
         }
     }
 
@@ -196,5 +203,22 @@ export class HTTPClient {
             return cause.code;
         }
         return undefined;
+    }
+
+    private applyDefaultSignal(options: RequestInitWithOptions): RequestInitWithOptions {
+        if (options.signal || !this.defaultTimeoutMs) {
+            return options;
+        }
+        return {
+            ...options,
+            signal: AbortSignal.timeout(this.defaultTimeoutMs),
+        };
+    }
+
+    private normalizeTimeoutMs(value: number | undefined): number | undefined {
+        if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+            return undefined;
+        }
+        return value;
     }
 }

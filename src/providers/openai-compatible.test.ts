@@ -448,5 +448,52 @@ describe('OpenAICompatibleProvider', () => {
                 })
             ).rejects.toThrow();
         }, 10000);
+
+        it('should fallback to provider timeout when abortSignal is missing', async () => {
+            const timeoutMs = 80;
+            const shortTimeoutProvider = new OpenAICompatibleProvider({
+                apiKey: 'test-api-key',
+                baseURL: 'https://api.example.com',
+                model: 'gpt-4',
+                temperature: 0.7,
+                max_tokens: 2000,
+                LLMMAX_TOKENS: 8000,
+                timeout: timeoutMs,
+                debug: false,
+            });
+
+            const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(
+                async (_input: RequestInfo | URL, init?: RequestInit) => {
+                    const signal = init?.signal;
+                    expect(signal).toBeInstanceOf(AbortSignal);
+
+                    await new Promise<void>((_resolve, reject) => {
+                        if (signal?.aborted) {
+                            reject(new DOMException('Aborted', 'AbortError'));
+                            return;
+                        }
+
+                        signal?.addEventListener(
+                            'abort',
+                            () => {
+                                reject(new DOMException('Aborted', 'AbortError'));
+                            },
+                            { once: true }
+                        );
+                    });
+
+                    throw new Error('should not reach successful fetch path');
+                }
+            );
+
+            const error = await shortTimeoutProvider.generate([{ role: 'user', content: 'Hello' }]).then(
+                () => null,
+                (err) => err
+            );
+            fetchSpy.mockRestore();
+
+            expect(error).toBeInstanceOf(Error);
+            expect((error as Error & { code?: string }).code).toBe('TIMEOUT');
+        }, 10000);
     });
 });
