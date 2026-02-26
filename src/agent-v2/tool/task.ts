@@ -307,6 +307,8 @@ export class TaskTool extends BaseTool<typeof taskRunSchema> {
             systemPrompt: this.buildSubagentSystemPrompt(config.systemPrompt),
             toolRegistry: registry,
             maxRetries: config.maxRetries || 10,
+            // 传递空闲超时配置
+            idleTimeout: config.idleTimeoutMs,
             // 只有在需要事件冒泡时才启用流式输出
             stream: !!bubblingStreamCallback,
             streamCallback: bubblingStreamCallback,

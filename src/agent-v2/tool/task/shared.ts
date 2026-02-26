@@ -78,6 +78,8 @@ export interface AgentConfig {
     tools: ToolClassConstructor[];
     systemPrompt: string;
     maxRetries?: number;
+    /** 空闲超时（毫秒），用于流式请求 */
+    idleTimeoutMs?: number;
 }
 
 export const JsonObjectSchema = z.record(z.string(), z.unknown());

@@ -27,6 +27,7 @@ import type { StatusMeta } from '../stream-types';
 import type { ITimeProvider } from '../core-types';
 import { DefaultTimeProvider } from '../time-provider';
 import type { ResponseValidatorOptions, ValidationResult } from '../response-validator';
+import { IdleTimeoutController } from './idle-timeout-controller';
 
 /**
  * LLM 调用器配置
@@ -40,6 +41,8 @@ export interface LLMCallerConfig {
     maxBufferSize: number;
     /** 请求超时（毫秒） */
     requestTimeoutMs?: number;
+    /** 空闲超时（毫秒），用于流式请求。每次收到数据就重置计时器 */
+    idleTimeoutMs?: number;
     /** 是否启用 thinking 模式 */
     thinking?: boolean;
     /** 时间提供者 */
@@ -113,14 +116,32 @@ export class LLMCaller {
         this.streamProcessor.reset();
         this.streamProcessor.setMessageId(messageId);
 
-        // 合并超时信号
-        const requestTimeout = this.config.requestTimeoutMs ?? this.config.provider.getTimeTimeout();
-        const mergedAbortSignal = AbortSignal.any([
-            this.abortController.signal,
-            AbortSignal.timeout(requestTimeout),
-            ...(abortSignal ? [abortSignal] : []),
-            ...(options?.abortSignal ? [options.abortSignal] : []),
-        ]);
+        // 判断是否为流式请求
+        const isStream = options?.stream ?? this.config.stream;
+
+        // 空闲超时控制器（仅流式请求使用）
+        let idleTimeoutController: IdleTimeoutController | null = null;
+
+        // 构建中止信号数组
+        const signals: AbortSignal[] = [this.abortController.signal];
+
+        if (isStream) {
+            // 流式请求：使用空闲超时（每次收到数据就重置）
+            const idleTimeoutMs = this.config.idleTimeoutMs ?? 3 * 60 * 1000; // 默认 3 分钟
+            idleTimeoutController = new IdleTimeoutController(idleTimeoutMs);
+            signals.push(idleTimeoutController.signal);
+        } else {
+            // 非流式请求：使用固定超时
+            const requestTimeout = this.config.requestTimeoutMs ?? this.config.provider.getTimeTimeout();
+            signals.push(AbortSignal.timeout(requestTimeout));
+        }
+
+        // 添加外部传入的信号
+        if (abortSignal) signals.push(abortSignal);
+        if (options?.abortSignal) signals.push(options.abortSignal);
+
+        // 合并所有信号
+        const mergedAbortSignal = AbortSignal.any(signals);
 
         // 合并配置和传入的 options
         const llmOptions: LLMGenerateOptions = {
@@ -133,10 +154,15 @@ export class LLMCaller {
             abortSignal: mergedAbortSignal,
         };
 
+        // 更新 StreamProcessor 的空闲超时重置回调
+        if (idleTimeoutController) {
+            this.streamProcessor.setResetIdleTimeout(() => idleTimeoutController!.reset());
+        }
+
         try {
             let response: LLMResponse;
 
-            if (llmOptions.stream ?? this.config.stream) {
+            if (isStream) {
                 response = await this.executeStream(messages, llmOptions, messageId);
             } else {
                 response = await this.executeNormal(messages, llmOptions);
@@ -144,6 +170,10 @@ export class LLMCaller {
 
             return { response, messageId };
         } finally {
+            // 清理空闲超时控制器
+            if (idleTimeoutController) {
+                idleTimeoutController.abort();
+            }
             this.cleanup();
         }
     }

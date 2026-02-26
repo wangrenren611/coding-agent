@@ -93,6 +93,15 @@ export interface AgentOptions {
      * - 超时后会触发重试机制（最多 maxRetries 次）
      */
     requestTimeout?: number;
+    /**
+     * 空闲超时时间（毫秒），用于流式请求
+     *
+     * - 默认值：3 分钟
+     * - 每次收到数据就重置计时器，只要持续有数据就不会超时
+     * - 只有超过此时间没有收到数据才会触发超时
+     * - 非流式请求不使用此配置
+     */
+    idleTimeout?: number;
     /** 重试等待时间（毫秒，默认 5000） */
     retryDelayMs?: number;
     /** 是否启用流式输出 */
