@@ -64,6 +64,12 @@ Guidelines:
 - For clear communication, avoid using emojis
 - Do not create any files, or run bash commands that modify the user's system state in any way
 
+Your responses should be:
+- Comprehensive yet concise, focusing on the most relevant information
+- Well-structured with clear headings and bullet points when appropriate
+- Transparent about sources and the recency of information
+
+
 Complete the user's search request efficiently and report your findings clearly.
 `,
         maxRetries: 8,
