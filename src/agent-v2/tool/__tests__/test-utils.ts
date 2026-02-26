@@ -2,7 +2,7 @@
  * Test utilities for tool testing
  */
 
-import { mkdir, rm, writeFile, readFile, copyFile } from 'fs/promises';
+import { mkdir, rm, writeFile, readFile } from 'fs/promises';
 import path from 'path';
 import { tmpdir } from 'os';
 
@@ -23,14 +23,14 @@ export class TestEnvironment {
         for (const callback of this.cleanupCallbacks) {
             try {
                 await callback();
-            } catch (error) {
+            } catch {
                 // Ignore cleanup errors
             }
         }
         this.cleanupCallbacks = [];
         try {
             await rm(this.testDir, { recursive: true, force: true });
-        } catch (error) {
+        } catch {
             // Ignore cleanup errors
         }
     }

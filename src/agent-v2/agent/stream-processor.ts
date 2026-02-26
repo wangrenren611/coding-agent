@@ -34,9 +34,6 @@ import {
     createResponseValidator,
 } from './response-validator';
 
-// 重新导出状态枚举供外部使用
-export { ProcessorState, ContentType } from './processor-state';
-
 /**
  * 内部处理器状态（细粒度状态追踪）
  */
@@ -44,7 +41,7 @@ interface InternalProcessorState {
     /** 是否已中止 */
     aborted: boolean;
     /** 中止原因 */
-    abortReason?: 'manual' | 'buffer_overflow';
+    abortReason?: 'manual' | 'buffer_overflow' | 'validation_violation';
     /** 推理内容是否已开始 */
     reasoningStarted: boolean;
     /** 普通文本是否已开始 */
@@ -182,7 +179,7 @@ export class StreamProcessor {
      */
     processChunk(chunk: Chunk): void {
         if (this.state.aborted) return;
-     
+
         const finishReason = getFinishReason(chunk);
 
         // 1. 更新元数据
@@ -270,7 +267,7 @@ export class StreamProcessor {
         return this.state.aborted;
     }
 
-    getAbortReason(): 'manual' | 'buffer_overflow' | undefined {
+    getAbortReason(): 'manual' | 'buffer_overflow' | 'validation_violation' | undefined {
         return this.state.abortReason;
     }
 
@@ -310,6 +307,9 @@ export class StreamProcessor {
         if (!this.appendToBuffer('reasoning', content)) {
             return;
         }
+        if (!this.validateAfterDelta(content)) {
+            return;
+        }
 
         // 触发开始事件
         if (!this.state.reasoningStarted) {
@@ -340,6 +340,9 @@ export class StreamProcessor {
     ): void {
         // 追加到缓冲区
         if (!this.appendToBuffer('content', content)) {
+            return;
+        }
+        if (!this.validateAfterDelta(content)) {
             return;
         }
 
@@ -468,8 +471,7 @@ export class StreamProcessor {
      * 追加内容到缓冲区
      */
     private appendToBuffer(type: 'reasoning' | 'content', content: string): boolean {
-        const currentSize = type === 'reasoning' ? this.buffers.reasoning.length : this.buffers.content.length;
-
+        const currentSize = this.buffers.reasoning.length + this.buffers.content.length;
         const projectedSize = currentSize + content.length;
 
         if (projectedSize > this.maxBufferSize) {
@@ -482,6 +484,25 @@ export class StreamProcessor {
             this.buffers.reasoning += content;
         } else {
             this.buffers.content += content;
+        }
+
+        return true;
+    }
+
+    /**
+     * 增量验证流式内容
+     */
+    private validateAfterDelta(delta: string): boolean {
+        const result = this.validator.validateIncremental(delta);
+        if (result.valid) {
+            return true;
+        }
+
+        this.options.onValidationViolation?.(result);
+        if (result.action === 'abort') {
+            this.state.aborted = true;
+            this.state.abortReason = 'validation_violation';
+            return false;
         }
 
         return true;

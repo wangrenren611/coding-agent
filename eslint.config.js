@@ -9,6 +9,10 @@ export default tseslint.config(
       '**/dist/**',
       '**/node_modules/**',
       '**/*.test.ts',
+      '**/cli-ui/**/*',
+      '**/cli-ink/**/*',
+      '**/ui/cli/**/*',
+      '**/ui/blessed/**/*',
     ],
   },
   js.configs.recommended,
@@ -41,6 +45,14 @@ export default tseslint.config(
       react: {
         version: 'detect',
       },
+    },
+  }
+  ,
+  {
+    files: ['src/cli/**/*.{ts,tsx}'],
+    rules: {
+      // CLI 使用 OpenTUI 自定义 JSX 属性，不是 DOM 属性
+      'react/no-unknown-property': 'off',
     },
   }
 );

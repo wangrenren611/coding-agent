@@ -13,7 +13,7 @@ import { BaseTool, ToolContext, ToolResult } from './base';
 import { ToolRegistry } from './registry';
 import type { ToolRegistryConfig } from './registry';
 import type { IMemoryManager } from '../memory/types';
-import { AgentMessageType } from '../agent/stream-types';
+import { AgentMessage, AgentMessageType } from '../agent/stream-types';
 import { AGENT_CONFIGS, SubagentTypeSchema } from './task/subagent-config';
 import {
     BackgroundExecution,
@@ -74,7 +74,6 @@ const taskRunSchema = z
         model: z.enum(['sonnet', 'opus', 'haiku']).optional().describe('Optional model hint for this subagent'),
         resume: z.string().min(1).optional().describe('Optional resume token/id (currently informational)'),
         run_in_background: z.boolean().default(false).describe('Run task in background and return task_id immediately'),
-        max_turns: z.number().int().min(1).max(100).optional().describe('Maximum number of agent turns (best-effort)'),
     })
     .strict();
 
@@ -82,6 +81,7 @@ export class TaskTool extends BaseTool<typeof taskRunSchema> {
     name = 'task';
     description = TASK_TOOL_DESCRIPTION;
     schema = taskRunSchema;
+    // Task 启动子 Agent，工具层不额外施加超时，避免被 Registry 提前中断。
     executionTimeoutMs = null;
 
     private provider: LLMProvider;
@@ -94,12 +94,12 @@ export class TaskTool extends BaseTool<typeof taskRunSchema> {
     }
 
     async execute(args: z.infer<typeof this.schema>, context?: ToolContext): Promise<ToolResult> {
-        const { subagent_type, prompt, description, run_in_background, max_turns, model, resume } = args;
+        const { subagent_type, prompt, description, run_in_background, model, resume } = args;
         const config = AGENT_CONFIGS[subagent_type];
         if (!config) {
             return this.result({
                 success: false,
-                metadata: { error: 'INVALID_AGENT_TYPE' } as any,
+                metadata: { error: 'INVALID_AGENT_TYPE' },
                 output: `Invalid agent type: ${subagent_type}`,
             });
         }
@@ -112,7 +112,7 @@ export class TaskTool extends BaseTool<typeof taskRunSchema> {
         let subagent: Agent | undefined;
 
         try {
-            subagent = this.createSubagent(subagent_type, max_turns, {
+            subagent = this.createSubagent(subagent_type, {
                 memoryManager,
                 childSessionId,
                 parentStreamCallback: context?.streamCallback,
@@ -166,7 +166,7 @@ export class TaskTool extends BaseTool<typeof taskRunSchema> {
                         model,
                         resume,
                         storage: execution?.storage || 'memory_fallback',
-                    } as any,
+                    },
                     output: `Task started in background with task_id=${backgroundTaskId}`,
                 });
             }
@@ -213,7 +213,7 @@ export class TaskTool extends BaseTool<typeof taskRunSchema> {
                     model,
                     resume,
                     storage,
-                } as any,
+                },
                 output: result.output,
             });
         } catch (error) {
@@ -222,7 +222,7 @@ export class TaskTool extends BaseTool<typeof taskRunSchema> {
             if (!run_in_background && subagent) {
                 const finishedAt = nowIso();
                 const rawMessages = subagent.getMessages();
-                const toolsUsed = extractToolsUsed(rawMessages as any);
+                const toolsUsed = extractToolsUsed(rawMessages);
                 const output = `Agent execution failed: ${err.message}`;
                 storage = await saveSubTaskRunRecord(
                     memoryManager,
@@ -258,7 +258,7 @@ export class TaskTool extends BaseTool<typeof taskRunSchema> {
                     parent_session_id: parentSessionId,
                     child_session_id: childSessionId,
                     storage,
-                } as any,
+                },
                 output: `Agent execution failed: ${err.message}`,
             });
         }
@@ -266,7 +266,6 @@ export class TaskTool extends BaseTool<typeof taskRunSchema> {
 
     private createSubagent(
         agentType: SubagentType,
-        maxTurns: number | undefined,
         options: {
             memoryManager?: IMemoryManager;
             childSessionId: string;
@@ -287,7 +286,7 @@ export class TaskTool extends BaseTool<typeof taskRunSchema> {
 
         // 创建事件冒泡的 streamCallback
         const bubblingStreamCallback = options.parentStreamCallback
-            ? (msg: any) => {
+            ? (msg: AgentMessage) => {
                   // 将子 Agent 事件包装为 SUBAGENT_EVENT，冒泡到父会话
                   options.parentStreamCallback!({
                       type: AgentMessageType.SUBAGENT_EVENT,
@@ -307,8 +306,7 @@ export class TaskTool extends BaseTool<typeof taskRunSchema> {
             provider: this.provider,
             systemPrompt: this.buildSubagentSystemPrompt(config.systemPrompt),
             toolRegistry: registry,
-            // Note: Agent currently uses this field for retry control, so this is best-effort.
-            maxRetries: maxTurns || config.maxRetries || 10,
+            maxRetries: config.maxRetries || 10,
             // 只有在需要事件冒泡时才启用流式输出
             stream: !!bubblingStreamCallback,
             streamCallback: bubblingStreamCallback,
@@ -423,7 +421,7 @@ Execution context:
         const execution = await subagent.executeWithResult(prompt);
         const turns = subagent.getLoopCount();
         const rawMessages = subagent.getMessages();
-        const toolsUsed = extractToolsUsed(rawMessages as any);
+        const toolsUsed = extractToolsUsed(rawMessages);
         const normalizedMessages = normalizeMessagesForStorage(rawMessages);
         const failure = execution.failure;
 
@@ -492,7 +490,7 @@ export class TaskCreateTool extends BaseTool<typeof taskCreateSchema> {
 
         return this.result({
             success: true,
-            metadata: newTask as any,
+            metadata: newTask,
             output: `Created task ${newTask.id}: ${newTask.subject}`,
         });
     }
@@ -517,14 +515,14 @@ export class TaskGetTool extends BaseTool<typeof taskGetSchema> {
         if (!task) {
             return this.result({
                 success: false,
-                metadata: { error: 'TASK_NOT_FOUND' } as any,
+                metadata: { error: 'TASK_NOT_FOUND' },
                 output: `Task not found: ${taskId}`,
             });
         }
 
         return this.result({
             success: true,
-            metadata: task as any,
+            metadata: task,
             output: `Retrieved task ${task.id}`,
         });
     }
@@ -554,7 +552,7 @@ export class TaskListTool extends BaseTool<typeof taskListSchema> {
             metadata: {
                 count: summaries.length,
                 tasks: summaries,
-            } as any,
+            },
             output: `Listed ${summaries.length} task(s)`,
         });
     }
@@ -586,7 +584,7 @@ export class TaskUpdateTool extends BaseTool<typeof taskUpdateSchema> {
         if (index < 0) {
             return this.result({
                 success: false,
-                metadata: { error: 'TASK_NOT_FOUND' } as any,
+                metadata: { error: 'TASK_NOT_FOUND' },
                 output: `Task not found: ${taskId}`,
             });
         }
@@ -616,7 +614,7 @@ export class TaskUpdateTool extends BaseTool<typeof taskUpdateSchema> {
             await deleteTaskEntry(taskId, context?.sessionId, context?.memoryManager);
             return this.result({
                 success: true,
-                metadata: { taskId, status: 'deleted' } as any,
+                metadata: { taskId, status: 'deleted' },
                 output: `Deleted task ${taskId}`,
             });
         }
@@ -627,7 +625,7 @@ export class TaskUpdateTool extends BaseTool<typeof taskUpdateSchema> {
         if (status && !isStatusTransitionAllowed(current.status, status)) {
             return this.result({
                 success: false,
-                metadata: { error: 'INVALID_STATUS_TRANSITION' } as any,
+                metadata: { error: 'INVALID_STATUS_TRANSITION' },
                 output: `Invalid status transition: ${current.status} -> ${status}`,
             });
         }
@@ -639,7 +637,7 @@ export class TaskUpdateTool extends BaseTool<typeof taskUpdateSchema> {
         if (missingDependencies.length > 0) {
             return this.result({
                 success: false,
-                metadata: { error: 'INVALID_DEPENDENCY', missingDependencies } as any,
+                metadata: { error: 'INVALID_DEPENDENCY', missingDependencies },
                 output: `Invalid dependency task IDs: ${missingDependencies.join(', ')}`,
             });
         }
@@ -686,9 +684,16 @@ export class TaskUpdateTool extends BaseTool<typeof taskUpdateSchema> {
             await saveTaskEntry(touchedTask, context?.sessionId, context?.memoryManager);
         }
         const updated = next.find((task) => task.id === taskId);
+        if (!updated) {
+            return this.result({
+                success: false,
+                metadata: { error: 'TASK_NOT_FOUND' },
+                output: `Task not found: ${taskId}`,
+            });
+        }
         return this.result({
             success: true,
-            metadata: updated as any,
+            metadata: updated,
             output: `Updated task ${taskId}`,
         });
     }
@@ -713,7 +718,7 @@ export class TaskStopTool extends BaseTool<typeof taskStopSchema> {
         if (!execution && !runRecord) {
             return this.result({
                 success: false,
-                metadata: { error: 'TASK_NOT_FOUND' } as any,
+                metadata: { error: 'TASK_NOT_FOUND' },
                 output: `Background task not found: ${taskId || '<empty>'}`,
             });
         }
@@ -728,7 +733,7 @@ export class TaskStopTool extends BaseTool<typeof taskStopSchema> {
                     task_id: taskId,
                     status: runRecord?.status || execution?.status || 'unknown',
                     storage: runRecord ? 'memory_manager' : execution?.storage || 'memory_fallback',
-                } as any,
+                },
                 output: `Task ${taskId} is already ${runRecord?.status || execution?.status || 'finished'}`,
             });
         }
@@ -771,7 +776,7 @@ export class TaskStopTool extends BaseTool<typeof taskStopSchema> {
                 parent_session_id: execution.parentSessionId,
                 child_session_id: execution.childSessionId,
                 storage: execution.storage,
-            } as any,
+            },
             output: finalOutput,
         });
     }

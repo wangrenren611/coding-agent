@@ -244,10 +244,7 @@ export function sanitizeObject<T>(obj: T, options: SanitizeOptions = {}): T {
  */
 export interface ToolExecutionResultLike {
     tool_call_id: string;
-    result?: {
-        success?: boolean;
-        [key: string]: unknown;
-    };
+    result?: unknown;
 }
 
 /**

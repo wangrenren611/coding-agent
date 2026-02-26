@@ -16,7 +16,6 @@ import { ToolCallValidationError, ToolRegistry } from '../../tool/registry';
 import type { ToolContext } from '../../tool/base';
 import type { ToolCall, ToolExecutionResult } from '../core-types';
 import type { Message } from '../../session/types';
-import { createToolResultMessage } from '../message-builder';
 import { sanitizeToolResult as sanitizeToolResultUtil, toolResultToString } from '../../security';
 import { safeParse } from '../../util';
 import { LLMResponseInvalidError } from '../errors';
@@ -173,8 +172,13 @@ export class ToolExecutor {
                 resultMessageId
             );
 
-            // 创建工具结果消息
-            const message = createToolResultMessage(result.tool_call_id, outputText, resultMessageId);
+            const message: Message = {
+                messageId: resultMessageId,
+                role: 'tool',
+                content: outputText,
+                tool_call_id: result.tool_call_id,
+                type: 'tool-result',
+            };
 
             // 添加到会话
             this.config.onMessageAdd?.(message);

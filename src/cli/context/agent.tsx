@@ -10,16 +10,13 @@ import {
     AgentStatus,
     AgentMessage,
     AgentMessageType,
-    ToolRegistry,
     createMemoryManager,
     IMemoryManager,
-    EventType,
     SubagentEventMessage,
 } from '../../agent-v2';
 import { ProviderRegistry } from '../../providers';
 import { operatorPrompt } from '../../agent-v2/prompts/operator';
-import BashTool from '../../agent-v2/tool/bash';
-import type { LLMProvider, ModelId } from '../../providers';
+import type { ModelId } from '../../providers';
 
 const CLI_REQUEST_TIMEOUT_MS = 90 * 1000;
 const CLI_MAX_RETRIES = 2;
@@ -102,7 +99,7 @@ function agentMessageToPart(msg: AgentMessage): MessagePart | null {
             return {
                 id: `text-${msg.msgId || msg.timestamp}`,
                 type: 'text',
-                content: msg.type === AgentMessageType.TEXT_DELTA ? (msg as any).payload.content : '',
+                content: msg.type === AgentMessageType.TEXT_DELTA ? msg.payload.content : '',
             };
         case AgentMessageType.REASONING_START:
         case AgentMessageType.REASONING_DELTA:
@@ -110,55 +107,55 @@ function agentMessageToPart(msg: AgentMessage): MessagePart | null {
             return {
                 id: `reasoning-${msg.msgId || msg.timestamp}`,
                 type: 'reasoning',
-                content: msg.type === AgentMessageType.REASONING_DELTA ? (msg as any).payload.content : '',
+                content: msg.type === AgentMessageType.REASONING_DELTA ? msg.payload.content : '',
             };
         case AgentMessageType.TOOL_CALL_CREATED:
             return {
                 id: `tool-created-${msg.msgId || msg.timestamp}`,
                 type: 'tool-call',
                 content: '',
-                toolName: (msg as any).payload.tool_calls[0]?.toolName,
-                toolArgs: (msg as any).payload.tool_calls[0]?.args,
+                toolName: msg.payload.tool_calls[0]?.toolName,
+                toolArgs: msg.payload.tool_calls[0]?.args,
                 status: 'pending',
             };
         case AgentMessageType.TOOL_CALL_RESULT:
             return {
-                id: `tool-result-${(msg as any).payload.callId}`,
+                id: `tool-result-${msg.payload.callId}`,
                 type: 'tool-result',
                 content: '',
                 toolResult:
-                    typeof (msg as any).payload.result === 'string'
-                        ? (msg as any).payload.result
-                        : JSON.stringify((msg as any).payload.result, null, 2),
-                status: (msg as any).payload.status,
+                    typeof msg.payload.result === 'string'
+                        ? msg.payload.result
+                        : JSON.stringify(msg.payload.result, null, 2),
+                status: msg.payload.status,
             };
         case AgentMessageType.TOOL_CALL_STREAM:
             return {
-                id: `tool-stream-${(msg as any).payload.callId}`,
+                id: `tool-stream-${msg.payload.callId}`,
                 type: 'tool-result',
                 content: '',
-                toolResult: (msg as any).payload.output,
+                toolResult: msg.payload.output,
                 status: 'running',
             };
         case AgentMessageType.CODE_PATCH:
             return {
                 id: `patch-${msg.msgId || msg.timestamp}`,
                 type: 'code-patch',
-                content: (msg as any).payload.diff,
-                patchPath: (msg as any).payload.path,
-                patchLanguage: (msg as any).payload.language,
+                content: msg.payload.diff,
+                patchPath: msg.payload.path,
+                patchLanguage: msg.payload.language,
             };
         case AgentMessageType.STATUS:
             return {
                 id: `status-${msg.timestamp}`,
                 type: 'text',
-                content: `状态: ${(msg as any).payload.state}${(msg as any).payload.message ? ` - ${(msg as any).payload.message}` : ''}`,
+                content: `状态: ${msg.payload.state}${msg.payload.message ? ` - ${msg.payload.message}` : ''}`,
             };
         case AgentMessageType.ERROR:
             return {
                 id: `error-${msg.timestamp}`,
                 type: 'text',
-                content: `错误: ${(msg as any).payload.error}`,
+                content: `错误: ${msg.payload.error}`,
             };
         case AgentMessageType.USAGE_UPDATE:
             return null; // Usage 不显示为消息部分
@@ -219,7 +216,7 @@ function handleSubagentEvent(parts: MessagePart[], subagentMsg: SubagentEventMes
     const host = parts[hostIndex];
 
     if (event.type === AgentMessageType.STATUS) {
-        const state = (event as any).payload.state as AgentStatus;
+        const state = event.payload.state as AgentStatus;
         const nextSubagentStatus =
             state === AgentStatus.COMPLETED
                 ? 'completed'
@@ -255,7 +252,7 @@ function handleSubagentEvent(parts: MessagePart[], subagentMsg: SubagentEventMes
         if (existingPartIndex !== -1) {
             hostSubagentParts[existingPartIndex] = {
                 ...hostSubagentParts[existingPartIndex],
-                content: hostSubagentParts[existingPartIndex].content + (event as any).payload.content,
+                content: hostSubagentParts[existingPartIndex].content + event.payload.content,
             };
         } else {
             hostSubagentParts.push(part);
@@ -265,7 +262,7 @@ function handleSubagentEvent(parts: MessagePart[], subagentMsg: SubagentEventMes
         if (existingPartIndex !== -1) {
             hostSubagentParts[existingPartIndex] = {
                 ...hostSubagentParts[existingPartIndex],
-                toolResult: (hostSubagentParts[existingPartIndex].toolResult || '') + (event as any).payload.output,
+                toolResult: (hostSubagentParts[existingPartIndex].toolResult || '') + event.payload.output,
             };
         } else {
             hostSubagentParts.push(part);
@@ -295,7 +292,6 @@ export const { Provider: AgentProvider, use: useAgent } = createSimpleContext<Ag
 
     const agentRef = useRef<Agent | null>(null);
     const memoryManagerRef = useRef<IMemoryManager | null>(null);
-    const toolRegistryRef = useRef<ToolRegistry | null>(null);
 
     // 初始化
     const init = useCallback(async () => {
@@ -350,7 +346,7 @@ export const { Provider: AgentProvider, use: useAgent } = createSimpleContext<Ag
                     });
                     break;
 
-                case AgentMessageType.TEXT_DELTA:
+                case AgentMessageType.TEXT_DELTA: {
                     const textPartIndex = parts.findIndex((p) => p.id === `text-${msg.msgId}`);
                     if (textPartIndex !== -1) {
                         parts[textPartIndex] = {
@@ -359,6 +355,7 @@ export const { Provider: AgentProvider, use: useAgent } = createSimpleContext<Ag
                         };
                     }
                     break;
+                }
 
                 case AgentMessageType.TEXT_COMPLETE:
                     break;
@@ -371,7 +368,7 @@ export const { Provider: AgentProvider, use: useAgent } = createSimpleContext<Ag
                     });
                     break;
 
-                case AgentMessageType.REASONING_DELTA:
+                case AgentMessageType.REASONING_DELTA: {
                     const reasoningPartIndex = parts.findIndex((p) => p.id === `reasoning-${msg.msgId}`);
                     if (reasoningPartIndex !== -1) {
                         parts[reasoningPartIndex] = {
@@ -380,6 +377,7 @@ export const { Provider: AgentProvider, use: useAgent } = createSimpleContext<Ag
                         };
                     }
                     break;
+                }
 
                 case AgentMessageType.REASONING_COMPLETE:
                     break;
@@ -398,7 +396,7 @@ export const { Provider: AgentProvider, use: useAgent } = createSimpleContext<Ag
                     });
                     break;
 
-                case AgentMessageType.TOOL_CALL_RESULT:
+                case AgentMessageType.TOOL_CALL_RESULT: {
                     const toolPartIndex = parts.findIndex((p) => p.id === `tool-${msg.payload.callId}`);
                     if (toolPartIndex !== -1) {
                         parts[toolPartIndex] = {
@@ -432,8 +430,9 @@ export const { Provider: AgentProvider, use: useAgent } = createSimpleContext<Ag
                         });
                     }
                     break;
+                }
 
-                case AgentMessageType.TOOL_CALL_STREAM:
+                case AgentMessageType.TOOL_CALL_STREAM: {
                     const toolStreamPartId = `tool-result-${msg.payload.callId}`;
                     const toolStreamPartIndex = parts.findIndex((p) => p.id === toolStreamPartId);
                     if (toolStreamPartIndex !== -1) {
@@ -453,6 +452,7 @@ export const { Provider: AgentProvider, use: useAgent } = createSimpleContext<Ag
                         });
                     }
                     break;
+                }
 
                 case AgentMessageType.STATUS:
                     return { ...s, status: msg.payload.state };

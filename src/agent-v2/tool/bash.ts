@@ -42,6 +42,26 @@ interface PolicyDecision {
     reason?: string;
 }
 
+interface BunProcessLike {
+    exited: Promise<number>;
+    stdout: ReadableStream<Uint8Array> | null;
+    stderr: ReadableStream<Uint8Array> | null;
+    kill(): void;
+}
+
+interface BunRuntimeLike {
+    spawn(
+        command: string[],
+        options: {
+            cwd: string;
+            env: NodeJS.ProcessEnv;
+            stdin: 'ignore';
+            stdout: 'pipe';
+            stderr: 'pipe';
+        }
+    ): BunProcessLike;
+}
+
 const DANGEROUS_COMMANDS = new Set([
     'sudo',
     'su',
@@ -66,7 +86,7 @@ const DANGEROUS_COMMANDS = new Set([
 ]);
 
 const ALLOWED_COMMANDS = new Set([
-    "agent-browser",
+    'agent-browser',
     'ls',
     'pwd',
     'cat',
@@ -171,7 +191,7 @@ const ALLOWED_COMMANDS = new Set([
 const DANGEROUS_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
     { pattern: /\brm\s+-rf\s+\/(\s|$)/i, reason: 'Refusing destructive root deletion command' },
     { pattern: /\brm\s+-rf\s+--no-preserve-root\b/i, reason: 'Refusing destructive root deletion command' },
-    { pattern: /:\(\)\s*\{\s*:\|\:&\s*\};:/, reason: 'Refusing fork bomb pattern' },
+    { pattern: /:\(\)\s*\{\s*:\|:&\s*\};:/, reason: 'Refusing fork bomb pattern' },
     { pattern: /\b(curl|wget)[^|\n]*\|\s*(sh|bash|zsh)\b/i, reason: 'Refusing remote script pipe execution' },
     { pattern: /\b(eval|source)\s+<\s*\((curl|wget)\b/i, reason: 'Refusing remote script evaluation' },
     { pattern: /\b(dd)\s+[^|\n]*\bof=\/dev\/(sd|disk|nvme|rdisk)/i, reason: 'Refusing raw disk write command' },
@@ -264,7 +284,7 @@ export default class BashTool extends BaseTool<typeof schema> {
         command: string,
         timeoutMs: number
     ): Promise<{ exitCode: number; all: Buffer; streamed: boolean }> {
-        const bun = (globalThis as { Bun?: any }).Bun;
+        const bun = (globalThis as { Bun?: BunRuntimeLike }).Bun;
         if (!bun || typeof bun.spawn !== 'function') {
             throw new Error('Bun runtime unavailable');
         }
@@ -322,25 +342,27 @@ export default class BashTool extends BaseTool<typeof schema> {
 
     private runInBackground(command: string): { pid: number | undefined; logPath: string } {
         const logPath = path.join(tmpdir(), `agent-bash-bg-${Date.now()}-${randomUUID().slice(0, 8)}.log`);
-        const logFd = fs.openSync(logPath, 'a');
+        fs.writeFileSync(logPath, '', { flag: 'a' });
 
-        try {
-            const shellCommand =
-                process.platform === 'win32' ? ['cmd.exe', '/d', '/s', '/c', command] : ['/bin/bash', '-lc', command];
+        const quotedLogPath =
+            process.platform === 'win32' ? `"${logPath.replace(/"/g, '""')}"` : `'${logPath.replace(/'/g, `'\\''`)}'`;
+        const redirectedCommand = `${command} >> ${quotedLogPath} 2>&1`;
 
-            const child = spawn(shellCommand[0], shellCommand.slice(1), {
-                cwd: process.cwd(),
-                env: process.env,
-                detached: true,
-                stdio: ['ignore', logFd, logFd],
-                windowsHide: true,
-            });
+        const shellCommand =
+            process.platform === 'win32'
+                ? ['cmd.exe', '/d', '/s', '/c', redirectedCommand]
+                : ['/bin/bash', '-lc', redirectedCommand];
 
-            child.unref();
-            return { pid: child.pid, logPath };
-        } finally {
-            fs.closeSync(logFd);
-        }
+        const child = spawn(shellCommand[0], shellCommand.slice(1), {
+            cwd: process.cwd(),
+            env: process.env,
+            detached: true,
+            stdio: 'ignore',
+            windowsHide: true,
+        });
+
+        child.unref();
+        return { pid: child.pid, logPath };
     }
 
     private extractSegmentCommands(command: string): string[] {
@@ -427,7 +449,7 @@ export default class BashTool extends BaseTool<typeof schema> {
         if (!command) {
             return this.result({
                 success: false,
-                metadata: { error: 'COMMAND_REQUIRED' } as any,
+                metadata: { error: 'COMMAND_REQUIRED' },
                 output: 'COMMAND_REQUIRED: Command is required',
             });
         }
@@ -436,7 +458,7 @@ export default class BashTool extends BaseTool<typeof schema> {
         if (!policy.allowed) {
             return this.result({
                 success: false,
-                metadata: { error: 'COMMAND_BLOCKED_BY_POLICY' } as any,
+                metadata: { error: 'COMMAND_BLOCKED_BY_POLICY' },
                 output: `COMMAND_BLOCKED_BY_POLICY: ${policy.reason || 'Command not allowed'}`,
             });
         }
@@ -452,13 +474,13 @@ export default class BashTool extends BaseTool<typeof schema> {
                         pid,
                         logPath,
                         run_in_background: true,
-                    } as any,
+                    },
                     output: `BACKGROUND_STARTED: pid=${pidText}, log=${logPath}`,
                 });
             } catch (error) {
                 return this.result({
                     success: false,
-                    metadata: { error: 'BACKGROUND_START_FAILED' } as any,
+                    metadata: { error: 'BACKGROUND_START_FAILED' },
                     output: `BACKGROUND_START_FAILED: ${String(error)}`,
                 });
             }
@@ -500,14 +522,14 @@ export default class BashTool extends BaseTool<typeof schema> {
             } else {
                 return this.result({
                     success: false,
-                    metadata: { error: `EXIT_CODE_${result.exitCode}` } as any,
+                    metadata: { error: `EXIT_CODE_${result.exitCode}` },
                     output: `EXIT_CODE_${result.exitCode}: Command failed with exit code ${result.exitCode}\n${finalOutput}`,
                 });
             }
         } catch (error) {
             return this.result({
                 success: false,
-                metadata: { error: 'EXECUTION_FAILED' } as any,
+                metadata: { error: 'EXECUTION_FAILED' },
                 output: `EXECUTION_FAILED: ${command} execution failed: ${error}`,
             });
         }

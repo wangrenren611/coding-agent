@@ -151,7 +151,7 @@ export class SkillLoader {
             // 缓存
             this.skillCache.set(name, skill);
             return skill;
-        } catch (error) {
+        } catch {
             // 加载失败，返回 null
             return null;
         }
@@ -219,7 +219,7 @@ export class SkillLoader {
             };
 
             this.metadataMap.set(metadata.name, metadata);
-        } catch (error) {
+        } catch {
             // 静默处理加载错误
         }
     }

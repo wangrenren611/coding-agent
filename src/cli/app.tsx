@@ -7,11 +7,7 @@ import { useRoute } from './context/route';
 import { useTheme } from './context/theme';
 import { Home } from './routes';
 
-export interface AppProps {
-    // 不再需要 provider 参数，agent context 会自动从环境变量创建
-}
-
-export function App(_props: AppProps) {
+export function App() {
     const route = useRoute();
     const { theme } = useTheme();
 

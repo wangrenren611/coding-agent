@@ -127,7 +127,6 @@ describe('AgentState 状态管理测试', () => {
         it('初始重试计数应该是 0', () => {
             expect(state.retryCount).toBe(0);
         });
-
     });
 
     describe('canContinue 逻辑', () => {
@@ -575,7 +574,10 @@ describe('Agent 完成条件判断测试', () => {
             expect(result.status).toBe('completed');
 
             const assistantIndex = capturedMessages.findIndex(
-                (m) => m?.role === 'assistant' && Array.isArray(m?.tool_calls) && m.tool_calls.some((c: any) => c.id === 'call_1')
+                (m) =>
+                    m?.role === 'assistant' &&
+                    Array.isArray(m?.tool_calls) &&
+                    m.tool_calls.some((c: any) => c.id === 'call_1')
             );
             expect(assistantIndex).toBeGreaterThanOrEqual(0);
 
@@ -761,6 +763,161 @@ describe('Agent 重试机制测试', () => {
             expect(successes[0]).toEqual(
                 expect.objectContaining({
                     totalRetries: 1,
+                })
+            );
+        });
+
+        it('should emit TOOL_START and TOOL_SUCCESS events when tool execution succeeds', async () => {
+            let callCount = 0;
+            mockProvider.generate = async () => {
+                callCount += 1;
+                if (callCount === 1) {
+                    return {
+                        id: 'resp-tool-1',
+                        object: 'chat.completion',
+                        created: Date.now(),
+                        model: 'test-model',
+                        choices: [
+                            {
+                                index: 0,
+                                message: {
+                                    role: 'assistant',
+                                    content: '',
+                                    tool_calls: [
+                                        {
+                                            id: 'call_glob_1',
+                                            type: 'function',
+                                            function: {
+                                                name: 'glob',
+                                                arguments: JSON.stringify({ pattern: 'package.json' }),
+                                            },
+                                        },
+                                    ],
+                                },
+                                finish_reason: 'tool_calls',
+                            },
+                        ],
+                    } as any;
+                }
+
+                return {
+                    id: 'resp-tool-2',
+                    object: 'chat.completion',
+                    created: Date.now(),
+                    model: 'test-model',
+                    choices: [
+                        {
+                            index: 0,
+                            message: { role: 'assistant', content: 'done' },
+                            finish_reason: 'stop',
+                        },
+                    ],
+                } as any;
+            };
+
+            const toolStarts: unknown[] = [];
+            const toolSuccesses: unknown[] = [];
+            const toolFailures: unknown[] = [];
+
+            const agent = new Agent({
+                provider: mockProvider as any,
+                systemPrompt: 'Test',
+                stream: false,
+                memoryManager,
+            });
+
+            agent.on(EventType.TOOL_START, (data) => toolStarts.push(data));
+            agent.on(EventType.TOOL_SUCCESS, (data) => toolSuccesses.push(data));
+            agent.on(EventType.TOOL_FAILED, (data) => toolFailures.push(data));
+
+            await agent.execute('Run a tool');
+
+            expect(toolStarts).toHaveLength(1);
+            expect(toolSuccesses).toHaveLength(1);
+            expect(toolFailures).toHaveLength(0);
+            expect(toolStarts[0]).toEqual(
+                expect.objectContaining({
+                    toolName: 'glob',
+                })
+            );
+            expect(toolSuccesses[0]).toEqual(
+                expect.objectContaining({
+                    toolName: 'glob',
+                })
+            );
+        });
+
+        it('should emit TOOL_FAILED event when tool execution fails', async () => {
+            let callCount = 0;
+            mockProvider.generate = async () => {
+                callCount += 1;
+                if (callCount === 1) {
+                    return {
+                        id: 'resp-tool-fail-1',
+                        object: 'chat.completion',
+                        created: Date.now(),
+                        model: 'test-model',
+                        choices: [
+                            {
+                                index: 0,
+                                message: {
+                                    role: 'assistant',
+                                    content: '',
+                                    tool_calls: [
+                                        {
+                                            id: 'call_missing_1',
+                                            type: 'function',
+                                            function: {
+                                                name: 'missing_tool',
+                                                arguments: '{}',
+                                            },
+                                        },
+                                    ],
+                                },
+                                finish_reason: 'tool_calls',
+                            },
+                        ],
+                    } as any;
+                }
+
+                return {
+                    id: 'resp-tool-fail-2',
+                    object: 'chat.completion',
+                    created: Date.now(),
+                    model: 'test-model',
+                    choices: [
+                        {
+                            index: 0,
+                            message: { role: 'assistant', content: 'done' },
+                            finish_reason: 'stop',
+                        },
+                    ],
+                } as any;
+            };
+
+            const toolStarts: unknown[] = [];
+            const toolSuccesses: unknown[] = [];
+            const toolFailures: unknown[] = [];
+
+            const agent = new Agent({
+                provider: mockProvider as any,
+                systemPrompt: 'Test',
+                stream: false,
+                memoryManager,
+            });
+
+            agent.on(EventType.TOOL_START, (data) => toolStarts.push(data));
+            agent.on(EventType.TOOL_SUCCESS, (data) => toolSuccesses.push(data));
+            agent.on(EventType.TOOL_FAILED, (data) => toolFailures.push(data));
+
+            await agent.execute('Run a missing tool');
+
+            expect(toolStarts).toHaveLength(0);
+            expect(toolSuccesses).toHaveLength(0);
+            expect(toolFailures).toHaveLength(1);
+            expect(toolFailures[0]).toEqual(
+                expect.objectContaining({
+                    toolName: 'missing_tool',
                 })
             );
         });

@@ -1,7 +1,7 @@
 import { v4 as uuid } from 'uuid';
 import { Message } from './types';
 import type { ContextExclusionReason, IMemoryManager } from '../memory/types';
-import { Compaction, CompactionConfig, CompactionResult } from './compaction';
+import { Compaction, CompactionConfig } from './compaction';
 import { LLMProvider, type MessageContent, type ToolCall } from '../../providers';
 import { ToolCallRepairer } from './tool-call-repairer';
 
@@ -332,7 +332,8 @@ export class Session {
         if (!this.memoryManager) return;
 
         if (operation === 'update') {
-            const { messageId: _, ...updates } = message;
+            const updates: Partial<Message> = { ...message };
+            delete updates.messageId;
             await this.memoryManager.updateMessageInContext(this.sessionId, message.messageId, updates);
         } else {
             await this.memoryManager.addMessageToContext(this.sessionId, message);
@@ -401,7 +402,8 @@ export class Session {
             const original = originalById.get(messageId);
             if (!original) continue;
             if (this.isMessageEquivalent(original, normalized)) continue;
-            const { messageId: _ignored, ...updates } = normalized;
+            const updates: Partial<Message> = { ...normalized };
+            delete updates.messageId;
             await this.memoryManager.updateMessageInContext(this.sessionId, messageId, updates);
         }
 
@@ -434,7 +436,8 @@ export class Session {
 
                 if (validToolCalls.length === 0) {
                     if (this.hasAssistantOutput(message)) {
-                        const { tool_calls: _ignored, ...rest } = message;
+                        const rest = { ...message };
+                        delete rest.tool_calls;
                         normalized.push({
                             ...rest,
                             type: rest.type === 'tool-call' ? 'text' : rest.type,

@@ -130,9 +130,9 @@ describe('ToolExecutor protocol events', () => {
             onToolCallCreated: createdSpy,
         });
 
-        await expect(executor.execute([createToolCall('call-3', 'read_file', { filePath: 'x' })], 'msg-3')).rejects.toThrow(
-            LLMResponseInvalidError
-        );
+        await expect(
+            executor.execute([createToolCall('call-3', 'read_file', { filePath: 'x' })], 'msg-3')
+        ).rejects.toThrow(LLMResponseInvalidError);
         expect(createdSpy).not.toHaveBeenCalled();
         expect(registry.execute).not.toHaveBeenCalled();
     });

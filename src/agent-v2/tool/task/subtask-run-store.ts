@@ -25,7 +25,7 @@ export function buildSubTaskRunData(params: {
     error?: string;
     messageCount?: number;
 }): Omit<SubTaskRunData, 'createdAt' | 'updatedAt'> {
-    const { createdAt, startedAt, finishedAt } = toRunTimestamps(params.createdAt, params.startedAt, params.finishedAt);
+    const { startedAt, finishedAt } = toRunTimestamps(params.createdAt, params.startedAt, params.finishedAt);
 
     return {
         id: params.runId,

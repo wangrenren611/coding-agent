@@ -292,7 +292,8 @@ export class FileMemoryManager implements IMemoryManager {
             throw new Error(`Message not found in context: ${messageId}`);
         }
 
-        const { messageId: _ignoredMessageId, ...safeUpdates } = this.clone(updates);
+        const safeUpdates = this.clone(updates);
+        delete safeUpdates.messageId;
 
         context.messages[contextIndex] = {
             ...context.messages[contextIndex],
@@ -810,14 +811,20 @@ export class FileMemoryManager implements IMemoryManager {
                     .filter((item) => !item.archivedBy && !item.excludedFromContext)
                     .map((item) => {
                         const {
-                            sequence: _sequence,
-                            turn: _turn,
-                            isSummary: _isSummary,
-                            archivedBy: _archivedBy,
-                            excludedFromContext: _excludedFromContext,
-                            excludedReason: _excludedReason,
+                            sequence,
+                            turn,
+                            isSummary,
+                            archivedBy,
+                            excludedFromContext,
+                            excludedReason,
                             ...message
                         } = item;
+                        void sequence;
+                        void turn;
+                        void isSummary;
+                        void archivedBy;
+                        void excludedFromContext;
+                        void excludedReason;
                         return this.clone(message);
                     });
 
@@ -1013,7 +1020,8 @@ export class FileMemoryManager implements IMemoryManager {
 
     private normalizeSubTaskRun(raw: SubTaskRunData): SubTaskRunData {
         const messageCount = raw.messageCount ?? (Array.isArray(raw.messages) ? raw.messages.length : 0);
-        const { messages: _ignoredMessages, ...rest } = raw;
+        const rest = { ...raw };
+        delete rest.messages;
 
         return {
             ...rest,

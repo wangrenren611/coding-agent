@@ -1,8 +1,16 @@
 import fs from 'fs';
-import path from 'path';
 import { z } from 'zod';
 import { BaseTool, ToolContext, ToolResult } from './base';
 import { resolveAndValidatePath, PathTraversalError } from './file';
+
+const schema = z
+    .object({
+        filePath: z.string().describe('The absolute or relative path to the file'),
+        line: z.number().describe('Starting line number (1-based) where oldText begins'),
+        oldText: z.string().describe('The exact text to replace - can span multiple lines'),
+        newText: z.string().describe('The replacement text - can span multiple lines'),
+    })
+    .strict();
 
 /**
  * Normalize line endings: convert CRLF to LF
@@ -117,7 +125,7 @@ function generateDiffReport(actual: string, expected: string): string {
     return lines.join('\n');
 }
 
-export class SurgicalEditTool extends BaseTool<any> {
+export class SurgicalEditTool extends BaseTool<typeof schema> {
     name = 'precise_replace';
 
     description = `Performs exact string replacements in files.
@@ -142,7 +150,7 @@ STEP 3: For MULTIPLE modifications to SAME file:
 
 =============================================================================
 COMMON FAILURE CAUSES:
-- Missing indentation: "key": "value" vs "    \"key\": \"value\""
+- Missing indentation: "key": "value" vs '    "key": "value"'
 - Wrong line number: verify against read_file range output
 - Stale content: file was modified by previous tool call - re-read first
 - Extra/missing characters: copy-paste carefully from read_file
@@ -159,14 +167,7 @@ TOOL SELECTION GUIDE:
 - Large refactoring → write_file
 `;
 
-    schema = z
-        .object({
-            filePath: z.string().describe('The absolute or relative path to the file'),
-            line: z.number().describe('Starting line number (1-based) where oldText begins'),
-            oldText: z.string().describe('The exact text to replace - can span multiple lines'),
-            newText: z.string().describe('The replacement text - can span multiple lines'),
-        })
-        .strict();
+    schema = schema;
 
     async execute(
         { filePath, line, oldText, newText }: z.infer<typeof this.schema>,
@@ -179,7 +180,7 @@ TOOL SELECTION GUIDE:
             if (error instanceof PathTraversalError) {
                 return this.result({
                     success: false,
-                    metadata: { error: 'PATH_TRAVERSAL_DETECTED', filePath } as any,
+                    metadata: { error: 'PATH_TRAVERSAL_DETECTED', filePath },
                     output: `PATH_TRAVERSAL_DETECTED: ${error.message}`,
                 });
             }
@@ -190,7 +191,7 @@ TOOL SELECTION GUIDE:
         if (!fs.existsSync(fullPath)) {
             return this.result({
                 success: false,
-                metadata: { error: 'FILE_NOT_FOUND', filePath } as any,
+                metadata: { error: 'FILE_NOT_FOUND', filePath },
                 output: `FILE_NOT_FOUND: ${filePath}`,
             });
         }
@@ -221,7 +222,7 @@ TOOL SELECTION GUIDE:
         if (line < 1 || line > lines.length) {
             return this.result({
                 success: false,
-                metadata: { error: 'LINE_OUT_OF_RANGE', line, fileLength: lines.length } as any,
+                metadata: { error: 'LINE_OUT_OF_RANGE', line, fileLength: lines.length },
                 output: `LINE_OUT_OF_RANGE: line ${line} is out of range (file has ${lines.length} lines, valid range: 1-${lines.length})`,
             });
         }
@@ -239,7 +240,7 @@ TOOL SELECTION GUIDE:
                     reason: 'Not enough lines from specified position',
                     expectedLines: oldTextLines.length,
                     availableLines: lines.length - targetLineIdx,
-                } as any,
+                },
                 output: `TEXT_NOT_FOUND: Need ${oldTextLines.length} lines starting from line ${line}, but only ${lines.length - targetLineIdx} lines available
 
 === Content near line ${line} ===
@@ -270,7 +271,7 @@ ${contextSnippet}
                     expectedPreview: expectedText.slice(0, 100),
                     actualPreview: actualText.slice(0, 100),
                     actualContent: actualContentForCopy,
-                } as any,
+                },
                 output: `TEXT_NOT_FOUND at line ${line}: Text does not match oldText
 
 === Diff Report ===

@@ -133,6 +133,19 @@ describe('File Tools', () => {
             expect(result.metadata?.content).toBeDefined();
         });
 
+        it('should truncate oversized read output consistently', async () => {
+            const hugeContent = 'a'.repeat(60000);
+            const testFile = await env.createFile('huge.txt', hugeContent);
+            const tool = new ReadFileTool();
+            const result = await tool.execute({ filePath: testFile });
+
+            expect(result.success).toBe(true);
+            expect(result.metadata?.truncated).toBe(true);
+            expect(result.metadata?.originalLength).toBe(60000);
+            expect((result.metadata?.content as string).length).toBe(50000);
+            expect(result.output).toContain('[... Content truncated for brevity ...]');
+        });
+
         it('should handle files with special characters', async () => {
             const content = 'Hello "world"\n\tTabbed content\nSpecial: <>&\'"';
             const testFile = await env.createFile('special.txt', content);

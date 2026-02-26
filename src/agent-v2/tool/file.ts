@@ -263,7 +263,7 @@ Usage:
         if (!fs.existsSync(fullPath)) {
             return this.result({
                 success: false,
-                metadata: { error: 'FILE_NOT_FOUND' } as any,
+                metadata: { error: 'FILE_NOT_FOUND' },
                 output: 'FILE_NOT_FOUND: File not found',
             });
         }
@@ -273,7 +273,7 @@ Usage:
         if (!stats.isFile()) {
             return this.result({
                 success: false,
-                metadata: { error: 'PATH_IS_DIRECTORY' } as any,
+                metadata: { error: 'PATH_IS_DIRECTORY' },
                 output: 'PATH_IS_DIRECTORY: Path is a directory',
             });
         }
@@ -282,7 +282,7 @@ Usage:
         if (await isBinaryFile(fullPath)) {
             return this.result({
                 success: false,
-                metadata: { error: 'BINARY_FILE' } as any,
+                metadata: { error: 'BINARY_FILE' },
                 output: 'BINARY_FILE: Cannot read binary file',
             });
         }
@@ -328,7 +328,7 @@ Usage:
         if (startIndex >= totalLines) {
             return this.result({
                 success: false,
-                metadata: { error: 'START_LINE_OUT_OF_RANGE' } as any,
+                metadata: { error: 'START_LINE_OUT_OF_RANGE' },
                 output: 'START_LINE_OUT_OF_RANGE: Start line is out of range',
             });
         }
@@ -336,7 +336,7 @@ Usage:
         if (endIndex <= startIndex) {
             return this.result({
                 success: false,
-                metadata: { error: 'INVALID_LINE_RANGE' } as any,
+                metadata: { error: 'INVALID_LINE_RANGE' },
                 output: 'INVALID_LINE_RANGE: Invalid line range',
             });
         }
@@ -345,18 +345,24 @@ Usage:
         // 如果没有指定行范围，直接返回原始内容（保留原始换行符）
         const hasLineRange = startLine !== undefined || endLine !== undefined;
         const fileContent = hasLineRange ? selectedLines.join('\n') : content;
+        const MAX_RETURN_CHARS = 50000;
+        const truncated = fileContent.length > MAX_RETURN_CHARS;
+        const returnedContent = truncated ? fileContent.slice(0, MAX_RETURN_CHARS) : fileContent;
 
         return this.result({
             success: true,
             metadata: {
                 filePath,
-                content: fileContent,
+                content: returnedContent,
                 range: { startLine: startIndex + 1, endLine: endIndex },
+                truncated,
+                originalLength: fileContent.length,
             },
-            output:
-                fileContent.length > 50000
-                    ? `Content from ${filePath} (lines ${startIndex + 1}-${endIndex}):\n\n${fileContent}\n\n[... Content truncated for brevity ...]`
-                    : `Content from ${filePath}:\n\n${fileContent}`,
+            output: truncated
+                ? `Content from ${filePath} (lines ${startIndex + 1}-${endIndex}):\n\n${returnedContent}\n\n[... Content truncated for brevity ...]`
+                : hasLineRange
+                  ? `Content from ${filePath} (lines ${startIndex + 1}-${endIndex}):\n\n${returnedContent}`
+                  : `Content from ${filePath}:\n\n${returnedContent}`,
         });
     }
 
@@ -418,7 +424,7 @@ When the user provides a path to a file assume that path is valid.`;
             if (stats.isDirectory()) {
                 return this.result({
                     success: false,
-                    metadata: { error: 'PATH_IS_DIRECTORY' } as any,
+                    metadata: { error: 'PATH_IS_DIRECTORY' },
                     output: 'PATH_IS_DIRECTORY: Cannot write to directory',
                 });
             }
@@ -426,7 +432,7 @@ When the user provides a path to a file assume that path is valid.`;
             if (await isBinaryFile(fullPath)) {
                 return this.result({
                     success: false,
-                    metadata: { error: 'CANNOT_WRITE_BINARY_FILE' } as any,
+                    metadata: { error: 'CANNOT_WRITE_BINARY_FILE' },
                     output: 'CANNOT_WRITE_BINARY_FILE: Cannot write binary file',
                 });
             }

@@ -83,7 +83,7 @@ describe('BashTool', () => {
         backgroundLogs.push(metadata.logPath);
 
         let logContent = '';
-        for (let i = 0; i < 20; i += 1) {
+        for (let i = 0; i < 100; i += 1) {
             if (fs.existsSync(metadata.logPath)) {
                 logContent = await fs.promises.readFile(metadata.logPath, 'utf8');
                 if (logContent.includes('background-log-check')) {

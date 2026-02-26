@@ -4,7 +4,13 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SkillLoader, getSkillLoader, initializeSkillLoader } from '../loader';
-import { SkillTestEnvironment, SAMPLE_SKILL_CONTENT, INVALID_NAME_SKILL, MISSING_DESC_SKILL, LONG_DESC_SKILL } from './test-utils';
+import {
+    SkillTestEnvironment,
+    SAMPLE_SKILL_CONTENT,
+    INVALID_NAME_SKILL,
+    MISSING_DESC_SKILL,
+    LONG_DESC_SKILL,
+} from './test-utils';
 
 describe('SkillLoader', () => {
     let env: SkillTestEnvironment;
@@ -146,8 +152,8 @@ Content here.`;
             const metadata = loader.getAllMetadata();
 
             expect(metadata).toHaveLength(2);
-            expect(metadata.map(m => m.name)).toContain('skill-1');
-            expect(metadata.map(m => m.name)).toContain('skill-2');
+            expect(metadata.map((m) => m.name)).toContain('skill-1');
+            expect(metadata.map((m) => m.name)).toContain('skill-2');
         });
 
         it('should return empty array when no skills', async () => {

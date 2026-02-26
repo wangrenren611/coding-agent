@@ -1,8 +1,20 @@
 import fs from 'fs';
-import path from 'path';
 import { z } from 'zod';
 import { BaseTool, ToolContext, ToolResult } from './base';
 import { resolveAndValidatePath, PathTraversalError } from './file';
+
+const schema = z.object({
+    filePath: z.string().describe('Path to the file to modify'),
+    replacements: z
+        .array(
+            z.object({
+                line: z.number().describe('Line number (1-based)'),
+                oldText: z.string().describe('The exact text segment to replace'),
+                newText: z.string().describe('The new text'),
+            })
+        )
+        .describe('Array of replacements to apply in order'),
+});
 
 /**
  * 批量替换工具
@@ -13,7 +25,7 @@ import { resolveAndValidatePath, PathTraversalError } from './file';
  * - 不支持跨行替换
  * - 保留原文件的换行符类型（\r\n 或 \n）
  */
-export class BatchReplaceTool extends BaseTool<any> {
+export class BatchReplaceTool extends BaseTool<typeof schema> {
     name = 'batch_replace';
 
     description = `Replace multiple text segments in a single file call.
@@ -44,18 +56,7 @@ WORKFLOW:
 
 =============================================================================`;
 
-    schema = z.object({
-        filePath: z.string().describe('Path to the file to modify'),
-        replacements: z
-            .array(
-                z.object({
-                    line: z.number().describe('Line number (1-based)'),
-                    oldText: z.string().describe('The exact text segment to replace'),
-                    newText: z.string().describe('The new text'),
-                })
-            )
-            .describe('Array of replacements to apply in order'),
-    });
+    schema = schema;
 
     async execute(
         { filePath, replacements }: z.infer<typeof this.schema>,
@@ -65,7 +66,7 @@ WORKFLOW:
         if (replacements.length === 0) {
             return this.result({
                 success: false,
-                metadata: { error: 'EMPTY_REPLACEMENTS', filePath, code: 'EMPTY_REPLACEMENTS' } as any,
+                metadata: { error: 'EMPTY_REPLACEMENTS', filePath, code: 'EMPTY_REPLACEMENTS' },
                 output: 'EMPTY_REPLACEMENTS: No replacements provided',
             });
         }
@@ -77,7 +78,7 @@ WORKFLOW:
             if (error instanceof PathTraversalError) {
                 return this.result({
                     success: false,
-                    metadata: { error: 'PATH_TRAVERSAL_DETECTED', filePath } as any,
+                    metadata: { error: 'PATH_TRAVERSAL_DETECTED', filePath },
                     output: `PATH_TRAVERSAL_DETECTED: ${error.message}`,
                 });
             }
@@ -88,7 +89,7 @@ WORKFLOW:
         if (!fs.existsSync(fullPath)) {
             return this.result({
                 success: false,
-                metadata: { error: 'FILE_NOT_FOUND', filePath, code: 'FILE_NOT_FOUND' } as any,
+                metadata: { error: 'FILE_NOT_FOUND', filePath, code: 'FILE_NOT_FOUND' },
                 output: 'FILE_NOT_FOUND: File does not exist',
             });
         }
@@ -100,7 +101,7 @@ WORKFLOW:
         } catch (error) {
             return this.result({
                 success: false,
-                metadata: { error: 'READ_FAILED', filePath } as any,
+                metadata: { error: 'READ_FAILED', filePath },
                 output: `READ_FAILED: Failed to read file: ${error}`,
             });
         }
@@ -180,7 +181,7 @@ WORKFLOW:
             } catch (error) {
                 return this.result({
                     success: false,
-                    metadata: { error: 'WRITE_FAILED', filePath } as any,
+                    metadata: { error: 'WRITE_FAILED', filePath },
                     output: `WRITE_FAILED: Failed to write file: ${error}`,
                 });
             }

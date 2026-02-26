@@ -124,6 +124,7 @@ export class Agent {
 
         this.toolRegistry =
             config.toolRegistry ?? createDefaultToolRegistry({ workingDirectory: process.cwd() }, this.provider);
+        this.configureToolEventBridge();
 
         this.agentState = new AgentState({
             maxLoops: config.maxLoops ?? AGENT_DEFAULTS.LOOP_MAX,
@@ -254,6 +255,58 @@ export class Agent {
 
     off(type: EventType, listener: (data: unknown) => void): void {
         this.eventBus.off(type, listener);
+    }
+
+    private configureToolEventBridge(): void {
+        this.toolRegistry.setEventCallbacks({
+            onToolStart: (toolName, args) => {
+                this.eventBus.emit(EventType.TOOL_START, {
+                    timestamp: this.timeProvider.getCurrentTime(),
+                    toolName,
+                    arguments: args,
+                });
+            },
+            onToolSuccess: (toolName, duration, result) => {
+                this.eventBus.emit(EventType.TOOL_SUCCESS, {
+                    timestamp: this.timeProvider.getCurrentTime(),
+                    toolName,
+                    duration,
+                    resultLength: this.getPayloadLength(result),
+                });
+            },
+            onToolFailed: (toolName, error) => {
+                this.eventBus.emit(EventType.TOOL_FAILED, {
+                    timestamp: this.timeProvider.getCurrentTime(),
+                    toolName,
+                    error: this.normalizeToolError(error),
+                });
+            },
+        });
+    }
+
+    private getPayloadLength(value: unknown): number {
+        if (typeof value === 'string') {
+            return value.length;
+        }
+        try {
+            return JSON.stringify(value)?.length ?? 0;
+        } catch {
+            return 0;
+        }
+    }
+
+    private normalizeToolError(value: unknown): string {
+        if (value instanceof Error) {
+            return value.message || value.name;
+        }
+        if (typeof value === 'string') {
+            return value;
+        }
+        try {
+            return JSON.stringify(value) || String(value);
+        } catch {
+            return String(value);
+        }
     }
 
     // ==================== 状态查询 ====================
@@ -753,7 +806,8 @@ export class Agent {
                     if (!this.hasAssistantOutput(message)) {
                         return null;
                     }
-                    const { tool_calls: _ignored, ...rest } = message;
+                    const rest = { ...message };
+                    delete rest.tool_calls;
                     return { ...rest, type: rest.type === 'tool-call' ? 'text' : rest.type };
                 }
 
@@ -804,7 +858,8 @@ export class Agent {
                 const validToolCalls = this.getValidToolCalls(message.tool_calls);
                 if (validToolCalls.length === 0) {
                     if (this.hasAssistantOutput(message)) {
-                        const { tool_calls: _ignored, ...rest } = message;
+                        const rest = { ...message };
+                        delete rest.tool_calls;
                         fixed.push({ ...rest, type: rest.type === 'tool-call' ? 'text' : rest.type });
                     }
                     index += 1;

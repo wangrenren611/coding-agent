@@ -134,7 +134,7 @@ export class ToolCallRepairer {
     private extractToolCallIds(message: Message): string[] {
         if (message.role !== 'assistant') return [];
 
-        const rawCalls = (message as any).tool_calls;
+        const rawCalls = message.tool_calls;
         if (!Array.isArray(rawCalls)) return [];
 
         const uniqueIds = new Set<string>();
@@ -166,7 +166,7 @@ export class ToolCallRepairer {
     private extractToolCallId(message: Message): string | null {
         if (message.role !== 'tool') return null;
 
-        const toolCallId = (message as any).tool_call_id;
+        const toolCallId = message.tool_call_id;
         return typeof toolCallId === 'string' && toolCallId.length > 0 ? toolCallId : null;
     }
 }

@@ -41,9 +41,9 @@ export interface ToolEventCallbacks {
     /** 工具执行开始 */
     onToolStart?: (toolName: string, args: string) => void;
     /** 工具执行成功 */
-    onToolSuccess?: (toolName: string, duration: number, result: any) => void;
+    onToolSuccess?: (toolName: string, duration: number, result: ToolResult) => void;
     /** 工具执行失败 */
-    onToolFailed?: (toolName: string, result: any) => void;
+    onToolFailed?: (toolName: string, result: unknown) => void;
 }
 
 /**
@@ -77,7 +77,10 @@ export class ToolRegistry {
      * 设置事件回调
      */
     setEventCallbacks(callbacks: ToolEventCallbacks): void {
-        this.eventCallbacks = callbacks;
+        this.eventCallbacks = {
+            ...this.eventCallbacks,
+            ...callbacks,
+        };
     }
 
     /**
@@ -157,7 +160,7 @@ export class ToolRegistry {
     async execute(
         toolCalls: ToolCall[],
         context?: ExecutionContext
-    ): Promise<{ tool_call_id: string; name: string; arguments: string; result: any }[]> {
+    ): Promise<{ tool_call_id: string; name: string; arguments: string; result: ToolResult }[]> {
         const toolContext = this.buildToolContext(context);
 
         const results = await Promise.all(
@@ -274,7 +277,7 @@ export class ToolRegistry {
             })
         );
 
-        return results as { tool_call_id: string; name: string; arguments: string; result: any }[];
+        return results;
     }
 
     /**

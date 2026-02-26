@@ -3,7 +3,7 @@
  */
 
 export { EventType } from './types';
-import { EventListener, EventMap, EventType } from './types';
+import { BaseEventData, EventListener, EventMap, EventType } from './types';
 
 /**
  * EventBus - 简单的发布订阅模式事件总线
@@ -26,19 +26,18 @@ import { EventListener, EventMap, EventType } from './types';
  */
 export class EventBus {
     /** 事件监听器存储 */
-    private listeners: Map<string, Set<EventListener>> = new Map();
+    private listeners: Map<EventType, Set<EventListener<BaseEventData>>> = new Map();
 
     /**
      * 注册事件监听器
      * @param type 事件类型
      * @param listener 监听器函数
      */
-    on(type: EventType, listener: EventListener): void {
-        const key = type as string;
-        if (!this.listeners.has(key)) {
-            this.listeners.set(key, new Set());
+    on<T extends EventType>(type: T, listener: EventListener<EventMap[T]>): void {
+        if (!this.listeners.has(type)) {
+            this.listeners.set(type, new Set());
         }
-        this.listeners.get(key)!.add(listener);
+        this.listeners.get(type)!.add(listener as EventListener<BaseEventData>);
     }
 
     /**
@@ -46,13 +45,12 @@ export class EventBus {
      * @param type 事件类型
      * @param listener 监听器函数
      */
-    off(type: EventType, listener: EventListener): void {
-        const key = type as string;
-        const set = this.listeners.get(key);
+    off<T extends EventType>(type: T, listener: EventListener<EventMap[T]>): void {
+        const set = this.listeners.get(type);
         if (set) {
-            set.delete(listener);
+            set.delete(listener as EventListener<BaseEventData>);
             if (set.size === 0) {
-                this.listeners.delete(key);
+                this.listeners.delete(type);
             }
         }
     }
@@ -62,14 +60,13 @@ export class EventBus {
      * @param type 事件类型
      * @param data 事件数据
      */
-    emit(type: EventType, data: any): void {
-        const key = type as string;
-        const set = this.listeners.get(key);
+    emit<T extends EventType>(type: T, data: EventMap[T]): void {
+        const set = this.listeners.get(type);
         if (set) {
             // 异步执行所有监听器，不阻塞主流程
             for (const listener of set) {
                 try {
-                    listener(data);
+                    void (listener as EventListener<EventMap[T]>)(data);
                 } catch (error) {
                     // 监听器错误不影响其他监听器
                     console.error(`Event listener error for ${type}:`, error);
@@ -91,7 +88,7 @@ export class EventBus {
      * @returns 监听器数量
      */
     listenerCount(type: EventType): number {
-        return this.listeners.get(type as string)?.size ?? 0;
+        return this.listeners.get(type)?.size ?? 0;
     }
 
     /**
@@ -100,7 +97,7 @@ export class EventBus {
      */
     removeAllListeners(type?: EventType): void {
         if (type) {
-            this.listeners.delete(type as string);
+            this.listeners.delete(type);
         } else {
             this.listeners.clear();
         }

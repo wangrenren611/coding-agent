@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import * as readline from 'node:readline';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -35,12 +35,21 @@ type GrepFileResult = {
     matches: GrepMatch[];
 };
 
-function toDisplayString(arbitrary: any): string {
-    if (!arbitrary) return '';
-    if (typeof arbitrary.text === 'string') return arbitrary.text;
-    if (typeof arbitrary.bytes === 'string') {
+function toRecord(value: unknown): Record<string, unknown> | null {
+    return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null;
+}
+
+function toDisplayString(arbitrary: unknown): string {
+    const candidate = toRecord(arbitrary);
+    if (!candidate) return '';
+
+    const text = candidate.text;
+    if (typeof text === 'string') return text;
+
+    const bytes = candidate.bytes;
+    if (typeof bytes === 'string') {
         try {
-            return Buffer.from(arbitrary.bytes, 'base64').toString('utf8');
+            return Buffer.from(bytes, 'base64').toString('utf8');
         } catch {
             return '';
         }
@@ -51,6 +60,44 @@ function toDisplayString(arbitrary: any): string {
 function normalizeFilePath(cwd: string, p: string): string {
     const rel = path.isAbsolute(p) ? path.relative(cwd, p) : p;
     return rel.split(path.sep).join('/');
+}
+
+function isLikelyCommandName(candidate: string): boolean {
+    return !candidate.includes('/') && !candidate.includes('\\');
+}
+
+async function checkRipgrepCandidate(candidate: string): Promise<{
+    ok: boolean;
+    reason?: 'not_found' | 'no_permission' | 'access_error';
+    errorMsg?: string;
+}> {
+    if (isLikelyCommandName(candidate)) {
+        const probe = spawnSync(candidate, ['--version'], { stdio: 'ignore' });
+        if (!probe.error && probe.status === 0) {
+            return { ok: true };
+        }
+        const code = (probe.error as NodeJS.ErrnoException | undefined)?.code;
+        if (code === 'ENOENT') return { ok: false, reason: 'not_found' };
+        if (code === 'EACCES' || code === 'EPERM') return { ok: false, reason: 'no_permission' };
+        if (probe.error) {
+            return { ok: false, reason: 'access_error', errorMsg: probe.error.message };
+        }
+        return { ok: false, reason: 'not_found' };
+    }
+
+    try {
+        await fs.access(candidate, fs.constants.X_OK);
+        return { ok: true };
+    } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === 'ENOENT') return { ok: false, reason: 'not_found' };
+        if (code === 'EACCES' || code === 'EPERM') return { ok: false, reason: 'no_permission' };
+        return {
+            ok: false,
+            reason: 'access_error',
+            errorMsg: error instanceof Error ? error.message : String(error),
+        };
+    }
 }
 
 export default class GrepTool extends BaseTool<typeof schema> {
@@ -104,57 +151,6 @@ Usage:
             '**/build/**',
         ];
 
-        // === 获取 ripgrep 路径（使用动态导入）===
-        let rgBin: string;
-        try {
-            const vscodeRg = await import('@vscode/ripgrep');
-            rgBin = vscodeRg.rgPath;
-        } catch (error) {
-            return this.result({
-                success: false,
-                metadata: {
-                    error: 'RIPGREP_LOAD_FAILED',
-                    message: `Failed to load ripgrep module: ${error instanceof Error ? error.message : String(error)}`,
-                } as any,
-                output: 'RIPGREP_LOAD_FAILED: Failed to load ripgrep module',
-            });
-        }
-
-        // === 验证 ripgrep 二进制文件存在且有执行权限 ===
-        try {
-            await fs.access(rgBin, fs.constants.X_OK);
-        } catch (error) {
-            if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-                return this.result({
-                    success: false,
-                    metadata: {
-                        error: 'RIPGREP_NOT_FOUND',
-                        path: rgBin,
-                    } as any,
-                    output: 'RIPGREP_NOT_FOUND: ripgrep binary not found',
-                });
-            }
-            if ((error as NodeJS.ErrnoException).code === 'EACCES') {
-                return this.result({
-                    success: false,
-                    metadata: {
-                        error: 'RIPGREP_NO_PERMISSION',
-                        path: rgBin,
-                    } as any,
-                    output: 'RIPGREP_NO_PERMISSION: No permission to execute ripgrep',
-                });
-            }
-            return this.result({
-                success: false,
-                metadata: {
-                    error: 'RIPGREP_ACCESS_ERROR',
-                    path: rgBin,
-                    errorMsg: error instanceof Error ? error.message : String(error),
-                } as any,
-                output: 'RIPGREP_ACCESS_ERROR: Cannot access ripgrep',
-            });
-        }
-
         // === 验证搜索根目录是否存在且可访问 ===
         const resolvedSearchRoot = searchRoot ? path.resolve(cwd, searchRoot) : cwd;
         try {
@@ -166,7 +162,7 @@ Usage:
                     metadata: {
                         error: 'SEARCH_PATH_NOT_FOUND',
                         path: resolvedSearchRoot,
-                    } as any,
+                    },
                     output: 'SEARCH_PATH_NOT_FOUND: Search path does not exist',
                 });
             }
@@ -176,17 +172,82 @@ Usage:
                     metadata: {
                         error: 'SEARCH_PATH_NO_PERMISSION',
                         path: resolvedSearchRoot,
-                    } as any,
+                    },
                     output: 'SEARCH_PATH_NO_PERMISSION: No permission to read search path',
                 });
             }
+        }
+
+        // === 获取 ripgrep 路径（优先 @vscode/ripgrep，失败时回退系统 rg）===
+        let rgBin = '';
+        let ripgrepLoadError: string | null = null;
+        const rgCandidates: string[] = [];
+        try {
+            const vscodeRg = await import('@vscode/ripgrep');
+            if (typeof vscodeRg.rgPath === 'string' && vscodeRg.rgPath.trim().length > 0) {
+                rgCandidates.push(vscodeRg.rgPath);
+            }
+        } catch (error) {
+            ripgrepLoadError = error instanceof Error ? error.message : String(error);
+        }
+
+        if (process.env.RIPGREP_PATH?.trim()) {
+            rgCandidates.push(process.env.RIPGREP_PATH.trim());
+        }
+        rgCandidates.push('rg');
+
+        const dedupedCandidates = Array.from(new Set(rgCandidates.map((c) => c.trim()).filter((c) => c.length > 0)));
+
+        let sawNoPermission = false;
+        let accessErrorMsg: string | null = null;
+        for (const candidate of dedupedCandidates) {
+            const checked = await checkRipgrepCandidate(candidate);
+            if (checked.ok) {
+                rgBin = candidate;
+                break;
+            }
+            if (checked.reason === 'no_permission') sawNoPermission = true;
+            if (checked.reason === 'access_error') accessErrorMsg = checked.errorMsg ?? null;
+        }
+
+        if (!rgBin) {
+            if (sawNoPermission) {
+                return this.result({
+                    success: false,
+                    metadata: {
+                        error: 'RIPGREP_NO_PERMISSION',
+                        candidates: dedupedCandidates,
+                    },
+                    output: 'RIPGREP_NO_PERMISSION: No permission to execute ripgrep',
+                });
+            }
+            if (accessErrorMsg) {
+                return this.result({
+                    success: false,
+                    metadata: {
+                        error: 'RIPGREP_ACCESS_ERROR',
+                        candidates: dedupedCandidates,
+                        errorMsg: accessErrorMsg,
+                    },
+                    output: 'RIPGREP_ACCESS_ERROR: Cannot access ripgrep',
+                });
+            }
+            return this.result({
+                success: false,
+                metadata: {
+                    error: 'RIPGREP_NOT_FOUND',
+                    candidates: dedupedCandidates,
+                    ripgrepLoadError,
+                },
+                output: 'RIPGREP_NOT_FOUND: ripgrep binary not found',
+            });
         }
 
         // === 验证 pattern 参数有效性 ===
         if (!pattern || pattern.trim().length === 0) {
             return this.result({
                 success: false,
-                metadata: { error: 'INVALID_PATTERN' } as any,
+                metadata: { error: 'INVALID_PATTERN' },
                 output: 'INVALID_PATTERN: Search pattern cannot be empty',
             });
         }
@@ -230,7 +291,9 @@ Usage:
             const kill = () => {
                 try {
                     if (!child.killed) child.kill('SIGKILL');
-                } catch {}
+                } catch {
+                    // ignore kill errors
+                }
             };
 
             const timer = setTimeout(() => {
@@ -243,37 +306,42 @@ Usage:
             for await (const line of rl) {
                 if (!line) continue;
 
-                let evt: any;
+                let evt: unknown;
                 try {
                     evt = JSON.parse(line);
                 } catch {
                     continue;
                 }
 
-                if (evt?.type !== 'match') continue;
+                const evtRecord = toRecord(evt);
+                if (!evtRecord || evtRecord.type !== 'match') continue;
+                const data = toRecord(evtRecord.data);
+                if (!data) continue;
 
-                const fileRaw = toDisplayString(evt?.data?.path);
+                const fileRaw = toDisplayString(data.path);
                 if (!fileRaw) continue;
 
                 const file = normalizeFilePath(cwd, fileRaw);
                 const entry = fileMap.get(file) ?? { matches: [] };
 
-                const linesText = toDisplayString(evt?.data?.lines) || '';
+                const linesText = toDisplayString(data.lines) || '';
                 const content = linesText.replace(/\r?\n$/g, '');
 
-                const sub = Array.isArray(evt?.data?.submatches) ? evt.data.submatches : [];
-                const first = sub[0];
+                const sub = Array.isArray(data.submatches) ? data.submatches : [];
+                const first = toRecord(sub[0]);
                 const matchText = first?.match ? toDisplayString(first.match) : undefined;
                 const start = typeof first?.start === 'number' ? first.start : undefined;
                 const column = typeof start === 'number' ? start + 1 : null;
+                const lineNumber = typeof data.line_number === 'number' ? data.line_number : null;
+                const end = typeof first?.end === 'number' ? first.end : undefined;
 
                 entry.matches.push({
-                    line: typeof evt?.data?.line_number === 'number' ? evt.data.line_number : null,
+                    line: lineNumber,
                     column,
                     content: content.trimEnd(),
                     matchText,
                     start,
-                    end: typeof first?.end === 'number' ? first.end : undefined,
+                    end,
                 });
 
                 fileMap.set(file, entry);
@@ -315,7 +383,7 @@ Usage:
                         error: 'RIPGREP_ERROR',
                         exitCode,
                         stderr,
-                    } as any,
+                    },
                     output: `RIPGREP_ERROR: ${stderr || 'ripgrep error'}`,
                 });
             }
@@ -362,7 +430,7 @@ Usage:
                     metadata: {
                         error: 'RIPGREP_NOT_FOUND',
                         path: rgBin,
-                    } as any,
+                    },
                     output: 'RIPGREP_NOT_FOUND: ripgrep binary not found',
                 });
             }
@@ -373,7 +441,7 @@ Usage:
                     metadata: {
                         error: 'RIPGREP_NO_PERMISSION',
                         path: rgBin,
-                    } as any,
+                    },
                     output: 'RIPGREP_NO_PERMISSION: No permission to execute ripgrep',
                 });
             }
@@ -384,7 +452,7 @@ Usage:
                     metadata: {
                         error: 'RIPGREP_OPERATION_NOT_PERMITTED',
                         path: rgBin,
-                    } as any,
+                    },
                     output: 'RIPGREP_OPERATION_NOT_PERMITTED: Operation not permitted',
                 });
             }
@@ -395,7 +463,7 @@ Usage:
                 metadata: {
                     error: 'GREP_EXECUTION_ERROR',
                     errorMsg,
-                } as any,
+                },
                 output: `GREP_EXECUTION_ERROR: Failed to execute ripgrep: ${errorMsg}`,
             });
         }

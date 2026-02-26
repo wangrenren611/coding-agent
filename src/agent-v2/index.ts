@@ -10,13 +10,6 @@ export { AgentError, ToolError } from './agent/errors';
 
 // Agent 内部类型和工具
 export type { ITimeProvider } from './agent/types-internal';
-export { MessageBuilder } from './agent/message-builder';
-export {
-    createUserMessage,
-    createAssistantMessage,
-    createToolCallMessage,
-    createToolResultMessage,
-} from './agent/message-builder';
 
 // 流式消息类型
 export { AgentMessageType } from './agent/stream-types';

@@ -21,8 +21,6 @@ const schema = z.object({
     character: z.number().int().min(1).describe('The character offset (1-based, as shown in editors)'),
 });
 
-type LspInput = z.infer<typeof schema>;
-
 /**
  * 语言服务缓存管理器
  */
@@ -289,7 +287,7 @@ All operations require:
         if (!result) {
             return this.result({
                 success: false,
-                metadata: { error: 'LSP_SOURCE_FILE_NOT_FOUND', filePath } as any,
+                metadata: { error: 'LSP_SOURCE_FILE_NOT_FOUND', filePath },
                 output: 'LSP_SOURCE_FILE_NOT_FOUND: Source file not found',
             });
         }
@@ -302,7 +300,7 @@ All operations require:
         if (!content) {
             return this.result({
                 success: false,
-                metadata: { error: 'LSP_SOURCE_FILE_NOT_FOUND', filePath } as any,
+                metadata: { error: 'LSP_SOURCE_FILE_NOT_FOUND', filePath },
                 output: 'LSP_SOURCE_FILE_NOT_FOUND: Source file not found',
             });
         }
@@ -373,7 +371,7 @@ All operations require:
         if (!result) {
             return this.result({
                 success: false,
-                metadata: { error: 'LSP_SOURCE_FILE_NOT_FOUND', filePath } as any,
+                metadata: { error: 'LSP_SOURCE_FILE_NOT_FOUND', filePath },
                 output: 'LSP_SOURCE_FILE_NOT_FOUND: Source file not found',
             });
         }
@@ -385,7 +383,7 @@ All operations require:
         if (!content) {
             return this.result({
                 success: false,
-                metadata: { error: 'LSP_SOURCE_FILE_NOT_FOUND', filePath } as any,
+                metadata: { error: 'LSP_SOURCE_FILE_NOT_FOUND', filePath },
                 output: 'LSP_SOURCE_FILE_NOT_FOUND: Source file not found',
             });
         }
@@ -475,7 +473,7 @@ All operations require:
         if (!result) {
             return this.result({
                 success: false,
-                metadata: { error: 'LSP_SOURCE_FILE_NOT_FOUND', filePath } as any,
+                metadata: { error: 'LSP_SOURCE_FILE_NOT_FOUND', filePath },
                 output: 'LSP_SOURCE_FILE_NOT_FOUND: Source file not found',
             });
         }
@@ -487,7 +485,7 @@ All operations require:
         if (!content) {
             return this.result({
                 success: false,
-                metadata: { error: 'LSP_SOURCE_FILE_NOT_FOUND', filePath } as any,
+                metadata: { error: 'LSP_SOURCE_FILE_NOT_FOUND', filePath },
                 output: 'LSP_SOURCE_FILE_NOT_FOUND: Source file not found',
             });
         }
@@ -537,7 +535,7 @@ All operations require:
         if (!result) {
             return this.result({
                 success: false,
-                metadata: { error: 'LSP_SOURCE_FILE_NOT_FOUND', filePath } as any,
+                metadata: { error: 'LSP_SOURCE_FILE_NOT_FOUND', filePath },
                 output: 'LSP_SOURCE_FILE_NOT_FOUND: Source file not found',
             });
         }
@@ -549,7 +547,7 @@ All operations require:
         if (!content) {
             return this.result({
                 success: false,
-                metadata: { error: 'LSP_SOURCE_FILE_NOT_FOUND', filePath } as any,
+                metadata: { error: 'LSP_SOURCE_FILE_NOT_FOUND', filePath },
                 output: 'LSP_SOURCE_FILE_NOT_FOUND: Source file not found',
             });
         }
@@ -661,7 +659,7 @@ All operations require:
         if (!result) {
             return this.result({
                 success: false,
-                metadata: { error: 'LSP_SOURCE_FILE_NOT_FOUND', filePath } as any,
+                metadata: { error: 'LSP_SOURCE_FILE_NOT_FOUND', filePath },
                 output: 'LSP_SOURCE_FILE_NOT_FOUND: Source file not found',
             });
         }
@@ -704,7 +702,7 @@ All operations require:
             } catch {
                 return this.result({
                     success: false,
-                    metadata: { error: 'LSP_FILE_NOT_FOUND', filePath: absolutePath } as any,
+                    metadata: { error: 'LSP_FILE_NOT_FOUND', filePath: absolutePath },
                     output: 'LSP_FILE_NOT_FOUND: File not found',
                 });
             }
@@ -715,7 +713,7 @@ All operations require:
             if (!supportedExtensions.includes(ext)) {
                 return this.result({
                     success: false,
-                    metadata: { error: 'LSP_UNSUPPORTED_FILE_TYPE', ext } as any,
+                    metadata: { error: 'LSP_UNSUPPORTED_FILE_TYPE', ext },
                     output: 'LSP_UNSUPPORTED_FILE_TYPE: Unsupported file type',
                 });
             }
@@ -740,7 +738,7 @@ All operations require:
                 default:
                     return this.result({
                         success: false,
-                        metadata: { error: 'LSP_UNKNOWN_OPERATION', operation: args.operation } as any,
+                        metadata: { error: 'LSP_UNKNOWN_OPERATION', operation: args.operation },
                         output: 'LSP_UNKNOWN_OPERATION: Unknown operation',
                     });
             }
@@ -750,7 +748,7 @@ All operations require:
                 metadata: {
                     error: 'LSP_OPERATION_FAILED',
                     errorMsg: error instanceof Error ? error.message : String(error),
-                } as any,
+                },
                 output: 'LSP_OPERATION_FAILED: LSP operation failed',
             });
         }

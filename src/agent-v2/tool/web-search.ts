@@ -7,6 +7,19 @@ const schema = z.object({
     maxResults: z.number().min(1).max(10).default(5).describe('Maximum number of results'),
 });
 
+interface TavilyResultItem {
+    title?: string;
+    url?: string;
+    content?: string;
+    score?: number;
+}
+
+interface TavilySearchResponse {
+    query?: string;
+    responseTime?: number;
+    results?: TavilyResultItem[];
+}
+
 export class WebSearchTool extends BaseTool<typeof schema> {
     name = 'web_search';
     description = 'Performs a web search using Tavily API.';
@@ -17,13 +30,13 @@ export class WebSearchTool extends BaseTool<typeof schema> {
         if (!process.env.TAVILY_API_KEY) {
             return this.result({
                 success: false,
-                metadata: { error: 'API_KEY_MISSING' } as any,
+                metadata: { error: 'API_KEY_MISSING' },
                 output: 'API_KEY_MISSING: TAVILY_API_KEY environment variable not set',
             });
         }
 
         // === 底层异常：网络请求失败 ===
-        let response: any;
+        let response: TavilySearchResponse;
         try {
             const tvly = tavily({ apiKey: process.env.TAVILY_API_KEY });
             response = await tvly.search(query, { maxResults: maxResults || 5 });
@@ -33,7 +46,7 @@ export class WebSearchTool extends BaseTool<typeof schema> {
                 metadata: {
                     error: 'SEARCH_FAILED',
                     errorMsg: error instanceof Error ? error.message : String(error),
-                } as any,
+                },
                 output: `SEARCH_FAILED: Web search request failed`,
             });
         }
@@ -53,7 +66,7 @@ export class WebSearchTool extends BaseTool<typeof schema> {
             });
         }
 
-        const summarizedResults = results.map((r: any) => ({
+        const summarizedResults = results.map((r) => ({
             title: r.title,
             url: r.url,
             content: r.content || '',

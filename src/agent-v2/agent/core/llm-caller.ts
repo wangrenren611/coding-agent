@@ -189,6 +189,13 @@ export class LLMCaller {
                         'STREAM_BUFFER_OVERFLOW'
                     );
                 }
+                if (abortReason === 'validation_violation') {
+                    throw new LLMPermanentError(
+                        'Stream response failed validation checks',
+                        undefined,
+                        'STREAM_VALIDATION_VIOLATION'
+                    );
+                }
                 throw new LLMRetryableError('Stream processor aborted unexpectedly', undefined, 'STREAM_ABORTED');
             }
         }
@@ -255,7 +262,6 @@ export class LLMCaller {
     }
 
     private createStreamChunkError(chunkError: NonNullable<Chunk['error']>, chunkId?: string): Error {
-        console.log('[LLMCaller] createStreamChunkError', chunkError, chunkId);
         const rawMessage =
             typeof chunkError.message === 'string' && chunkError.message.trim().length > 0
                 ? chunkError.message.trim()
@@ -290,7 +296,7 @@ export class LLMCaller {
             'context_length',
             'content_filter',
             'safety',
-            'invalid_parameter_error'
+            'invalid_parameter_error',
         ];
 
         return permanentIndicators.some((indicator) => signature.includes(indicator));

@@ -52,12 +52,10 @@ const KNOWN_NONSENSE_PATTERNS = [
     /(\b\w+\b)(\s+\1){4,}/gi,
     // 重复短语模式
     /(.{5,50})\1{3,}/g,
-    // 乱码模式
-    /[\x00-\x08\x0B\x0C\x0E-\x1F]/,
     // 无意义重复字母
     /([a-zA-Z])\1{10,}/g,
     // 连续无意义标点
-    /[\.\,\!\?\;\:]{20,}/g,
+    /[.,!?;:]{20,}/g,
     // 重复的 "Alpha/Daemon/Gamma" 等幻觉常见词
     /\b(Alpha|Daemon|Gamma|Beta|Omega|Lambda)\b[\s\S]*?\b\1\b[\s\S]*?\b\1\b[\s\S]*?\b\1\b/gi,
     // 重复的中文无意义片段
@@ -122,6 +120,16 @@ export class ResponseValidator {
         }
 
         this.processedChars += newContent.length;
+
+        if (this.processedChars > this.options.maxResponseLength) {
+            return {
+                valid: false,
+                violationType: 'length',
+                details: `Response length ${this.processedChars} exceeds maximum ${this.options.maxResponseLength}`,
+                action: this.options.abortOnViolation ? 'abort' : 'truncate',
+                detectedPatterns: [`length:${this.processedChars}`],
+            };
+        }
 
         // 检查是否到达检查频率
         if (this.processedChars - this.lastCheckPosition < this.options.checkFrequency) {
@@ -224,7 +232,22 @@ export class ResponseValidator {
             }
         }
 
+        if (this.containsSuspiciousControlChars(content)) {
+            detected += 1;
+            patterns.push('control_chars');
+        }
+
         return { detected, patterns };
+    }
+
+    private containsSuspiciousControlChars(content: string): boolean {
+        for (let i = 0; i < content.length; i++) {
+            const code = content.charCodeAt(i);
+            if (code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

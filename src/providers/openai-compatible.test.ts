@@ -462,8 +462,9 @@ describe('OpenAICompatibleProvider', () => {
                 debug: false,
             });
 
-            const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(
-                async (_input: RequestInfo | URL, init?: RequestInit) => {
+            const fetchSpy = vi
+                .spyOn(globalThis, 'fetch')
+                .mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
                     const signal = init?.signal;
                     expect(signal).toBeInstanceOf(AbortSignal);
 
@@ -483,8 +484,7 @@ describe('OpenAICompatibleProvider', () => {
                     });
 
                     throw new Error('should not reach successful fetch path');
-                }
-            );
+                });
 
             const error = await shortTimeoutProvider.generate([{ role: 'user', content: 'Hello' }]).then(
                 () => null,

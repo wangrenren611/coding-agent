@@ -444,13 +444,18 @@ export function toRunTimestamps(
     };
 }
 
-export function extractToolsUsed(messages: Array<{ tool_calls?: Array<{ function?: { name?: string } }> }>): string[] {
+export function extractToolsUsed(messages: Message[]): string[] {
     const tools = new Set<string>();
     for (const message of messages) {
         if (!Array.isArray(message.tool_calls)) continue;
-        for (const call of message.tool_calls) {
-            const name = call?.function?.name;
-            if (name) tools.add(name);
+        for (const rawCall of message.tool_calls) {
+            if (!rawCall || typeof rawCall !== 'object') continue;
+            const fn = 'function' in rawCall ? rawCall.function : undefined;
+            if (!fn || typeof fn !== 'object') continue;
+            const name = 'name' in fn ? fn.name : undefined;
+            if (typeof name === 'string' && name.length > 0) {
+                tools.add(name);
+            }
         }
     }
     return Array.from(tools);

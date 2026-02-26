@@ -32,7 +32,7 @@ export class WebFetchTool extends BaseTool<typeof schema> {
                 metadata: {
                     error: 'INVALID_URL',
                     duration: Date.now() - startTime,
-                } as any,
+                },
                 output: 'INVALID_URL: URL must start with http:// or https://',
             });
         }
@@ -80,7 +80,7 @@ export class WebFetchTool extends BaseTool<typeof schema> {
                         error: 'FETCH_FAILED',
                         statusCode: response.status,
                         duration: Date.now() - startTime,
-                    } as any,
+                    },
                     output: `FETCH_FAILED: Request failed with status code: ${response.status}`,
                 });
             }
@@ -93,7 +93,7 @@ export class WebFetchTool extends BaseTool<typeof schema> {
                     metadata: {
                         error: 'RESPONSE_TOO_LARGE',
                         duration: Date.now() - startTime,
-                    } as any,
+                    },
                     output: 'RESPONSE_TOO_LARGE: Response too large (exceeds 5MB limit)',
                 });
             }
@@ -106,7 +106,7 @@ export class WebFetchTool extends BaseTool<typeof schema> {
                     metadata: {
                         error: 'RESPONSE_TOO_LARGE',
                         duration: Date.now() - startTime,
-                    } as any,
+                    },
                     output: 'RESPONSE_TOO_LARGE: Response too large (exceeds 5MB limit)',
                 });
             }
@@ -159,7 +159,7 @@ export class WebFetchTool extends BaseTool<typeof schema> {
                     error: 'FETCH_ERROR',
                     errorMsg: errorMessage,
                     duration: Date.now() - startTime,
-                } as any,
+                },
                 output: `FETCH_ERROR: Web fetch failed: ${errorMessage}`,
             });
         } finally {

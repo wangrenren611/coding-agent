@@ -20,7 +20,7 @@ import type { SkillFrontmatter, ParsedSkillFile } from './types';
  * 支持相对路径：@./file.ts, @../parent/file.ts
  * 排除：邮箱、代码块内、被反引号包围的
  */
-const FILE_REF_REGEX = /(?<![`\w])@(\.{0,2}[\/\\]?[^\s`,.*!?()]+(?:\.[^\s`,.*!?()]+)+)/g;
+const FILE_REF_REGEX = /(?<![`\w])@(\.{0,2}[/\\]?[^\s`,.*!?()]+(?:\.[^\s`,.*!?()]+)+)/g;
 
 /**
  * Shell 命令正则表达式

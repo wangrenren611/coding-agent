@@ -17,7 +17,6 @@ const GREEN = '\x1b[32m';
 const GRAY = '\x1b[90m';
 const YELLOW = '\x1b[33m';
 const BLUE = '\x1b[34m';
-const MAGENTA = '\x1b[35m';
 const RESET = '\x1b[0m';
 
 function parseRequestTimeoutMs(envValue: string | undefined): number {
@@ -29,8 +28,6 @@ function parseRequestTimeoutMs(envValue: string | undefined): number {
 }
 
 // 状态追踪
-let isReasoning = false;
-let isTexting = false;
 let lastStatusSignature = '';
 
 // 子 Agent 缩进前缀
@@ -51,7 +48,6 @@ function handleSingleMessage(message: BaseAgentEvent, indent: string = '') {
     switch (message.type) {
         // ==================== 推理/思考内容 (thinking 模式) ====================
         case AgentMessageType.REASONING_START:
-            isReasoning = true;
             process.stdout.write(`${indent}${GRAY}┌─ 💭 思考过程${RESET}\n`);
             process.stdout.write(`${indent}${GRAY}│${RESET} `);
             break;
@@ -61,14 +57,12 @@ function handleSingleMessage(message: BaseAgentEvent, indent: string = '') {
             break;
 
         case AgentMessageType.REASONING_COMPLETE:
-            isReasoning = false;
             process.stdout.write('\n');
             process.stdout.write(`${indent}${GRAY}└─ 思考完成${RESET}\n\n`);
             break;
 
         // ==================== 正式文本回复 ====================
         case AgentMessageType.TEXT_START:
-            isTexting = true;
             process.stdout.write(`${indent}${GREEN}┌─ 🤖 回复${RESET}\n`);
             process.stdout.write(`${indent}${GREEN}│${RESET} `);
             break;
@@ -78,13 +72,12 @@ function handleSingleMessage(message: BaseAgentEvent, indent: string = '') {
             break;
 
         case AgentMessageType.TEXT_COMPLETE:
-            isTexting = false;
             process.stdout.write('\n');
             process.stdout.write(`${indent}${GREEN}└─ 回复完成${RESET}\n`);
             break;
 
         // ==================== 工具调用 ====================
-        case AgentMessageType.TOOL_CALL_CREATED:
+        case AgentMessageType.TOOL_CALL_CREATED: {
             const tools = message.payload.tool_calls.map(
                 (call) => `${call.toolName}(${call.args.slice(0, 50)}${call.args.length > 50 ? '...' : ''})`
             );
@@ -96,6 +89,7 @@ function handleSingleMessage(message: BaseAgentEvent, indent: string = '') {
             process.stdout.write('\n');
             console.log(`${indent}${YELLOW}🔧 工具调用:${RESET}`, tools.join(', '));
             break;
+        }
 
         // case AgentMessageType.TOOL_CALL_STREAM:
         //     // 工具执行中的流式输出（如终端输出）
@@ -104,7 +98,7 @@ function handleSingleMessage(message: BaseAgentEvent, indent: string = '') {
         //     }
         //     break;
 
-        case AgentMessageType.TOOL_CALL_RESULT:
+        case AgentMessageType.TOOL_CALL_RESULT: {
             const status = message.payload.status === 'success' ? '✅' : '❌';
             const resultPreview =
                 typeof message.payload.result === 'string'
@@ -112,9 +106,10 @@ function handleSingleMessage(message: BaseAgentEvent, indent: string = '') {
                     : JSON.stringify(message.payload.result).slice(0, 100);
             console.log(`\n${indent}${status} 工具结果 [${message.payload.callId}]:`, resultPreview);
             break;
+        }
 
         // ==================== 状态更新 ====================
-        case AgentMessageType.STATUS:
+        case AgentMessageType.STATUS: {
             const state = message.payload.state;
             const signature = `${indent}|${state}|${message.payload.message || ''}|${message.payload.meta?.retry?.attempt || 0}`;
             if (signature === lastStatusSignature) {
@@ -135,9 +130,10 @@ function handleSingleMessage(message: BaseAgentEvent, indent: string = '') {
                 `${indent}\n${icon} 状态: ${state}${message.payload.message ? ` - ${message.payload.message}` : ''}`
             );
             break;
+        }
 
         // ==================== Token 使用量更新 ====================
-        case AgentMessageType.USAGE_UPDATE:
+        case AgentMessageType.USAGE_UPDATE: {
             const usage = message.payload.usage;
             const cumulative = message.payload.cumulative;
 
@@ -149,6 +145,7 @@ function handleSingleMessage(message: BaseAgentEvent, indent: string = '') {
                     (cumulative ? ` | 累计: ${cumulative.total_tokens}` : '')
             );
             break;
+        }
 
         // ==================== 错误处理 ====================
         case AgentMessageType.ERROR:
@@ -212,7 +209,7 @@ function handleSubagentEvent(message: SubagentEventMessage, indent: string = '')
         if (
             event.type === AgentMessageType.STATUS &&
             !closedSubagentTasks.has(task_id) &&
-            ['completed', 'failed', 'aborted'].includes((event as any).payload.state)
+            ['completed', 'failed', 'aborted'].includes(event.payload.state)
         ) {
             console.log(`${indent}${BLUE}└─────────────────────────────────────────${RESET}`);
             closedSubagentTasks.add(task_id);
@@ -270,7 +267,7 @@ async function demo1() {
             // 如需恢复会话，请取消注释并填入有效 sessionId
             //    sessionId: 'agent-7',
             // sessionId: 'agent-8',
-           sessionId: 'agent-32',
+            // sessionId: 'agent-32',
             //  sessionId: 'agent-33',
             //   sessionId:'18a09614-bb1e-4f06-b685-d040ff08c3aa',
 

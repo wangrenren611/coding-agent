@@ -1,4 +1,4 @@
-import { BaseLLMMessage, FinishReason, MessageContent, Role, ToolCall, Usage } from '../../providers';
+import { BaseLLMMessage, FinishReason, MessageContent, Role, Usage } from '../../providers';
 
 export type MessageType = 'text' | 'tool-call' | 'tool-result' | 'summary';
 

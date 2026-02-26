@@ -3,6 +3,27 @@ import { Message } from './types';
 import { InputContentPart, LLMProvider, LLMResponse } from '../../providers';
 import { IMemoryManager, CompactionRecord } from '../memory/types';
 
+type ToolCallLike = { id?: string };
+
+function getAssistantToolCalls(message: Message): ToolCallLike[] {
+    if (message.role !== 'assistant') {
+        return [];
+    }
+    const rawToolCalls = message.tool_calls;
+    if (!Array.isArray(rawToolCalls)) {
+        return [];
+    }
+    return rawToolCalls.filter((call): call is ToolCallLike => typeof call === 'object' && call !== null);
+}
+
+function getToolCallId(message: Message): string | undefined {
+    if (message.role !== 'tool') {
+        return undefined;
+    }
+    const toolCallId = message.tool_call_id;
+    return typeof toolCallId === 'string' ? toolCallId : undefined;
+}
+
 export interface CompactionConfig {
     /** 最大上下文 Token 数 */
     maxTokens: number;
@@ -236,11 +257,9 @@ export class Compaction {
         const toolCallToAssistant = new Map<string, Message>();
 
         for (const msg of [...pending, ...active]) {
-            if (msg.role === 'assistant' && Array.isArray((msg as any).tool_calls)) {
-                for (const call of (msg as any).tool_calls) {
-                    if (call?.id) {
-                        toolCallToAssistant.set(call.id, msg);
-                    }
+            for (const call of getAssistantToolCalls(msg)) {
+                if (call.id) {
+                    toolCallToAssistant.set(call.id, msg);
                 }
             }
         }
@@ -248,7 +267,7 @@ export class Compaction {
         // 找出保护区中需要配对的 tool 消息
         const toolsNeedingPair = active.filter((msg) => {
             if (msg.role !== 'tool') return false;
-            const toolCallId = (msg as any).tool_call_id;
+            const toolCallId = getToolCallId(msg);
             return typeof toolCallId === 'string' && toolCallToAssistant.has(toolCallId);
         });
 
@@ -261,7 +280,10 @@ export class Compaction {
         const toolCallIdsToMove = new Set<string>();
 
         for (const toolMsg of toolsNeedingPair) {
-            const toolCallId = (toolMsg as any).tool_call_id;
+            const toolCallId = getToolCallId(toolMsg);
+            if (!toolCallId) {
+                continue;
+            }
             const assistantMsg = toolCallToAssistant.get(toolCallId);
             if (assistantMsg) {
                 assistantsToMove.add(assistantMsg);
@@ -273,8 +295,8 @@ export class Compaction {
         const newPending = pending.filter((msg) => {
             if (assistantsToMove.has(msg)) return false;
             if (msg.role === 'tool') {
-                const toolCallId = (msg as any).tool_call_id;
-                if (toolCallIdsToMove.has(toolCallId)) return false;
+                const toolCallId = getToolCallId(msg);
+                if (toolCallId && toolCallIdsToMove.has(toolCallId)) return false;
             }
             return true;
         });
@@ -289,9 +311,9 @@ export class Compaction {
             addedMessages.add(assistantMsg);
 
             // 添加对应的 tool 消息
-            for (const call of (assistantMsg as any).tool_calls || []) {
+            for (const call of getAssistantToolCalls(assistantMsg)) {
                 if (call?.id) {
-                    const toolMsg = active.find((m) => m.role === 'tool' && (m as any).tool_call_id === call.id);
+                    const toolMsg = active.find((m) => m.role === 'tool' && getToolCallId(m) === call.id);
                     if (toolMsg && !addedMessages.has(toolMsg)) {
                         newActive.push(toolMsg);
                         addedMessages.add(toolMsg);

@@ -9,6 +9,7 @@
  */
 
 import type { FinishReason, MessageContent, Usage, InputContentPart } from '../../providers';
+import type { ToolResult } from '../tool/base';
 
 // 从 providers 重导出共享类型，避免重复定义
 export type { ToolCall } from '../../providers';
@@ -79,11 +80,12 @@ export interface SafeError {
 export interface ToolExecutionResult {
     /** 工具调用 ID */
     tool_call_id: string;
+    /** 工具名称 */
+    name: string;
+    /** 原始参数 */
+    arguments: string;
     /** 执行结果 */
-    result?: {
-        success?: boolean;
-        [key: string]: unknown;
-    };
+    result: ToolResult;
 }
 
 // ==================== 事件类型 ====================

@@ -215,7 +215,9 @@ describe('Session persistence queue', () => {
             content: '',
             type: 'tool-call',
             finish_reason: 'tool_calls',
-            tool_calls: [{ id: 'call_ctx_1', type: 'function', index: 0, function: { name: 'tool_x', arguments: '{}' } }],
+            tool_calls: [
+                { id: 'call_ctx_1', type: 'function', index: 0, function: { name: 'tool_x', arguments: '{}' } },
+            ],
         });
         session.addMessage({
             messageId: 'user-interleaved',
@@ -258,7 +260,9 @@ describe('Session persistence queue', () => {
         const historyTools = fullHistory.filter((msg) => msg.role === 'tool');
         expect(historyTools).toHaveLength(2);
 
-        const repairedInHistory = historyTools.find((msg) => String(msg.content || '').includes('TOOL_CALL_INTERRUPTED'));
+        const repairedInHistory = historyTools.find((msg) =>
+            String(msg.content || '').includes('TOOL_CALL_INTERRUPTED')
+        );
         expect(repairedInHistory?.tool_call_id).toBe('call_ctx_1');
         expect(repairedInHistory?.excludedFromContext).not.toBe(true);
 
@@ -337,7 +341,12 @@ describe('Session persistence queue', () => {
         const fullHistory = await memoryManager.getFullHistory({ sessionId });
         const historyTools = fullHistory.filter((msg) => msg.role === 'tool');
         expect(historyTools).toHaveLength(4);
-        expect(historyTools.map((msg) => msg.tool_call_id)).toEqual(['call_keep', 'call_keep', 'call_unknown', 'call_missing']);
+        expect(historyTools.map((msg) => msg.tool_call_id)).toEqual([
+            'call_keep',
+            'call_keep',
+            'call_unknown',
+            'call_missing',
+        ]);
 
         const duplicateRaw = historyTools.find((msg) => String(msg.content || '').includes('"output":"duplicate"'));
         expect(duplicateRaw?.excludedFromContext).toBe(true);
@@ -431,11 +440,26 @@ describe('Session persistence queue', () => {
             finish_reason: null, // 中断时 finish_reason 为 null
             tool_calls: [
                 // 合法的 tool call
-                { id: 'call_valid', type: 'function', index: 0, function: { name: 'read_file', arguments: '{"path": "test.txt"}' } },
+                {
+                    id: 'call_valid',
+                    type: 'function',
+                    index: 0,
+                    function: { name: 'read_file', arguments: '{"path": "test.txt"}' },
+                },
                 // 半截 JSON（流式中断）
-                { id: 'call_truncated', type: 'function', index: 1, function: { name: 'write_file', arguments: '{"path": "test.' } },
+                {
+                    id: 'call_truncated',
+                    type: 'function',
+                    index: 1,
+                    function: { name: 'write_file', arguments: '{"path": "test.' },
+                },
                 // 完全非法的 JSON
-                { id: 'call_invalid', type: 'function', index: 2, function: { name: 'bash', arguments: '{not: valid}' } },
+                {
+                    id: 'call_invalid',
+                    type: 'function',
+                    index: 2,
+                    function: { name: 'bash', arguments: '{not: valid}' },
+                },
                 // 空 arguments（允许，无参数的工具调用）
                 { id: 'call_empty', type: 'function', index: 3, function: { name: 'list_dir', arguments: '' } },
             ],

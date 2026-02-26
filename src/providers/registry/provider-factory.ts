@@ -6,7 +6,7 @@
 
 import { StandardAdapter } from '../adapters/standard';
 import { OpenAICompatibleProvider, OpenAICompatibleConfig } from '../openai-compatible';
-import type { BaseProviderConfig, ModelId, ProviderType } from '../types';
+import type { BaseProviderConfig, ModelId } from '../types';
 import { MODEL_DEFINITIONS } from './model-config';
 import type { ModelConfig } from '../types';
 import { KimiAdapter } from '../adapters/kimi';

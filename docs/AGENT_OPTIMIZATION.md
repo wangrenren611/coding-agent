@@ -244,19 +244,18 @@ function calculateLoopLimit(context): number {
 
 ---
 
-**问题 2: 顺序执行工具调用**
+**问题 2: 已并行执行，但缺少依赖感知调度**
 
 ```typescript
-// 当前实现：顺序执行
-for (const toolCall of toolCalls) {
-    const result = await this.toolExecutor.execute(toolCall);
-    results.push(result);
-}
+// 当前实现：直接并行执行
+const results = await Promise.all(
+  toolCalls.map((toolCall) => this.executeSingle(toolCall))
+);
 ```
 
 **影响**: 
-- 无依赖关系的工具调用（如同时读取多个文件）被顺序执行
-- 增加总体执行时间
+- 对同一文件有读写冲突的调用仍可能被并发执行
+- 缺少按依赖/副作用分组的执行策略
 
 **优化方案: 并行工具执行**
 
@@ -507,16 +506,18 @@ class ProgressTracker {
 
 #### 当前问题分析
 
-**问题 1: 统一超时时间**
+**问题 1: Registry 默认统一超时，但存在工具级覆写与工具内超时**
 
 ```typescript
 // src/agent-v2/tool/registry.ts
-const DEFAULT_TOOL_TIMEOUT = 300000;  // 5 分钟，所有工具统一
+const DEFAULT_TOOL_TIMEOUT = 300000;  // Registry 默认超时
+// BaseTool.executionTimeoutMs 支持工具级覆写
+// 部分工具（如 web_fetch / bash）还带内部超时
 ```
 
 **影响**: 
-- 快速工具（如 `read_file`）超时时间过长
-- 慢速工具（如 `web_fetch`）可能不够
+- 同一层配置分散（Registry / Tool / Tool-internal）
+- 超时来源不统一，排障成本较高
 
 **优化方案: 动态工具超时**
 
@@ -874,7 +875,7 @@ export class ListDirectoryTool extends BaseTool<typeof ListDirectorySchema> {
 
 #### 当前问题分析
 
-**问题 1: 顺序执行无依赖工具**
+**问题 1: 已并行执行工具调用，但缺少依赖与冲突控制**
 
 **优化方案: 工具依赖图**
 
@@ -1026,17 +1027,16 @@ class FallbackExecutor {
 
 #### 当前问题分析
 
-**问题 1: 压缩触发阈值固定**
+**问题 1: 压缩阈值是会话级静态配置，缺少任务自适应**
 
 ```typescript
-// src/agent-v2/session/compaction.ts
-const triggerRatio = 0.9;  // 固定 90% 触发
+// src/agent-v2/session/index.ts + compaction.ts
+// triggerRatio / keepMessagesNum 在 Session 构造时注入，运行中静态使用
 ```
 
 **影响**: 
-- 所有任务类型使用相同阈值，不够灵活
-- 代码生成任务需要更多上下文，应延迟压缩
-- 简单问答可激进压缩，节省 Token
+- 只能在创建会话时按配置调参，不能按任务实时调整
+- 同会话内不同阶段无法动态切换策略
 
 **优化方案: 动态压缩阈值**
 
@@ -1730,11 +1730,11 @@ class RootCauseAnalyzer {
 
 #### 当前问题分析
 
-**问题 1: 固定重试延迟**
+**问题 1: 默认固定重试延迟（可被 retryAfter 覆盖），缺少指数退避+jitter**
 
 ```typescript
 // 当前实现
-const RETRY_DELAY_MS = 10000;  // 固定 10 秒
+// 默认 retryDelayMs 固定；若错误携带 retryAfter，会优先使用 retryAfter
 ```
 
 **优化方案: 指数退避**
@@ -2620,6 +2620,8 @@ class CostOptimizer {
 
 ### 8.2 新增 Provider 建议
 
+> 注：DeepSeek 与 Qwen 已在当前代码中支持，本节更适合聚焦尚未接入或待完善的 Provider。
+
 | Provider | 厂商 | 模型 | 特点 | 优先级 |
 |----------|------|------|------|--------|
 | DeepSeek | 深度求索 | DeepSeek-V2/V3 | 代码能力强，价格低 | ⭐⭐⭐ |
@@ -3163,7 +3165,10 @@ class QuotaManager {
 
 #### 当前问题分析
 
-**问题 1: 缺少结构化日志**
+**问题 1: 缺少统一结构化日志落盘/检索能力（事件总线已存在）**
+
+> 现状补充：系统已定义 EventType；工具事件（TOOL_START/TOOL_SUCCESS/TOOL_FAILED）已接线到 EventBus，
+> 但尚未形成统一日志格式、存储与查询链路。
 
 **优化方案: 结构化日志**
 
@@ -4320,7 +4325,7 @@ const examplePlugin: Plugin = {
 
 #### 当前问题分析
 
-**问题 1: 缺少多 Agent 协作模式**
+**问题 1: 已有 Task 子 Agent 协作能力，缺少更强编排能力**
 
 **优化方案: Agent 角色系统**
 
@@ -4598,7 +4603,7 @@ ${audits.map(a =>
 
 ---
 
-**问题 2: 缺少敏感信息检测**
+**问题 2: 已有工具结果脱敏，仍缺输入侧与审计侧统一检测**
 
 **优化方案: 敏感信息检测**
 

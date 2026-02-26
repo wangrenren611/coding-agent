@@ -135,7 +135,7 @@ export interface ToolCallResultMessage extends BaseAgentMessage {
     payload: {
         callId: string;
         status: 'success' | 'error';
-        result: any; // 工具返回的完整结果
+        result: unknown; // 工具返回的完整结果
         exitCode?: number;
     };
     msgId?: string; // 关联的消息 ID

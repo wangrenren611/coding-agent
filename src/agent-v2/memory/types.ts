@@ -290,11 +290,7 @@ export interface IMemoryManager {
      * 注意：不会删除完整历史，历史会保留并标记为 excludedFromContext
      * @returns true 表示上下文中消息被删除，false 表示消息不存在
      */
-    removeMessageFromContext(
-        sessionId: string,
-        messageId: string,
-        reason?: ContextExclusionReason
-    ): Promise<boolean>;
+    removeMessageFromContext(sessionId: string, messageId: string, reason?: ContextExclusionReason): Promise<boolean>;
 
     /**
      * 清空当前上下文（保留系统消息）

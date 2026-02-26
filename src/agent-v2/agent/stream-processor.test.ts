@@ -13,6 +13,7 @@ describe('StreamProcessor', () => {
     let onTextComplete: ReturnType<typeof vi.fn>;
     let onMessageCreate: ReturnType<typeof vi.fn>;
     let onUsageUpdate: ReturnType<typeof vi.fn>;
+    let onValidationViolation: ReturnType<typeof vi.fn>;
 
     beforeEach(() => {
         onMessageUpdate = vi.fn();
@@ -24,6 +25,7 @@ describe('StreamProcessor', () => {
         onTextComplete = vi.fn();
         onMessageCreate = vi.fn();
         onUsageUpdate = vi.fn();
+        onValidationViolation = vi.fn();
 
         processor = new StreamProcessor({
             maxBufferSize: 100000,
@@ -36,6 +38,7 @@ describe('StreamProcessor', () => {
             onTextComplete,
             onMessageCreate,
             onUsageUpdate,
+            onValidationViolation,
         });
 
         processor.setMessageId('test-msg-id');
@@ -686,6 +689,67 @@ describe('StreamProcessor', () => {
             smallProcessor.processChunk(chunk);
 
             expect(smallProcessor.isAborted()).toBe(true);
+        });
+
+        it('should abort when total content+reasoning exceeds limit', () => {
+            const smallProcessor = new StreamProcessor({
+                maxBufferSize: 10,
+                onMessageUpdate,
+                onTextDelta: vi.fn(),
+                onTextStart: vi.fn(),
+                onTextComplete: vi.fn(),
+                onMessageCreate: vi.fn(),
+                onReasoningDelta: vi.fn(),
+                onReasoningStart: vi.fn(),
+                onReasoningComplete: vi.fn(),
+            });
+            smallProcessor.setMessageId('test-id');
+
+            smallProcessor.processChunk({
+                id: 'c1',
+                choices: [{ index: 0, delta: { reasoning_content: '12345' } }],
+            });
+            smallProcessor.processChunk({
+                id: 'c2',
+                choices: [{ index: 0, delta: { content: '12345' } }],
+            });
+            smallProcessor.processChunk({
+                id: 'c3',
+                choices: [{ index: 0, delta: { content: '1' } }],
+            });
+
+            expect(smallProcessor.isAborted()).toBe(true);
+            expect(smallProcessor.getAbortReason()).toBe('buffer_overflow');
+        });
+    });
+
+    describe('validation', () => {
+        it('should trigger validation callback and abort when violation is fatal', () => {
+            const validatingProcessor = new StreamProcessor({
+                maxBufferSize: 100000,
+                onMessageUpdate,
+                onTextDelta: vi.fn(),
+                onTextStart: vi.fn(),
+                onTextComplete: vi.fn(),
+                onMessageCreate: vi.fn(),
+                onValidationViolation,
+                validatorOptions: {
+                    repetitionThreshold: 2,
+                    nonsenseThreshold: 1,
+                    checkFrequency: 1,
+                    abortOnViolation: true,
+                },
+            });
+            validatingProcessor.setMessageId('validation-id');
+
+            validatingProcessor.processChunk({
+                id: 'v1',
+                choices: [{ index: 0, delta: { content: 'alpha alpha alpha alpha alpha alpha' } }],
+            });
+
+            expect(onValidationViolation).toHaveBeenCalledTimes(1);
+            expect(validatingProcessor.isAborted()).toBe(true);
+            expect(validatingProcessor.getAbortReason()).toBe('validation_violation');
         });
     });
 

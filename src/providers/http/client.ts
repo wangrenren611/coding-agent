@@ -22,9 +22,7 @@ export interface HttpClientOptions {
     defaultTimeoutMs?: number;
 }
 
-export interface RequestInitWithOptions extends RequestInit {
-    // 预留扩展
-}
+export type RequestInitWithOptions = RequestInit;
 
 /**
  * HTTP 客户端
