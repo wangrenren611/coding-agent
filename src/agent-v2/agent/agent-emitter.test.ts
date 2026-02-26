@@ -25,11 +25,14 @@ describe('AgentEmitter', () => {
 
     describe('构造函数', () => {
         it('应该使用提供的配置初始化', () => {
-            expect(() => new AgentEmitter({
-                streamCallback: mockCallback,
-                sessionId: 'test',
-                getTimestamp: () => Date.now(),
-            })).not.toThrow();
+            expect(
+                () =>
+                    new AgentEmitter({
+                        streamCallback: mockCallback,
+                        sessionId: 'test',
+                        getTimestamp: () => Date.now(),
+                    })
+            ).not.toThrow();
         });
 
         it('应该允许无 streamCallback', () => {
@@ -46,28 +49,26 @@ describe('AgentEmitter', () => {
         it('应该更新配置', () => {
             const newCallback = vi.fn();
             emitter.updateConfig({ streamCallback: newCallback });
-            
+
             emitter.emitStatus(AgentStatus.RUNNING, 'running');
-            
+
             expect(newCallback).toHaveBeenCalled();
             expect(mockCallback).not.toHaveBeenCalled();
         });
 
         it('应该更新 sessionId', () => {
             emitter.updateConfig({ sessionId: 'new-session-id' });
-            
+
             emitter.emitStatus(AgentStatus.IDLE, 'test');
-            
-            expect(mockCallback).toHaveBeenCalledWith(
-                expect.objectContaining({ sessionId: 'new-session-id' })
-            );
+
+            expect(mockCallback).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'new-session-id' }));
         });
     });
 
     describe('状态事件', () => {
         it('emitStatus 应该发送正确的消息', () => {
             emitter.emitStatus(AgentStatus.RUNNING, 'Agent is running', 'msg-1');
-            
+
             expect(mockCallback).toHaveBeenCalledWith({
                 type: AgentMessageType.STATUS,
                 payload: { state: AgentStatus.RUNNING, message: 'Agent is running' },
@@ -79,7 +80,7 @@ describe('AgentEmitter', () => {
 
         it('emitStatus 应该支持无 msgId', () => {
             emitter.emitStatus(AgentStatus.IDLE, 'Agent is idle');
-            
+
             expect(mockCallback).toHaveBeenCalledWith(
                 expect.objectContaining({
                     type: AgentMessageType.STATUS,
@@ -87,16 +88,64 @@ describe('AgentEmitter', () => {
                 })
             );
             // 确保没有 msgId 字段
-            expect(mockCallback).toHaveBeenCalledWith(
-                expect.not.objectContaining({ msgId: expect.anything() })
-            );
+            expect(mockCallback).toHaveBeenCalledWith(expect.not.objectContaining({ msgId: expect.anything() }));
+        });
+
+        it('emitStatus 应该支持结构化 meta', () => {
+            emitter.emitStatus(AgentStatus.RETRYING, 'Retrying...', 'msg-2', {
+                source: 'agent',
+                phase: 'retry',
+                retry: {
+                    type: 'normal',
+                    attempt: 1,
+                    max: 3,
+                    delayMs: 1000,
+                },
+            });
+
+            expect(mockCallback).toHaveBeenCalledWith({
+                type: AgentMessageType.STATUS,
+                payload: {
+                    state: AgentStatus.RETRYING,
+                    message: 'Retrying...',
+                    meta: {
+                        source: 'agent',
+                        phase: 'retry',
+                        retry: {
+                            type: 'normal',
+                            attempt: 1,
+                            max: 3,
+                            delayMs: 1000,
+                        },
+                    },
+                },
+                msgId: 'msg-2',
+                sessionId,
+                timestamp,
+            });
+        });
+    });
+
+    describe('错误事件', () => {
+        it('emitError 应该发送正确的消息', () => {
+            emitter.emitError('boom', 'task-failed');
+
+            expect(mockCallback).toHaveBeenCalledWith({
+                type: AgentMessageType.ERROR,
+                payload: {
+                    error: 'boom',
+                    phase: 'task-failed',
+                },
+                sessionId,
+                timestamp,
+            });
         });
     });
 
     describe('文本事件', () => {
         it('emitTextStart 应该发送正确的消息', () => {
             emitter.emitTextStart('msg-1');
-            
+
             expect(mockCallback).toHaveBeenCalledWith({
                 type: AgentMessageType.TEXT_START,
                 payload: { content: '' },
@@ -108,7 +157,7 @@ describe('AgentEmitter', () => {
 
         it('emitTextDelta 应该发送正确的消息', () => {
             emitter.emitTextDelta('Hello', 'msg-1');
-            
+
             expect(mockCallback).toHaveBeenCalledWith({
                 type: AgentMessageType.TEXT_DELTA,
                 payload: { content: 'Hello' },
@@ -120,7 +169,7 @@ describe('AgentEmitter', () => {
 
         it('emitTextComplete 应该发送正确的消息', () => {
             emitter.emitTextComplete('msg-1');
-            
+
             expect(mockCallback).toHaveBeenCalledWith({
                 type: AgentMessageType.TEXT_COMPLETE,
                 payload: { content: '' },
@@ -134,7 +183,7 @@ describe('AgentEmitter', () => {
     describe('推理事件', () => {
         it('emitReasoningStart 应该发送正确的消息', () => {
             emitter.emitReasoningStart('msg-1');
-            
+
             expect(mockCallback).toHaveBeenCalledWith({
                 type: AgentMessageType.REASONING_START,
                 payload: { content: '' },
@@ -146,7 +195,7 @@ describe('AgentEmitter', () => {
 
         it('emitReasoningDelta 应该发送正确的消息', () => {
             emitter.emitReasoningDelta('Thinking...', 'msg-1');
-            
+
             expect(mockCallback).toHaveBeenCalledWith({
                 type: AgentMessageType.REASONING_DELTA,
                 payload: { content: 'Thinking...' },
@@ -158,7 +207,7 @@ describe('AgentEmitter', () => {
 
         it('emitReasoningComplete 应该发送正确的消息', () => {
             emitter.emitReasoningComplete('msg-1');
-            
+
             expect(mockCallback).toHaveBeenCalledWith({
                 type: AgentMessageType.REASONING_COMPLETE,
                 payload: { content: '' },
@@ -183,7 +232,7 @@ describe('AgentEmitter', () => {
 
         it('emitToolCallCreated 应该发送正确的消息', () => {
             emitter.emitToolCallCreated(mockToolCalls as any, 'msg-1', '思考中...');
-            
+
             expect(mockCallback).toHaveBeenCalledWith({
                 type: AgentMessageType.TOOL_CALL_CREATED,
                 payload: {
@@ -201,7 +250,7 @@ describe('AgentEmitter', () => {
 
         it('emitToolCallResult 应该发送正确的消息', () => {
             emitter.emitToolCallResult('call-1', { success: true, data: 'test' }, 'success', 'msg-1');
-            
+
             expect(mockCallback).toHaveBeenCalledWith({
                 type: AgentMessageType.TOOL_CALL_RESULT,
                 payload: {
@@ -217,7 +266,7 @@ describe('AgentEmitter', () => {
 
         it('emitToolCallResult 应该处理字符串结果', () => {
             emitter.emitToolCallResult('call-1', 'error message', 'error', 'msg-1');
-            
+
             expect(mockCallback).toHaveBeenCalledWith({
                 type: AgentMessageType.TOOL_CALL_RESULT,
                 payload: {
@@ -230,18 +279,49 @@ describe('AgentEmitter', () => {
                 timestamp,
             });
         });
+
+        it('emitToolCallStream 应该发送正确的消息', () => {
+            emitter.emitToolCallStream('call-1', 'chunk-1', 'msg-1');
+
+            expect(mockCallback).toHaveBeenCalledWith({
+                type: AgentMessageType.TOOL_CALL_STREAM,
+                payload: {
+                    callId: 'call-1',
+                    output: 'chunk-1',
+                },
+                msgId: 'msg-1',
+                sessionId,
+                timestamp,
+            });
+        });
+
+        it('emitCodePatch 应该发送正确的消息', () => {
+            emitter.emitCodePatch('src/main.ts', '@@ -1,1 +1,1 @@\n-old\n+new', 'msg-1', 'typescript');
+
+            expect(mockCallback).toHaveBeenCalledWith({
+                type: AgentMessageType.CODE_PATCH,
+                payload: {
+                    path: 'src/main.ts',
+                    diff: '@@ -1,1 +1,1 @@\n-old\n+new',
+                    language: 'typescript',
+                },
+                msgId: 'msg-1',
+                sessionId,
+                timestamp,
+            });
+        });
     });
 
     describe('Usage 事件', () => {
         it('emitUsageUpdate 应该累加使用量', () => {
             const usage1: Usage = { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 };
             const usage2: Usage = { prompt_tokens: 20, completion_tokens: 10, total_tokens: 30 };
-            
+
             emitter.emitUsageUpdate(usage1);
             emitter.emitUsageUpdate(usage2);
-            
+
             expect(mockCallback).toHaveBeenCalledTimes(2);
-            
+
             // 第二次调用应该有累积值
             expect(mockCallback).toHaveBeenLastCalledWith(
                 expect.objectContaining({
@@ -261,9 +341,9 @@ describe('AgentEmitter', () => {
         it('getCumulativeUsage 应该返回当前累积值', () => {
             const usage: Usage = { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 };
             emitter.emitUsageUpdate(usage);
-            
+
             const cumulative = emitter.getCumulativeUsage();
-            
+
             expect(cumulative).toEqual({
                 prompt_tokens: 10,
                 completion_tokens: 5,
@@ -271,13 +351,25 @@ describe('AgentEmitter', () => {
             });
         });
 
+        it('emitUsageUpdate 应该支持 msgId', () => {
+            const usage: Usage = { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 };
+            emitter.emitUsageUpdate(usage, 'msg-usage');
+
+            expect(mockCallback).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    type: AgentMessageType.USAGE_UPDATE,
+                    msgId: 'msg-usage',
+                })
+            );
+        });
+
         it('resetCumulativeUsage 应该重置累积值', () => {
             const usage: Usage = { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 };
             emitter.emitUsageUpdate(usage);
             emitter.resetCumulativeUsage();
-            
+
             const cumulative = emitter.getCumulativeUsage();
-            
+
             expect(cumulative).toEqual({
                 prompt_tokens: 0,
                 completion_tokens: 0,

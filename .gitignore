@@ -17,4 +17,8 @@ typescript
 apps/agent-cli-ink-v2/data/*
 
 /test-memory
-data/
+
+data
+data/agent-memory
+request.json
+coverage/

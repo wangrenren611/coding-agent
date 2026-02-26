@@ -22,6 +22,7 @@ export type {
     LLMRequestMessage,
     FinishReason,
     LLMResponse,
+    StreamChunkError,
     Chunk,
     StreamCallback,
     Tool,
@@ -30,11 +31,7 @@ export type {
 } from './api';
 
 // 配置相关类型
-export type {
-    BaseAPIConfig,
-    BaseProviderConfig,
-    OpenAICompatibleConfig,
-} from './config';
+export type { BaseAPIConfig, BaseProviderConfig, OpenAICompatibleConfig } from './config';
 
 // Provider 相关类型
 export { LLMProvider } from './provider';
@@ -56,8 +53,4 @@ export {
 } from './errors';
 
 // Registry 相关类型
-export type {
-    ProviderType,
-    ModelId,
-    ModelConfig,
-} from './registry';
+export type { ProviderType, ModelId, ModelConfig } from './registry';

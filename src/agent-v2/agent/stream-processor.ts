@@ -28,19 +28,11 @@ import {
     hasToolCalls,
 } from './types-internal';
 import {
-    ProcessorState as State,
-    ContentType,
-    canTransition,
-} from './processor-state';
-import {
     ResponseValidator,
     ResponseValidatorOptions,
     ValidationResult,
     createResponseValidator,
 } from './response-validator';
-
-// 重新导出状态枚举供外部使用
-export { ProcessorState, ContentType } from './processor-state';
 
 /**
  * 内部处理器状态（细粒度状态追踪）
@@ -48,6 +40,8 @@ export { ProcessorState, ContentType } from './processor-state';
 interface InternalProcessorState {
     /** 是否已中止 */
     aborted: boolean;
+    /** 中止原因 */
+    abortReason?: 'manual' | 'buffer_overflow' | 'validation_violation';
     /** 推理内容是否已开始 */
     reasoningStarted: boolean;
     /** 普通文本是否已开始 */
@@ -58,8 +52,6 @@ interface InternalProcessorState {
     reasoningCompleted: boolean;
     /** 普通文本是否已完成 */
     textCompleted: boolean;
-    /** 当前状态机状态 */
-    currentState: State;
 }
 
 /**
@@ -109,7 +101,7 @@ export interface StreamProcessorOptions {
     // ==================== Token 使用量回调 ====================
 
     /** Token 使用量更新回调 */
-    onUsageUpdate?: (usage: Usage) => void;
+    onUsageUpdate?: (usage: Usage, messageId: string) => void;
 
     // ==================== 响应验证选项 ====================
 
@@ -165,6 +157,7 @@ export class StreamProcessor {
      */
     abort(): void {
         this.state.aborted = true;
+        this.state.abortReason = 'manual';
     }
 
     /**
@@ -217,7 +210,7 @@ export class StreamProcessor {
 
         if (chunk.usage) {
             this.metadata.usage = chunk.usage;
-            this.options.onUsageUpdate?.(chunk.usage);
+            this.options.onUsageUpdate?.(chunk.usage, this.currentMessageId);
         }
     }
 
@@ -274,17 +267,21 @@ export class StreamProcessor {
         return this.state.aborted;
     }
 
+    getAbortReason(): 'manual' | 'buffer_overflow' | 'validation_violation' | undefined {
+        return this.state.abortReason;
+    }
+
     // ==================== 私有方法：状态初始化 ====================
 
     private createInitialState(): InternalProcessorState {
         return {
             aborted: false,
+            abortReason: undefined,
             reasoningStarted: false,
             textStarted: false,
             toolCallsStarted: false,
             reasoningCompleted: false,
             textCompleted: false,
-            currentState: State.IDLE,
         };
     }
 
@@ -310,15 +307,8 @@ export class StreamProcessor {
         if (!this.appendToBuffer('reasoning', content)) {
             return;
         }
-
-        // 增量验证 - 检测幻觉
-        const validationResult = this.validator.validateIncremental(content);
-        if (!validationResult.valid) {
-            this.handleValidationViolation(validationResult);
-            if (validationResult.action === 'abort') {
-                this.state.aborted = true;
-                return;
-            }
+        if (!this.validateAfterDelta(content)) {
+            return;
         }
 
         // 触发开始事件
@@ -352,28 +342,19 @@ export class StreamProcessor {
         if (!this.appendToBuffer('content', content)) {
             return;
         }
-
-        // 增量验证 - 检测幻觉
-        const validationResult = this.validator.validateIncremental(content);
-        if (!validationResult.valid) {
-            this.handleValidationViolation(validationResult);
-            if (validationResult.action === 'abort') {
-                this.state.aborted = true;
-                return;
-            }
+        if (!this.validateAfterDelta(content)) {
+            return;
         }
 
         // 触发开始事件
         if (!this.state.textStarted) {
-
-            if(this.state.reasoningStarted&&!this.state.reasoningCompleted){
-              this.state.reasoningCompleted = true;
-              this.options.onReasoningComplete?.(this.currentMessageId);
+            if (this.state.reasoningStarted && !this.state.reasoningCompleted) {
+                this.state.reasoningCompleted = true;
+                this.options.onReasoningComplete?.(this.currentMessageId);
             }
 
-            this.state.textStarted=true
+            this.state.textStarted = true;
             this.options.onTextStart(this.currentMessageId);
-
         }
 
         // 触发增量事件
@@ -405,16 +386,16 @@ export class StreamProcessor {
         // 标记工具调用开始
         if (!this.state.toolCallsStarted) {
             this.state.toolCallsStarted = true;
-            
+
             // 如果之前有文本内容，先触发完成
             if (this.state.textStarted && !this.state.textCompleted) {
                 this.state.textCompleted = true;
                 this.options.onTextComplete(this.currentMessageId);
             }
 
-            if(this.state.reasoningStarted&&!this.state.reasoningCompleted){
-              this.state.reasoningCompleted = true;
-              this.options.onReasoningComplete?.(this.currentMessageId);
+            if (this.state.reasoningStarted && !this.state.reasoningCompleted) {
+                this.state.reasoningCompleted = true;
+                this.options.onReasoningComplete?.(this.currentMessageId);
             }
         }
 
@@ -436,10 +417,7 @@ export class StreamProcessor {
      * 处理单独的 finish_reason
      * 当 chunk 只有 finish_reason 没有其他内容时调用
      */
-    private handleFinishReasonOnly(
-        finishReason: FinishReason,
-        chunkId: string | undefined
-    ): void {
+    private handleFinishReasonOnly(finishReason: FinishReason, chunkId: string | undefined): void {
         // 触发文本完成
         if (this.state.textStarted && !this.state.textCompleted) {
             this.state.textCompleted = true;
@@ -493,14 +471,12 @@ export class StreamProcessor {
      * 追加内容到缓冲区
      */
     private appendToBuffer(type: 'reasoning' | 'content', content: string): boolean {
-        const currentSize = type === 'reasoning'
-            ? this.buffers.reasoning.length
-            : this.buffers.content.length;
-
+        const currentSize = this.buffers.reasoning.length + this.buffers.content.length;
         const projectedSize = currentSize + content.length;
 
         if (projectedSize > this.maxBufferSize) {
-            this.abort();
+            this.state.aborted = true;
+            this.state.abortReason = 'buffer_overflow';
             return false;
         }
 
@@ -508,6 +484,25 @@ export class StreamProcessor {
             this.buffers.reasoning += content;
         } else {
             this.buffers.content += content;
+        }
+
+        return true;
+    }
+
+    /**
+     * 增量验证流式内容
+     */
+    private validateAfterDelta(delta: string): boolean {
+        const result = this.validator.validateIncremental(delta);
+        if (result.valid) {
+            return true;
+        }
+
+        this.options.onValidationViolation?.(result);
+        if (result.action === 'abort') {
+            this.state.aborted = true;
+            this.state.abortReason = 'validation_violation';
+            return false;
         }
 
         return true;
@@ -556,33 +551,6 @@ export class StreamProcessor {
         if (chunk.model) this.metadata.model = chunk.model;
         if (chunk.created) this.metadata.created = chunk.created;
         if (finishReason) this.metadata.finish_reason = finishReason;
-
-
-    }
-
-    // ==================== 验证相关方法 ====================
-
-    /**
-     * 处理验证违规
-     */
-    private handleValidationViolation(result: ValidationResult): void {
-        // 调用外部回调（如果有）
-        this.options.onValidationViolation?.(result);
-
-        // 记录日志
-        console.warn('[StreamProcessor] Response validation violation detected:', {
-            type: result.violationType,
-            details: result.details,
-            action: result.action,
-            patterns: result.detectedPatterns,
-        });
-    }
-
-    /**
-     * 获取验证器检测到的问题
-     */
-    getValidationIssues(): string[] {
-        return this.validator.getDetectedIssues();
     }
 
     /**

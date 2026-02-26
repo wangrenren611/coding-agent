@@ -36,7 +36,7 @@ describe('File Tools', () => {
             const result = await tool.execute({
                 filePath: testFile,
                 startLine: 2,
-                endLine: 4
+                endLine: 4,
             });
 
             expect(result.success).toBe(true);
@@ -50,7 +50,7 @@ describe('File Tools', () => {
             const tool = new ReadFileTool();
             const result = await tool.execute({
                 filePath: testFile,
-                startLine: 3
+                startLine: 3,
             });
 
             expect(result.success).toBe(true);
@@ -63,7 +63,7 @@ describe('File Tools', () => {
             const tool = new ReadFileTool();
             const result = await tool.execute({
                 filePath: testFile,
-                endLine: 3
+                endLine: 3,
             });
 
             expect(result.success).toBe(true);
@@ -103,7 +103,7 @@ describe('File Tools', () => {
             const tool = new ReadFileTool();
             const result = await tool.execute({
                 filePath: testFile,
-                startLine: 10
+                startLine: 10,
             });
 
             expect(result.success).toBe(false);
@@ -117,7 +117,7 @@ describe('File Tools', () => {
             const result = await tool.execute({
                 filePath: testFile,
                 startLine: 2,
-                endLine: 1  // endLine < startLine
+                endLine: 1, // endLine < startLine
             });
 
             expect(result.success).toBe(false);
@@ -131,6 +131,19 @@ describe('File Tools', () => {
 
             expect(result.success).toBe(true);
             expect(result.metadata?.content).toBeDefined();
+        });
+
+        it('should truncate oversized read output consistently', async () => {
+            const hugeContent = 'a'.repeat(60000);
+            const testFile = await env.createFile('huge.txt', hugeContent);
+            const tool = new ReadFileTool();
+            const result = await tool.execute({ filePath: testFile });
+
+            expect(result.success).toBe(true);
+            expect(result.metadata?.truncated).toBe(true);
+            expect(result.metadata?.originalLength).toBe(60000);
+            expect((result.metadata?.content as string).length).toBe(50000);
+            expect(result.output).toContain('[... Content truncated for brevity ...]');
         });
 
         it('should handle files with special characters', async () => {
@@ -180,7 +193,7 @@ describe('File Tools', () => {
             const tool = new WriteFileTool();
             const result = await tool.execute({
                 filePath: testFile,
-                content: 'New content'
+                content: 'New content',
             });
 
             expect(result.success).toBe(true);
@@ -193,7 +206,7 @@ describe('File Tools', () => {
             const tool = new WriteFileTool();
             const result = await tool.execute({
                 filePath: testFile,
-                content: 'Nested file'
+                content: 'Nested file',
             });
 
             expect(result.success).toBe(true);
@@ -205,7 +218,7 @@ describe('File Tools', () => {
             const tool = new WriteFileTool();
             const result = await tool.execute({
                 filePath: testFile,
-                content: 'New content'
+                content: 'New content',
             });
 
             expect(result.success).toBe(true);
@@ -219,7 +232,7 @@ describe('File Tools', () => {
             const tool = new WriteFileTool();
             const result = await tool.execute({
                 filePath: dirPath,
-                content: 'Should not write'
+                content: 'Should not write',
             });
 
             expect(result.success).toBe(false);
@@ -233,7 +246,7 @@ describe('File Tools', () => {
             const tool = new WriteFileTool();
             const result = await tool.execute({
                 filePath: binaryFile,
-                content: 'New content'
+                content: 'New content',
             });
 
             expect(result.success).toBe(false);
@@ -246,7 +259,7 @@ describe('File Tools', () => {
             const tool = new WriteFileTool();
             const result = await tool.execute({
                 filePath: testFile,
-                content
+                content,
             });
 
             expect(result.success).toBe(true);
@@ -260,7 +273,7 @@ describe('File Tools', () => {
             const tool = new WriteFileTool();
             const result = await tool.execute({
                 filePath: testFile,
-                content
+                content,
             });
 
             expect(result.success).toBe(true);
@@ -273,7 +286,7 @@ describe('File Tools', () => {
             const tool = new WriteFileTool();
             const result = await tool.execute({
                 filePath: testFile,
-                content: LARGE_FILE_CONTENT
+                content: LARGE_FILE_CONTENT,
             });
 
             expect(result.success).toBe(true);
@@ -288,7 +301,7 @@ describe('File Tools', () => {
             const tool = new WriteFileTool();
             const result = await tool.execute({
                 filePath: testFile,
-                content: ''
+                content: '',
             });
 
             expect(result.success).toBe(true);
@@ -299,7 +312,7 @@ describe('File Tools', () => {
             const tool = new WriteFileTool();
             const result = await tool.execute({
                 filePath: testFile.replace(/\\/g, '/'),
-                content: 'Windows path test'
+                content: 'Windows path test',
             });
 
             expect(result.success).toBe(true);

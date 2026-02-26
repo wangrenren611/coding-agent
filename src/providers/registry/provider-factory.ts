@@ -6,7 +6,7 @@
 
 import { StandardAdapter } from '../adapters/standard';
 import { OpenAICompatibleProvider, OpenAICompatibleConfig } from '../openai-compatible';
-import type { BaseProviderConfig, ModelId, ProviderType } from '../types';
+import type { BaseProviderConfig, ModelId } from '../types';
 import { MODEL_DEFINITIONS } from './model-config';
 import type { ModelConfig } from '../types';
 import { KimiAdapter } from '../adapters/kimi';
@@ -22,10 +22,7 @@ export class ProviderFactory {
      * @param overrides 可选的配置覆盖
      * @returns OpenAI Compatible Provider 实例
      */
-    static createFromEnv(
-        modelId: ModelId,
-        overrides?: Partial<ModelConfig>
-    ): OpenAICompatibleProvider {
+    static createFromEnv(modelId: ModelId, overrides?: Partial<ModelConfig>): OpenAICompatibleProvider {
         if (!modelId) {
             throw new Error('ModelId is required.');
         }
@@ -41,9 +38,9 @@ export class ProviderFactory {
         const baseConfig: Record<string, unknown> = {
             baseURL,
             model: modelConfig.model,
-            temperature: modelConfig.temperature||0.3,
+            temperature: modelConfig.temperature || 0.3,
             max_tokens: modelConfig.max_tokens,
-            maxOutputTokens: modelConfig.LLMMAX_TOKENS,
+            LLMMAX_TOKENS: modelConfig.LLMMAX_TOKENS,
             thinking: modelConfig.thinking,
         };
 
@@ -54,7 +51,7 @@ export class ProviderFactory {
             apiKey: overrides?.apiKey ?? apiKey,
             baseURL: overrides?.baseURL ?? baseURL,
             max_tokens: modelConfig.max_tokens,
-            maxOutputTokens: modelConfig.LLMMAX_TOKENS,
+            LLMMAX_TOKENS: modelConfig.LLMMAX_TOKENS,
         };
 
         const adapter = ProviderFactory.createAdapter(modelId);
@@ -91,6 +88,7 @@ export class ProviderFactory {
         // 如果需要特定适配器，可以在此处添加 switch 逻辑
         switch (modelId) {
             case 'kimi-k2.5':
+            case 'qwen-kimi-k2.5':
             case 'glm-5':
                 return new KimiAdapter({
                     defaultModel: modelConfig.model,

@@ -132,8 +132,13 @@ export interface LLMRequestMessage extends BaseLLMMessage {
 
 /**
  * 完成原因
+ * - stop: 正常完成
+ * - length: 达到 token 限制
+ * - content_filter: 内容过滤
+ * - tool_calls: 工具调用
+ * - abort: 请求被中断
  */
-export type FinishReason = 'stop' | 'length' | 'content_filter' | 'tool_calls' | null;
+export type FinishReason = 'stop' | 'length' | 'content_filter' | 'tool_calls' | 'abort' | null;
 
 /**
  * LLM 响应
@@ -153,6 +158,17 @@ export interface LLMResponse {
 }
 
 /**
+ * 流式错误对象（部分 OpenAI 兼容服务会在 SSE chunk 中返回）
+ */
+export interface StreamChunkError {
+    code?: string | null;
+    param?: string | null;
+    message?: string;
+    type?: string;
+    [key: string]: unknown;
+}
+
+/**
  * 流式响应块
  */
 export interface Chunk {
@@ -167,6 +183,7 @@ export interface Chunk {
     model?: string;
     object?: string;
     created?: number;
+    error?: StreamChunkError;
 }
 
 /**

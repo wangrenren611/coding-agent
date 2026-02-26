@@ -3,51 +3,52 @@
  *
  * 提供统一的 HTTP 客户端，具有以下功能：
  * - 单次请求执行（不包含重试）
- * - 超时处理
- * - Abort 信号支持
+ * - Abort 信号支持（优先使用上层传入 signal）
+ * - 可选默认超时兜底（调用方未传 signal 时生效）
  * - 与 LLM 错误类型集成的错误处理
+ *
+ * 超时控制设计：
+ * - Agent 层通过 LLMCaller 创建 AbortSignal.timeout() 控制主链路超时
+ * - 当调用方未传 signal 且配置了 defaultTimeoutMs，本层会创建兜底超时信号
+ * - 这样兼顾统一控制与 standalone 调用安全性
  */
 
-import {
-    LLMError,
-    LLMAbortedError,
-    LLMRetryableError,
-    createErrorFromStatus,
-} from '../types';
+import { LLMError, LLMAbortedError, LLMRetryableError, createErrorFromStatus } from '../types';
 
 export interface HttpClientOptions {
-    /** 请求超时时间（毫秒） */
-    timeout: number;
     /** 启用调试日志 */
     debug?: boolean;
+    /** 默认超时（毫秒，仅在调用方未传 signal 时生效） */
+    defaultTimeoutMs?: number;
 }
 
-export interface RequestInitWithOptions extends RequestInit {
-    timeout?: number;
-}
+export type RequestInitWithOptions = RequestInit;
 
 /**
- * 带超时和错误归一化的 HTTP 客户端
+ * HTTP 客户端
+ *
+ * 超时优先由调用方通过 options.signal 传入；
+ * 如未传入且配置了 defaultTimeoutMs，会自动应用默认超时信号。
  */
 export class HTTPClient {
-    readonly defaultTimeout: number;
     readonly debug: boolean;
+    readonly defaultTimeoutMs?: number;
 
-    constructor(options: HttpClientOptions) {
-        this.defaultTimeout = options.timeout;
+    constructor(options: HttpClientOptions = {}) {
         this.debug = options.debug ?? false;
+        this.defaultTimeoutMs = this.normalizeTimeoutMs(options.defaultTimeoutMs);
     }
 
     /**
      * 单次 Fetch（重试由上层 Agent 负责）
+     *
+     * @param url - 请求 URL
+     * @param options - 请求选项，signal 应已包含超时逻辑
      */
-    async fetch(
-        url: string,
-        options: RequestInitWithOptions = {}
-    ): Promise<Response> {
-        const timeout = options.timeout ?? this.defaultTimeout;
+    async fetch(url: string, options: RequestInitWithOptions = {}): Promise<Response> {
+        const requestOptions = this.applyDefaultSignal(options);
         try {
-            const response = await this.fetchWithTimeout(url, options, timeout);
+            const response = await this.executeFetch(url, requestOptions);
 
             // 检查 HTTP 错误
             if (!response.ok) {
@@ -57,23 +58,17 @@ export class HTTPClient {
 
             return response;
         } catch (rawError) {
-            throw this.normalizeError(rawError, timeout, options.signal ?? undefined);
+            throw this.normalizeError(rawError, requestOptions.signal ?? undefined);
         }
     }
 
     /**
-     * 带超时支持的 Fetch
+     * 执行 Fetch 请求
+     *
+     * 直接使用传入的 signal，不创建额外的超时信号
      */
-    private async fetchWithTimeout(
-        url: string,
-        options: RequestInit,
-        timeout: number
-    ): Promise<Response> {
+    private async executeFetch(url: string, options: RequestInit): Promise<Response> {
         const upstreamSignal = options.signal;
-        const timeoutSignal = AbortSignal.timeout(timeout);
-        const combinedSignal = upstreamSignal
-            ? AbortSignal.any([upstreamSignal, timeoutSignal])
-            : timeoutSignal;
 
         try {
             if (this.debug) {
@@ -82,11 +77,11 @@ export class HTTPClient {
 
             const response = await fetch(url, {
                 ...options,
-                signal: combinedSignal,
-                headers: options.headers,
+                signal: upstreamSignal,
             });
+
             if (this.debug) {
-                console.log(`[HTTPClient] end Sending request: ${options.method || 'GET'} ${url}`);
+                console.log(`[HTTPClient] Response received: ${options.method || 'GET'} ${url}`);
             }
 
             return response;
@@ -95,50 +90,67 @@ export class HTTPClient {
                 console.log(`[HTTPClient] Request failed: ${options.method || 'GET'} ${url}`);
             }
 
+            // 检查是否为超时或中止错误
             if (upstreamSignal?.aborted) {
+                const reason = this.getAbortReason(upstreamSignal);
+                if (reason === 'timeout') {
+                    throw new LLMRetryableError('Request timeout', undefined, 'TIMEOUT');
+                }
                 throw new LLMAbortedError('Request was cancelled by upstream signal');
-            }
-
-            if (timeoutSignal.aborted) {
-                throw new LLMRetryableError(
-                    `Request timeout after ${timeout}ms`,
-                    timeout,
-                    'TIMEOUT'
-                );
             }
 
             throw error;
         }
     }
 
-    private normalizeError(
-        error: unknown,
-        timeout: number,
-        signal?: AbortSignal
-    ): Error {
+    /**
+     * 获取 AbortSignal 的中止原因
+     */
+    private getAbortReason(signal: AbortSignal): 'timeout' | 'abort' | 'unknown' {
+        // AbortSignal.timeout() 创建的信号会有特定的 reason
+        try {
+            const reason = signal.reason;
+            if (reason instanceof Error) {
+                if (reason.name === 'TimeoutError' || reason.message?.toLowerCase().includes('timeout')) {
+                    return 'timeout';
+                }
+            }
+            if (typeof reason === 'string' && reason.toLowerCase().includes('timeout')) {
+                return 'timeout';
+            }
+        } catch {
+            // 忽略访问 reason 的错误
+        }
+        return 'unknown';
+    }
+
+    /**
+     * 归一化错误
+     */
+    private normalizeError(error: unknown, signal?: AbortSignal): Error {
+        // 已经是 LLM 错误，直接返回
         if (error instanceof LLMError) {
             return error;
         }
 
+        // 检查中止信号
         if (signal?.aborted) {
+            const reason = this.getAbortReason(signal);
+            if (reason === 'timeout') {
+                return new LLMRetryableError('Request timeout', undefined, 'TIMEOUT');
+            }
             return new LLMAbortedError('Request was cancelled');
         }
 
+        // Body 超时类错误
         if (this.isBodyTimeoutLikeError(error)) {
-            return new LLMRetryableError(
-                `Response body timeout after ${timeout}ms`,
-                undefined,
-                'BODY_TIMEOUT'
-            );
+            return new LLMRetryableError('Response body timeout', undefined, 'BODY_TIMEOUT');
         }
 
+        // 网络类错误
         if (this.isNetworkLikeError(error)) {
             const message = error instanceof Error ? error.message : String(error);
-            return new LLMRetryableError(
-                `Network request failed: ${message}`,
-                undefined,
-                'NETWORK_ERROR'
-            );
+            return new LLMRetryableError(`Network request failed: ${message}`, undefined, 'NETWORK_ERROR');
         }
 
         if (error instanceof Error) {
@@ -154,11 +166,7 @@ export class HTTPClient {
         const code = this.getErrorCode(error);
         const message = `${error.name} ${error.message}`.toLowerCase();
 
-        return (
-            code === 'UND_ERR_BODY_TIMEOUT'
-            || message.includes('body timeout')
-            || message.includes('terminated')
-        );
+        return code === 'UND_ERR_BODY_TIMEOUT' || message.includes('body timeout') || message.includes('terminated');
     }
 
     private isNetworkLikeError(error: unknown): boolean {
@@ -193,5 +201,22 @@ export class HTTPClient {
             return cause.code;
         }
         return undefined;
+    }
+
+    private applyDefaultSignal(options: RequestInitWithOptions): RequestInitWithOptions {
+        if (options.signal || !this.defaultTimeoutMs) {
+            return options;
+        }
+        return {
+            ...options,
+            signal: AbortSignal.timeout(this.defaultTimeoutMs),
+        };
+    }
+
+    private normalizeTimeoutMs(value: number | undefined): number | undefined {
+        if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+            return undefined;
+        }
+        return value;
     }
 }

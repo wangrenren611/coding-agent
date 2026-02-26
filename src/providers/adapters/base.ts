@@ -5,14 +5,7 @@
  * 请求/响应转换。
  */
 
-import type {
-    InputContentPart,
-    LLMRequest,
-    LLMResponse,
-    LLMRequestMessage,
-    MessageContent,
-    Role
-} from '../types';
+import type { InputContentPart, LLMRequest, LLMResponse, LLMRequestMessage, MessageContent, Role } from '../types';
 
 export abstract class BaseAPIAdapter {
     /**
@@ -54,7 +47,7 @@ export abstract class BaseAPIAdapter {
             msg.content !== undefined &&
             msg.content !== null &&
             (typeof msg.content !== 'string' || msg.content !== '') &&
-            (!(Array.isArray(msg.content)) || msg.content.length > 0);
+            (!Array.isArray(msg.content) || msg.content.length > 0);
         const hasToolCalls = Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0;
         const hasToolCallId = Boolean(msg.tool_call_id);
         return hasContent || hasToolCalls || hasToolCallId;
@@ -70,7 +63,7 @@ export abstract class BaseAPIAdapter {
             const normalizedContent = this.normalizeMessageContent(item.content);
             const message: LLMRequestMessage = {
                 content: normalizedContent,
-                role:item.role as Role,
+                role: item.role as Role,
             };
 
             if (item.reasoning_content !== undefined && item.reasoning_content !== null) {
@@ -98,8 +91,7 @@ export abstract class BaseAPIAdapter {
         if (typeof content === 'string') return content;
 
         if (Array.isArray(content)) {
-            return content
-                .filter((part): part is InputContentPart => this.isValidContentPart(part));
+            return content.filter((part): part is InputContentPart => this.isValidContentPart(part));
         }
 
         if (content === undefined || content === null) {

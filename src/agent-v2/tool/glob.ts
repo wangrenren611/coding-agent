@@ -41,8 +41,8 @@ export default class GlobTool extends BaseTool<typeof schema> {
                     '**/.nuxt/**',
                     '**/build/**',
                     '**/*.min.js',
-                    '**/*.min.css'
-                ]
+                    '**/*.min.css',
+                ],
             });
         } catch (error) {
             throw new Error(`Glob matching failed: ${error}`);

@@ -30,7 +30,7 @@ describe('BatchReplaceTool - Deep Tests', () => {
                     { line: 1, oldText: 'OLD', newText: 'NEW' },
                     { line: 2, oldText: 'OLD', newText: 'NEW' },
                     { line: 3, oldText: 'OLD', newText: 'NEW' },
-                ]
+                ],
             });
 
             expect(result.success).toBe(true);
@@ -49,7 +49,7 @@ describe('BatchReplaceTool - Deep Tests', () => {
                     { line: 1, oldText: 'MATCH', newText: 'NEW' },
                     { line: 2, oldText: 'MISSING', newText: 'NEW' },
                     { line: 3, oldText: 'MATCH', newText: 'NEW' },
-                ]
+                ],
             });
 
             expect(result.success).toBe(true); // Partial success still returns success
@@ -66,7 +66,7 @@ describe('BatchReplaceTool - Deep Tests', () => {
             const tool = new BatchReplaceTool();
             const result = await tool.execute({
                 filePath: testFile,
-                replacements: []
+                replacements: [],
             });
 
             expect(result.success).toBe(false);
@@ -83,8 +83,8 @@ describe('BatchReplaceTool - Deep Tests', () => {
                 filePath: testFile,
                 replacements: [
                     { line: 1, oldText: 'ORIGINAL_TEXT', newText: 'FIRST_MOD' },
-                    { line: 1, oldText: 'ORIGINAL_TEXT', newText: 'SECOND_MOD' },  // Should still find ORIGINAL
-                ]
+                    { line: 1, oldText: 'ORIGINAL_TEXT', newText: 'SECOND_MOD' }, // Should still find ORIGINAL
+                ],
             });
 
             expect(result.success).toBe(true);
@@ -103,7 +103,7 @@ describe('BatchReplaceTool - Deep Tests', () => {
                     { line: 1, oldText: 'VAR1', newText: 'A' },
                     { line: 1, oldText: 'VAR2', newText: 'B' },
                     { line: 1, oldText: 'VAR3', newText: 'C' },
-                ]
+                ],
             });
 
             expect(result.success).toBe(true);
@@ -121,14 +121,14 @@ describe('BatchReplaceTool - Deep Tests', () => {
             const result = await tool.execute({
                 filePath: testFile,
                 replacements: [
-                    { line: 1, oldText: 'WRONG', newText: 'NEW' },  // Will fail
-                ]
+                    { line: 1, oldText: 'WRONG', newText: 'NEW' }, // Will fail
+                ],
             });
 
             expect(result.success).toBe(true); // Still success because file wasn't damaged
             expect(result.metadata?.modifiedCount).toBe(0);
             const modified = await env.readFile('test.txt');
-            expect(modified).toBe('CORRECT original line');  // Unchanged
+            expect(modified).toBe('CORRECT original line'); // Unchanged
         });
     });
 
@@ -142,7 +142,7 @@ describe('BatchReplaceTool - Deep Tests', () => {
                 replacements: [
                     { line: 1, oldText: 'OLD', newText: 'NEW' },
                     { line: 2, oldText: 'OLD', newText: 'NEW' },
-                ]
+                ],
             });
 
             expect(result.success).toBe(true);
@@ -157,9 +157,7 @@ describe('BatchReplaceTool - Deep Tests', () => {
             const tool = new BatchReplaceTool();
             const result = await tool.execute({
                 filePath: testFile,
-                replacements: [
-                    { line: 1, oldText: 'OLD', newText: 'NEW' },
-                ]
+                replacements: [{ line: 1, oldText: 'OLD', newText: 'NEW' }],
             });
 
             expect(result.success).toBe(true);
@@ -168,14 +166,12 @@ describe('BatchReplaceTool - Deep Tests', () => {
         });
 
         it('should handle files with trailing newline', async () => {
-            const content = 'Line 1 OLD\nLine 2 OLD\n';  // Trailing newline
+            const content = 'Line 1 OLD\nLine 2 OLD\n'; // Trailing newline
             const testFile = await env.createFile('trailing.txt', content);
             const tool = new BatchReplaceTool();
             const result = await tool.execute({
                 filePath: testFile,
-                replacements: [
-                    { line: 1, oldText: 'OLD', newText: 'NEW' },
-                ]
+                replacements: [{ line: 1, oldText: 'OLD', newText: 'NEW' }],
             });
 
             expect(result.success).toBe(true);
@@ -184,14 +180,12 @@ describe('BatchReplaceTool - Deep Tests', () => {
         });
 
         it('should handle files without trailing newline', async () => {
-            const content = 'Line 1 OLD\nLine 2 OLD';  // No trailing newline
+            const content = 'Line 1 OLD\nLine 2 OLD'; // No trailing newline
             const testFile = await env.createFile('no-trailing.txt', content);
             const tool = new BatchReplaceTool();
             const result = await tool.execute({
                 filePath: testFile,
-                replacements: [
-                    { line: 2, oldText: 'OLD', newText: 'NEW' },
-                ]
+                replacements: [{ line: 2, oldText: 'OLD', newText: 'NEW' }],
             });
 
             expect(result.success).toBe(true);
@@ -207,9 +201,7 @@ describe('BatchReplaceTool - Deep Tests', () => {
             const tool = new BatchReplaceTool();
             const result = await tool.execute({
                 filePath: testFile,
-                replacements: [
-                    { line: 1, oldText: '$100', newText: '$200' },
-                ]
+                replacements: [{ line: 1, oldText: '$100', newText: '$200' }],
             });
 
             expect(result.success).toBe(true);
@@ -223,9 +215,7 @@ describe('BatchReplaceTool - Deep Tests', () => {
             const tool = new BatchReplaceTool();
             const result = await tool.execute({
                 filePath: testFile,
-                replacements: [
-                    { line: 1, oldText: '$$', newText: '$$$' },
-                ]
+                replacements: [{ line: 1, oldText: '$$', newText: '$$$' }],
             });
 
             expect(result.success).toBe(true);
@@ -240,9 +230,7 @@ describe('BatchReplaceTool - Deep Tests', () => {
             const tool = new BatchReplaceTool();
             const result = await tool.execute({
                 filePath: testFile,
-                replacements: [
-                    { line: 1, oldText: 'Test', newText: '$& modified' },
-                ]
+                replacements: [{ line: 1, oldText: 'Test', newText: '$& modified' }],
             });
 
             expect(result.success).toBe(true);
@@ -260,7 +248,7 @@ describe('BatchReplaceTool - Deep Tests', () => {
                 replacements: [
                     { line: 1, oldText: 'Tabbed', newText: 'Modified' },
                     { line: 2, oldText: 'Spaced', newText: 'Changed' },
-                ]
+                ],
             });
 
             expect(result.success).toBe(true);
@@ -282,7 +270,7 @@ return oldName;`;
                     { line: 1, oldText: 'oldName', newText: 'newName' },
                     { line: 2, oldText: 'oldName', newText: 'newName' },
                     { line: 3, oldText: 'oldName', newText: 'newName' },
-                ]
+                ],
             });
 
             expect(result.success).toBe(true);
@@ -303,7 +291,7 @@ DEBUG: false`;
                     { line: 1, oldText: 'localhost', newText: 'production.server.com' },
                     { line: 2, oldText: '3000', newText: '8080' },
                     { line: 3, oldText: 'false', newText: 'true' },
-                ]
+                ],
             });
 
             expect(result.success).toBe(true);
@@ -324,14 +312,14 @@ DEBUG: false`;
                 replacements: [
                     { line: 1, oldText: 'old-class', newText: 'new-class' },
                     { line: 3, oldText: 'old-class', newText: 'new-class' },
-                ]
+                ],
             });
 
             expect(result.success).toBe(true);
             const modified = await env.readFile('styles.css');
             expect(modified).toMatch(/\.new-class { color: red; }/);
             expect(modified).toMatch(/\.new-class:hover { color: blue; }/);
-            expect(modified).toContain('.another-old');  // Should remain unchanged
+            expect(modified).toContain('.another-old'); // Should remain unchanged
         });
 
         it('should update import paths', async () => {
@@ -345,14 +333,14 @@ import { Util } from './other/path';`;
                 replacements: [
                     { line: 1, oldText: './old/path/', newText: './new/path/' },
                     { line: 2, oldText: './old/path/', newText: './new/path/' },
-                ]
+                ],
             });
 
             expect(result.success).toBe(true);
             const modified = await env.readFile('imports.ts');
-            expect(modified).toContain("./new/path/Component");
-            expect(modified).toContain("./new/path/Helper");
-            expect(modified).toContain("./other/path");  // Should remain unchanged
+            expect(modified).toContain('./new/path/Component');
+            expect(modified).toContain('./new/path/Helper');
+            expect(modified).toContain('./other/path'); // Should remain unchanged
         });
     });
 
@@ -361,9 +349,7 @@ import { Util } from './other/path';`;
             const tool = new BatchReplaceTool();
             const result = await tool.execute({
                 filePath: 'nonexistent.txt',
-                replacements: [
-                    { line: 1, oldText: 'old', newText: 'new' },
-                ]
+                replacements: [{ line: 1, oldText: 'old', newText: 'new' }],
             });
 
             expect(result.success).toBe(false);
@@ -378,8 +364,8 @@ import { Util } from './other/path';`;
                 filePath: testFile,
                 replacements: [
                     { line: 1, oldText: 'Line', newText: 'Modified' },
-                    { line: 10, oldText: 'Line', newText: 'Modified' },  // Out of range
-                ]
+                    { line: 10, oldText: 'Line', newText: 'Modified' }, // Out of range
+                ],
             });
 
             expect(result.success).toBe(true); // Still overall success
@@ -394,8 +380,8 @@ import { Util } from './other/path';`;
             const result = await tool.execute({
                 filePath: testFile,
                 replacements: [
-                    { line: 0, oldText: 'old', newText: 'new' },  // Invalid line number
-                ]
+                    { line: 0, oldText: 'old', newText: 'new' }, // Invalid line number
+                ],
             });
 
             expect(result.success).toBe(true); // Still returns success with error in results
@@ -409,9 +395,7 @@ import { Util } from './other/path';`;
             const tool = new BatchReplaceTool();
             const result = await tool.execute({
                 filePath: testFile,
-                replacements: [
-                    { line: -1, oldText: 'old', newText: 'new' },
-                ]
+                replacements: [{ line: -1, oldText: 'old', newText: 'new' }],
             });
 
             expect(result.success).toBe(true);
@@ -428,14 +412,14 @@ import { Util } from './other/path';`;
                     { line: 1, oldText: 'NOTFOUND', newText: 'new' },
                     { line: 2, oldText: 'ALSORNOTFOUND', newText: 'new' },
                     { line: 3, oldText: 'STILLNOTFOUND', newText: 'new' },
-                ]
+                ],
             });
 
             expect(result.success).toBe(true); // No exception thrown
             expect(result.metadata?.modifiedCount).toBe(0);
             expect(result.metadata?.failedCount).toBe(3);
             const modified = await env.readFile('test.txt');
-            expect(modified).toBe(content);  // File unchanged
+            expect(modified).toBe(content); // File unchanged
         });
     });
 
@@ -449,12 +433,12 @@ import { Util } from './other/path';`;
             const replacements = Array.from({ length: 100 }, (_, i) => ({
                 line: i + 1,
                 oldText: 'PATTERN',
-                newText: 'REPLACED'
+                newText: 'REPLACED',
             }));
 
             const result = await tool.execute({
                 filePath: testFile,
-                replacements
+                replacements,
             });
 
             expect(result.success).toBe(true);
@@ -469,9 +453,7 @@ import { Util } from './other/path';`;
             const tool = new BatchReplaceTool();
             const result = await tool.execute({
                 filePath: testFile,
-                replacements: [
-                    { line: 1, oldText: 'anything', newText: 'new' },
-                ]
+                replacements: [{ line: 1, oldText: 'anything', newText: 'new' }],
             });
 
             expect(result.success).toBe(true);
@@ -484,9 +466,7 @@ import { Util } from './other/path';`;
             const tool = new BatchReplaceTool();
             const result = await tool.execute({
                 filePath: testFile,
-                replacements: [
-                    { line: 1, oldText: 'Single', newText: 'Modified' },
-                ]
+                replacements: [{ line: 1, oldText: 'Single', newText: 'Modified' }],
             });
 
             expect(result.success).toBe(true);
@@ -500,9 +480,7 @@ import { Util } from './other/path';`;
             const tool = new BatchReplaceTool();
             const result = await tool.execute({
                 filePath: testFile,
-                replacements: [
-                    { line: 1, oldText: 'THIS ', newText: '' },
-                ]
+                replacements: [{ line: 1, oldText: 'THIS ', newText: '' }],
             });
 
             expect(result.success).toBe(true);
@@ -517,9 +495,7 @@ import { Util } from './other/path';`;
             const tool = new BatchReplaceTool();
             const result = await tool.execute({
                 filePath: testFile,
-                replacements: [
-                    { line: 1, oldText: longText, newText: 'SHORT' },
-                ]
+                replacements: [{ line: 1, oldText: longText, newText: 'SHORT' }],
             });
 
             expect(result.success).toBe(true);
@@ -539,7 +515,7 @@ import { Util } from './other/path';`;
                     { line: 1, oldText: 'MATCH', newText: 'NEW' },
                     { line: 2, oldText: 'MISSING', newText: 'NEW' },
                     { line: 3, oldText: 'MATCH', newText: 'NEW' },
-                ]
+                ],
             });
 
             expect(result.success).toBe(true);

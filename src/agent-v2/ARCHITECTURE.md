@@ -5,24 +5,24 @@ This document describes the intended structure of `agent-v2` and the boundaries 
 ## Module Boundaries
 
 - `agent/`
-  - Orchestrates one task lifecycle.
-  - Owns retry loop, stream handling, tool execution workflow, and status events.
-  - Delegates conversation state to `session/`.
+    - Orchestrates one task lifecycle.
+    - Owns retry loop, stream handling, tool execution workflow, and status events.
+    - Delegates conversation state to `session/`.
 - `session/`
-  - Owns in-memory conversation state.
-  - Handles message upsert semantics for streaming updates.
-  - Coordinates persistence through `memory/`.
-  - Optional context compaction via `session/compaction.ts`.
+    - Owns in-memory conversation state.
+    - Handles message upsert semantics for streaming updates.
+    - Coordinates persistence through `memory/`.
+    - Optional context compaction via `session/compaction.ts`.
 - `memory/`
-  - Persistence abstraction (`IMemoryManager`) and concrete implementations.
-  - `FileMemoryManager` stores session/context/history/task records.
-  - Guarantees context/history consistency for message add/update.
+    - Persistence abstraction (`IMemoryManager`) and concrete implementations.
+    - `FileMemoryManager` stores session/context/history/task records.
+    - Guarantees context/history consistency for message add/update.
 - `tool/`
-  - Tool contract, registry, execution, and built-in tool implementations.
+    - Tool contract, registry, execution, and built-in tool implementations.
 - `eventbus/`
-  - Internal event dispatch primitives.
+    - Internal event dispatch primitives.
 - `prompts/`
-  - Prompt templates and operator policy.
+    - Prompt templates and operator policy.
 
 ## Runtime Data Flow
 
@@ -47,4 +47,3 @@ This document describes the intended structure of `agent-v2` and the boundaries 
 - Add storage behavior in `memory/`, not in `agent/`.
 - Keep `Session` focused on state transitions and persistence coordination.
 - Prefer adding small helpers over introducing new framework layers.
-

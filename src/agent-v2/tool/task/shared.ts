@@ -7,13 +7,13 @@ import type { Message } from '../../session/types';
 export type ToolClassConstructor = new () => BaseTool<z.ZodType>;
 
 export enum SubagentType {
-  Bash = 'bash',
-  GeneralPurpose = 'general-purpose',
-  Explore = 'explore',
-  Plan = 'plan',
-  UiSketcher = 'ui-sketcher',
-  BugAnalyzer = 'bug-analyzer',
-  CodeReviewer = 'code-reviewer',
+    Bash = 'bash',
+    GeneralPurpose = 'general-purpose',
+    Explore = 'explore',
+    Plan = 'plan',
+    UiSketcher = 'ui-sketcher',
+    BugAnalyzer = 'bug-analyzer',
+    CodeReviewer = 'code-reviewer',
 }
 
 export type TaskStatus = 'pending' | 'in_progress' | 'completed';
@@ -21,81 +21,83 @@ export type BackgroundTaskStatus = 'queued' | 'running' | 'cancelling' | 'cancel
 export type ModelHint = 'sonnet' | 'opus' | 'haiku';
 
 export interface ManagedTask {
-  id: string;
-  subject: string;
-  description: string;
-  activeForm: string;
-  status: TaskStatus;
-  owner?: string;
-  metadata?: Record<string, unknown>;
-  blocks: string[];
-  blockedBy: string[];
-  createdAt: string;
-  updatedAt: string;
+    id: string;
+    subject: string;
+    description: string;
+    activeForm: string;
+    status: TaskStatus;
+    owner?: string;
+    metadata?: Record<string, unknown>;
+    blocks: string[];
+    blockedBy: string[];
+    createdAt: string;
+    updatedAt: string;
 }
 
 export interface BackgroundExecution {
-  taskId: string;
-  parentSessionId: string;
-  childSessionId: string;
-  memoryManager?: IMemoryManager;
-  storage: 'memory_manager' | 'memory_fallback';
-  status: BackgroundTaskStatus;
-  createdAt: string;
-  startedAt: string;
-  finishedAt?: string;
-  lastActivityAt?: string;
-  lastToolName?: string;
-  description: string;
-  prompt: string;
-  subagentType: SubagentType;
-  model?: ModelHint;
-  resume?: string;
-  output?: string;
-  error?: string;
-  turns?: number;
-  toolsUsed: string[];
-  messages: Message[];
-  stopRequested: boolean;
-  heartbeatTimer?: NodeJS.Timeout;
-  lastHeartbeatPersistAt?: number;
-  lastPersistedMessageCount?: number;
-  agent?: Agent;
-  promise?: Promise<void>;
+    taskId: string;
+    parentSessionId: string;
+    childSessionId: string;
+    memoryManager?: IMemoryManager;
+    storage: 'memory_manager' | 'memory_fallback';
+    status: BackgroundTaskStatus;
+    createdAt: string;
+    startedAt: string;
+    finishedAt?: string;
+    lastActivityAt?: string;
+    lastToolName?: string;
+    description: string;
+    prompt: string;
+    subagentType: SubagentType;
+    model?: ModelHint;
+    resume?: string;
+    output?: string;
+    error?: string;
+    turns?: number;
+    toolsUsed: string[];
+    messages: Message[];
+    stopRequested: boolean;
+    heartbeatTimer?: NodeJS.Timeout;
+    lastHeartbeatPersistAt?: number;
+    lastPersistedMessageCount?: number;
+    agent?: Agent;
+    promise?: Promise<void>;
 }
 
 export interface SubagentResult {
-  status: 'completed' | 'failed' | 'cancelled';
-  turns: number;
-  toolsUsed: string[];
-  output: string;
-  messages: Message[];
-  errorCode?: string;
-  errorMessage?: string;
+    status: 'completed' | 'failed' | 'cancelled';
+    turns: number;
+    toolsUsed: string[];
+    output: string;
+    messages: Message[];
+    errorCode?: string;
+    errorMessage?: string;
 }
 
 export interface AgentConfig {
-  tools: ToolClassConstructor[];
-  systemPrompt: string;
-  maxRetries?: number;
+    tools: ToolClassConstructor[];
+    systemPrompt: string;
+    maxRetries?: number;
 }
 
 export const JsonObjectSchema = z.record(z.string(), z.unknown());
 export const JsonPatchSchema = z.record(z.string(), z.union([z.unknown(), z.null()]));
 
-export const ManagedTaskSchema = z.object({
-  id: z.string().min(1),
-  subject: z.string().min(1),
-  description: z.string().min(1),
-  activeForm: z.string().min(1),
-  status: z.enum(['pending', 'in_progress', 'completed']),
-  owner: z.string().optional(),
-  metadata: JsonObjectSchema.optional(),
-  blocks: z.array(z.string().min(1)),
-  blockedBy: z.array(z.string().min(1)),
-  createdAt: z.string().min(1),
-  updatedAt: z.string().min(1),
-}).strict();
+export const ManagedTaskSchema = z
+    .object({
+        id: z.string().min(1),
+        subject: z.string().min(1),
+        description: z.string().min(1),
+        activeForm: z.string().min(1),
+        status: z.enum(['pending', 'in_progress', 'completed']),
+        owner: z.string().optional(),
+        metadata: JsonObjectSchema.optional(),
+        blocks: z.array(z.string().min(1)),
+        blockedBy: z.array(z.string().min(1)),
+        createdAt: z.string().min(1),
+        updatedAt: z.string().min(1),
+    })
+    .strict();
 
 export const ManagedTaskListSchema = z.array(ManagedTaskSchema);
 
@@ -311,13 +313,6 @@ Claim a task by setting owner:
 
 Set up task dependencies:
 {"taskId": "2", "addBlockedBy": ["1"]}`;
-export const TASK_OUTPUT_DESCRIPTION = `- Retrieves output from a running or completed task (background shell, agent, or remote session)
-- Takes a task_id parameter identifying the task
-- Returns the task output along with status information
-- Use block=true (default) to wait for task completion
-- Use block=false for non-blocking check of current status
-- Task IDs can be found using the /tasks command
-- Works with all task types: background shells, async agents, and remote sessions`;
 export const TASK_STOP_DESCRIPTION = `- Stops a running background task by its ID
 - Takes a task_id parameter identifying the task
 - Returns a success or failure status
@@ -329,177 +324,182 @@ export const BACKGROUND_HEARTBEAT_INTERVAL_MS = 1000;
 export const BACKGROUND_HEARTBEAT_PERSIST_INTERVAL_MS = 1500;
 
 export function nowIso(): string {
-  return new Date().toISOString();
+    return new Date().toISOString();
 }
 
 export function nowMs(): number {
-  return Date.now();
+    return Date.now();
 }
 
 export function unique(values: string[]): string[] {
-  return Array.from(new Set(values.filter((v) => v.trim().length > 0)));
+    return Array.from(new Set(values.filter((v) => v.trim().length > 0)));
 }
 
 export function compareTaskIds(a: string, b: string): number {
-  const numA = /^\d+$/.test(a) ? Number.parseInt(a, 10) : Number.NaN;
-  const numB = /^\d+$/.test(b) ? Number.parseInt(b, 10) : Number.NaN;
-  if (!Number.isNaN(numA) && !Number.isNaN(numB)) {
-    return numA - numB;
-  }
-  if (!Number.isNaN(numA)) return -1;
-  if (!Number.isNaN(numB)) return 1;
-  return a.localeCompare(b);
+    const numA = /^\d+$/.test(a) ? Number.parseInt(a, 10) : Number.NaN;
+    const numB = /^\d+$/.test(b) ? Number.parseInt(b, 10) : Number.NaN;
+    if (!Number.isNaN(numA) && !Number.isNaN(numB)) {
+        return numA - numB;
+    }
+    if (!Number.isNaN(numA)) return -1;
+    if (!Number.isNaN(numB)) return 1;
+    return a.localeCompare(b);
 }
 
 const taskIdCounters = new Map<string, number>();
 
 function taskCounterKey(sessionId?: string): string {
-  return sessionId || '__memory__';
+    return sessionId || '__memory__';
 }
 
 export function nextTaskId(tasks: ManagedTask[], sessionId?: string): string {
-  let maxId = 0;
-  for (const task of tasks) {
-    if (/^\d+$/.test(task.id)) {
-      maxId = Math.max(maxId, Number.parseInt(task.id, 10));
+    let maxId = 0;
+    for (const task of tasks) {
+        if (/^\d+$/.test(task.id)) {
+            maxId = Math.max(maxId, Number.parseInt(task.id, 10));
+        }
     }
-  }
 
-  const counterKey = taskCounterKey(sessionId);
-  const lastIssued = taskIdCounters.get(counterKey) ?? 0;
-  const nextId = Math.max(maxId, lastIssued) + 1;
-  taskIdCounters.set(counterKey, nextId);
-  return String(nextId);
+    const counterKey = taskCounterKey(sessionId);
+    const lastIssued = taskIdCounters.get(counterKey) ?? 0;
+    const nextId = Math.max(maxId, lastIssued) + 1;
+    taskIdCounters.set(counterKey, nextId);
+    return String(nextId);
 }
 
 export function clearTaskIdCounterState(sessionId?: string): void {
-  if (!sessionId) {
-    taskIdCounters.clear();
-    return;
-  }
+    if (!sessionId) {
+        taskIdCounters.clear();
+        return;
+    }
 
-  taskIdCounters.delete(taskCounterKey(sessionId));
+    taskIdCounters.delete(taskCounterKey(sessionId));
 }
 
 export function isStatusTransitionAllowed(from: TaskStatus, to: TaskStatus): boolean {
-  if (from === to) return true;
-  const transitions: Record<TaskStatus, TaskStatus[]> = {
-    pending: ['in_progress'],
-    in_progress: ['completed'],
-    completed: [],
-  };
-  return transitions[from].includes(to);
+    if (from === to) return true;
+    const transitions: Record<TaskStatus, TaskStatus[]> = {
+        pending: ['in_progress'],
+        in_progress: ['completed'],
+        completed: [],
+    };
+    return transitions[from].includes(to);
 }
 
 export function extractOpenDependencies(tasks: ManagedTask[], blockedBy: string[]): string[] {
-  const openSet = new Set(
-    tasks
-      .filter((t) => t.status !== 'completed')
-      .map((t) => t.id),
-  );
-  return unique(blockedBy).filter((id) => openSet.has(id));
+    const openSet = new Set(tasks.filter((t) => t.status !== 'completed').map((t) => t.id));
+    return unique(blockedBy).filter((id) => openSet.has(id));
 }
 
 export function createExecutionId(): string {
-  return `task_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    return `task_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
 
 export function buildSubTaskSessionId(parentSessionId: string, taskId: string): string {
-  return `${parentSessionId}::subtask::${taskId}`;
+    return `${parentSessionId}::subtask::${taskId}`;
 }
 
 export function normalizeMessagesForStorage(messages: unknown): Message[] {
-  try {
-    if (!Array.isArray(messages)) return [];
-    return JSON.parse(JSON.stringify(messages)) as Message[];
-  } catch {
-    return [];
-  }
+    try {
+        if (!Array.isArray(messages)) return [];
+        return JSON.parse(JSON.stringify(messages)) as Message[];
+    } catch {
+        return [];
+    }
 }
 
 export function getMessageCount(messages: unknown): number {
-  return Array.isArray(messages) ? messages.length : 0;
+    return Array.isArray(messages) ? messages.length : 0;
 }
 
 export function toIso(ts?: number): string | undefined {
-  return ts ? new Date(ts).toISOString() : undefined;
+    return ts ? new Date(ts).toISOString() : undefined;
 }
 
 export function pickLastToolName(messages: Message[]): string | undefined {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const calls = messages[i]?.tool_calls;
-    if (!Array.isArray(calls)) continue;
-    for (let j = calls.length - 1; j >= 0; j--) {
-      const name = calls[j]?.function?.name;
-      if (name) return name;
+    for (let i = messages.length - 1; i >= 0; i--) {
+        const calls = messages[i]?.tool_calls;
+        if (!Array.isArray(calls)) continue;
+        for (let j = calls.length - 1; j >= 0; j--) {
+            const name = calls[j]?.function?.name;
+            if (name) return name;
+        }
     }
-  }
-  return undefined;
+    return undefined;
 }
 
-export function toRunTimestamps(createdAtIso: string, startedAtIso: string, finishedAtIso?: string): {
-  createdAt: number;
-  startedAt: number;
-  finishedAt?: number;
+export function toRunTimestamps(
+    createdAtIso: string,
+    startedAtIso: string,
+    finishedAtIso?: string
+): {
+    createdAt: number;
+    startedAt: number;
+    finishedAt?: number;
 } {
-  return {
-    createdAt: new Date(createdAtIso).getTime(),
-    startedAt: new Date(startedAtIso).getTime(),
-    ...(finishedAtIso ? { finishedAt: new Date(finishedAtIso).getTime() } : {}),
-  };
+    return {
+        createdAt: new Date(createdAtIso).getTime(),
+        startedAt: new Date(startedAtIso).getTime(),
+        ...(finishedAtIso ? { finishedAt: new Date(finishedAtIso).getTime() } : {}),
+    };
 }
 
-export function extractToolsUsed(messages: Array<{ tool_calls?: Array<{ function?: { name?: string } }> }>): string[] {
-  const tools = new Set<string>();
-  for (const message of messages) {
-    if (!Array.isArray(message.tool_calls)) continue;
-    for (const call of message.tool_calls) {
-      const name = call?.function?.name;
-      if (name) tools.add(name);
+export function extractToolsUsed(messages: Message[]): string[] {
+    const tools = new Set<string>();
+    for (const message of messages) {
+        if (!Array.isArray(message.tool_calls)) continue;
+        for (const rawCall of message.tool_calls) {
+            if (!rawCall || typeof rawCall !== 'object') continue;
+            const fn = 'function' in rawCall ? rawCall.function : undefined;
+            if (!fn || typeof fn !== 'object') continue;
+            const name = 'name' in fn ? fn.name : undefined;
+            if (typeof name === 'string' && name.length > 0) {
+                tools.add(name);
+            }
+        }
     }
-  }
-  return Array.from(tools);
+    return Array.from(tools);
 }
 
 export function messageContentToText(content: unknown): string {
-  if (typeof content === 'string') {
-    return content;
-  }
+    if (typeof content === 'string') {
+        return content;
+    }
 
-  if (!Array.isArray(content)) {
-    return '';
-  }
-
-  return content
-    .map((part) => {
-      if (!part || typeof part !== 'object' || !('type' in part)) {
+    if (!Array.isArray(content)) {
         return '';
-      }
+    }
 
-      const typedPart = part as {
-        type?: string;
-        text?: string;
-        image_url?: { url?: string };
-        file?: { filename?: string; file_id?: string };
-        input_audio?: unknown;
-        input_video?: { url?: string; file_id?: string };
-      };
+    return content
+        .map((part) => {
+            if (!part || typeof part !== 'object' || !('type' in part)) {
+                return '';
+            }
 
-      switch (typedPart.type) {
-        case 'text':
-          return typedPart.text || '';
-        case 'image_url':
-          return `[image] ${typedPart.image_url?.url || ''}`.trim();
-        case 'file':
-          return `[file] ${typedPart.file?.filename || typedPart.file?.file_id || ''}`.trim();
-        case 'input_audio':
-          return '[audio]';
-        case 'input_video':
-          return `[video] ${typedPart.input_video?.url || typedPart.input_video?.file_id || ''}`.trim();
-        default:
-          return '';
-      }
-    })
-    .filter(Boolean)
-    .join('\n');
+            const typedPart = part as {
+                type?: string;
+                text?: string;
+                image_url?: { url?: string };
+                file?: { filename?: string; file_id?: string };
+                input_audio?: unknown;
+                input_video?: { url?: string; file_id?: string };
+            };
+
+            switch (typedPart.type) {
+                case 'text':
+                    return typedPart.text || '';
+                case 'image_url':
+                    return `[image] ${typedPart.image_url?.url || ''}`.trim();
+                case 'file':
+                    return `[file] ${typedPart.file?.filename || typedPart.file?.file_id || ''}`.trim();
+                case 'input_audio':
+                    return '[audio]';
+                case 'input_video':
+                    return `[video] ${typedPart.input_video?.url || typedPart.input_video?.file_id || ''}`.trim();
+                default:
+                    return '';
+            }
+        })
+        .filter(Boolean)
+        .join('\n');
 }

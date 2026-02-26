@@ -5,13 +5,14 @@
  */
 
 import type { ModelId } from '../types';
+import fs from 'node:fs';
 import { MODEL_DEFINITIONS } from './model-config';
 
 /**
  * 模型配置文件格式
  */
 export interface ModelConfigFile {
-    models: Record<string, Omit<typeof MODEL_DEFINITIONS[ModelId], 'apiKey'>>;
+    models: Record<string, Omit<(typeof MODEL_DEFINITIONS)[ModelId], 'apiKey'>>;
 }
 
 /**
@@ -20,16 +21,10 @@ export interface ModelConfigFile {
  * @param path 配置文件路径
  * @returns 模型配置映射
  */
-export function loadConfigFromFile(path: string): Record<string, Omit<typeof MODEL_DEFINITIONS[ModelId], 'apiKey'>> {
-    // 注意：这是一个 Node.js 环境的函数
-    // 在浏览器环境中需要使用其他方式（如 fetch）
-    if (typeof require !== 'undefined') {
-        const fs = require('fs');
-        const content = fs.readFileSync(path, 'utf-8');
-        const parsed = JSON.parse(content) as ModelConfigFile;
-        return parsed.models;
-    }
-    throw new Error('loadConfigFromFile is only available in Node.js environment');
+export function loadConfigFromFile(path: string): Record<string, Omit<(typeof MODEL_DEFINITIONS)[ModelId], 'apiKey'>> {
+    const content = fs.readFileSync(path, 'utf-8');
+    const parsed = JSON.parse(content) as ModelConfigFile;
+    return parsed.models;
 }
 
 /**

@@ -47,4 +47,12 @@ export default tseslint.config(
       },
     },
   }
+  ,
+  {
+    files: ['src/cli/**/*.{ts,tsx}'],
+    rules: {
+      // CLI 使用 OpenTUI 自定义 JSX 属性，不是 DOM 属性
+      'react/no-unknown-property': 'off',
+    },
+  }
 );

@@ -1,116 +1,120 @@
+/**
+ * Agent 核心 类 (重构版)
+ *
+ * 职责：
+ * 1. 协调各组件工作（协调器模式）
+ * 2. 管理对话会话状态
+ * 3. 处理错误和重试机制
+ *
+ * 组件委托：
+ * - LLM调用 -> LLMCaller
+ * - 工具执行 -> ToolExecutor
+ * - 状态管理 -> AgentState
+ * - 事件发射 -> AgentEmitter
+ */
+
+import { v4 as uuid } from 'uuid';
+
 import {
-    Chunk,
-    InputContentPart,
-    LLMError,
-    LLMRetryableError,
-    isAbortedError,
-    isRetryableError,
+    FinishReason,
     LLMGenerateOptions,
     LLMResponse,
+    LLMRetryableError,
+    type ToolCall,
+    isRetryableError,
     MessageContent,
-    LLMRequest,
-    Usage
-} from "../../providers";
-import { Session } from "../session";
-import { ToolRegistry } from "../tool/registry";
-import { AgentError, CompensationRetryError, ToolError } from "./errors";
-import {
-    AgentExecutionResult,
-    AgentFailure,
-    AgentFailureCode,
-    AgentOptions,
-    AgentStatus,
-    StreamCallback
-} from "./types";
-import { EventBus, EventType } from "../eventbus";
-import { Message } from "../session/types";
-import { v4 as uuid } from "uuid";
-import { createDefaultToolRegistry } from "../tool";
-import { StreamProcessor } from "./stream-processor";
-import { MessageBuilder } from "./message-builder";
-import {
-    createToolResultMessage,
-    createUserMessage,
-} from "./message-builder";
-import {
-    ITimeProvider,
-    SafeError,
-    TaskFailedEvent,
-    ToolCall,
-    ToolExecutionResult,
-    ValidationResult as InternalValidationResult,
-    getResponseFinishReason,
-    getResponseToolCalls,
-    responseHasToolCalls,
-} from "./types-internal";
-import { AgentMessageType } from "./stream-types";
-import { ToolContext } from "../tool/base";
-import { AgentEmitter } from "./agent-emitter";
-import { safeToolResultToString } from "../util";
-import {
-    ResponseValidatorOptions,
-    ValidationResult,
-} from "./response-validator";
+    Usage,
+} from '../../providers';
+import { Session } from '../session';
+import { ToolRegistry } from '../tool/registry';
+import { EventBus, EventType } from '../eventbus';
+import { Message } from '../session/types';
+import { createDefaultToolRegistry } from '../tool';
 
-// ==================== 默认实现 ====================
+import {
+    AgentAbortedError,
+    AgentBusyError,
+    AgentLoopExceededError,
+    AgentMaxRetriesExceededError,
+    AgentConfigurationError,
+    AgentValidationError,
+    LLMRequestError,
+    LLMResponseInvalidError,
+} from './errors';
+import { AgentExecutionResult, AgentOptions, AgentStatus, StreamCallback } from './types';
+import { AgentState } from './core/agent-state';
+import { LLMCaller } from './core/llm-caller';
+import { ToolExecutor } from './core/tool-executor';
+import { DefaultTimeProvider } from './time-provider';
+import { InputValidator } from './input-validator';
+import { ErrorClassifier } from './error-classifier';
+import { AgentEmitter } from './agent-emitter';
+import { ITimeProvider, TaskFailedEvent, contentToText, hasContent } from './core-types';
+import { getResponseFinishReason, getResponseToolCalls, responseHasToolCalls } from './types-internal';
 
-class DefaultTimeProvider implements ITimeProvider {
-    getCurrentTime(): number {
-        return Date.now();
-    }
+// ==================== 常量 ====================
 
-    async sleep(ms: number): Promise<void> {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    }
-}
+/**
+ * Agent 默认配置
+ *
+ * 超时控制说明：
+ * - Agent.requestTimeout 优先使用
+ * - 如果未设置，回退到 Provider.getTimeTimeout()（provider 默认通常为 3 分钟）
+ */
+const AGENT_DEFAULTS = {
+    /** 最大循环次数 */
+    LOOP_MAX: 3000,
+    /** 最大重试次数 */
+    MAX_RETRIES: 10,
+    /** 默认重试延迟（毫秒）- 10 秒 */
+    RETRY_DELAY_MS: 10 * 1000,
+    /** Abort 重试延迟（毫秒） */
+    ABORT_RETRY_DELAY_MS: 5000,
+    /** 空响应重试延迟（毫秒） */
+    EMPTY_RESPONSE_RETRY_DELAY_MS: 100,
+    /** 默认流式缓冲区大小（字节） */
+    BUFFER_SIZE: 100000,
+} as const;
 
 // ==================== Agent 类 ====================
 
 export class Agent {
-    // 依赖
-    private provider: AgentOptions['provider'];
-    private session: Session;
-    private toolRegistry: ToolRegistry;
-    private eventBus: EventBus;
+    // 外部依赖
+    private readonly provider: AgentOptions['provider'];
+    private readonly session: Session;
+    private readonly toolRegistry: ToolRegistry;
+    private readonly eventBus: EventBus;
 
     // 配置
-    private systemPrompt: string;
-    private maxRetries: number;
-    private stream: boolean;
-    private streamCallback?: StreamCallback;
-    private maxBufferSize: number;
-    private thinking?: boolean;
-    private validationOptions?: Partial<ResponseValidatorOptions>;
-    private onValidationViolation?: (result: ValidationResult) => void;
-
-    // 状态
-    private status: AgentStatus;
-    private abortController: AbortController | null = null;
-    private lastFailure?: AgentFailure;
-
-    // 执行追踪
-    private taskStartTime = 0;
-    private loopCount = 0;
-    private retryCount = 0;
-    private compensationRetryCount = 0;
-    private timeProvider: ITimeProvider;
-    private loopMax: number;
-    private maxCompensationRetries: number;
-    private readonly defaultRetryDelayMs: number;
+    private readonly stream: boolean;
+    private readonly streamCallback?: StreamCallback;
+    private readonly thinking?: boolean;
     private readonly requestTimeoutMs?: number;
-    private nextRetryDelayMs: number;
+    private pendingRetryReason: string | null = null;
 
-    // 流式处理
-    private streamProcessor: StreamProcessor;
-    private emitter: AgentEmitter;
+    // 内部组件
+    private readonly agentState: AgentState;
+    private readonly timeProvider: ITimeProvider;
+    private readonly llmCaller: LLMCaller;
+    private readonly toolExecutor: ToolExecutor;
+    private readonly emitter: AgentEmitter;
+    private readonly inputValidator: InputValidator;
+    private readonly errorClassifier: ErrorClassifier;
 
     constructor(config: AgentOptions) {
-        this.validateConfig(config);
+        this.provider = this.validateAndGetProvider(config);
+        this.stream = config.stream ?? false;
+        this.streamCallback = config.streamCallback;
+        this.thinking = config.thinking;
+        this.requestTimeoutMs = this.normalizeMs(config.requestTimeout);
 
-        this.provider = config.provider;
-        this.systemPrompt = config.systemPrompt ?? '';
+        this.timeProvider = config.timeProvider ?? new DefaultTimeProvider();
+        this.eventBus = new EventBus();
+        this.inputValidator = new InputValidator();
+        this.errorClassifier = new ErrorClassifier();
+
         this.session = new Session({
-            systemPrompt: this.systemPrompt,
+            systemPrompt: config.systemPrompt ?? '',
             memoryManager: config.memoryManager,
             sessionId: config.sessionId,
             enableCompaction: config.enableCompaction,
@@ -118,108 +122,132 @@ export class Agent {
             provider: this.provider,
         });
 
-        this.toolRegistry = config.toolRegistry ?? createDefaultToolRegistry(
-            { workingDirectory: process.cwd() },
-            this.provider
-        );
-        this.maxRetries = config.maxRetries ?? 10;
-        this.stream = config.stream ?? false;
-        this.streamCallback = config.streamCallback;
-        this.eventBus = new EventBus();
-        this.status = AgentStatus.IDLE;
-        this.timeProvider = config.timeProvider ?? new DefaultTimeProvider();
-        this.maxBufferSize = config.maxBufferSize ?? 100000;
-        this.thinking = config.thinking;
-        this.validationOptions = config.validationOptions;
-        this.onValidationViolation = config.onValidationViolation;
-        this.loopMax = 3000;
-        this.maxCompensationRetries = 1;
-        this.defaultRetryDelayMs = this.normalizePositiveMs(config.retryDelayMs, 1000 * 60 * 10);
-        this.requestTimeoutMs = this.normalizeOptionalPositiveMs(config.requestTimeout);
-        this.nextRetryDelayMs = this.defaultRetryDelayMs;
+        this.toolRegistry =
+            config.toolRegistry ?? createDefaultToolRegistry({ workingDirectory: process.cwd() }, this.provider);
+        this.configureToolEventBridge();
 
-        // 初始化事件发射器
+        this.agentState = new AgentState({
+            maxLoops: config.maxLoops ?? AGENT_DEFAULTS.LOOP_MAX,
+            maxRetries: config.maxRetries ?? AGENT_DEFAULTS.MAX_RETRIES,
+            defaultRetryDelayMs: config.retryDelayMs ?? AGENT_DEFAULTS.RETRY_DELAY_MS,
+            timeProvider: this.timeProvider,
+        });
+
         this.emitter = new AgentEmitter({
             streamCallback: this.streamCallback,
             sessionId: this.session.getSessionId(),
             getTimestamp: () => this.timeProvider.getCurrentTime(),
         });
 
-        // 初始化流式处理器
-        this.streamProcessor = new StreamProcessor({
-            maxBufferSize: this.maxBufferSize,
+        // 创建 LLM 调用器
+        this.llmCaller = new LLMCaller({
+            provider: this.provider,
+            stream: this.stream,
+            maxBufferSize: config.maxBufferSize ?? AGENT_DEFAULTS.BUFFER_SIZE,
+            requestTimeoutMs: this.requestTimeoutMs,
+            thinking: this.thinking,
+            timeProvider: this.timeProvider,
+            validatorOptions: config.validationOptions,
+            onValidationViolation: config.onValidationViolation,
+            // 流式处理回调
             onMessageCreate: (msg) => this.session.addMessage(msg as Message),
             onMessageUpdate: (msg) => this.session.addMessage(msg as Message),
-            onTextDelta: (content, msgId) => this.emitter.emitTextDelta(content, msgId),
             onTextStart: (msgId) => this.emitter.emitTextStart(msgId),
+            onTextDelta: (content, msgId) => this.emitter.emitTextDelta(content, msgId),
             onTextComplete: (msgId) => this.emitter.emitTextComplete(msgId),
-            // 推理内容回调 (thinking 模式)
-            onReasoningDelta: (content, msgId) => this.emitter.emitReasoningDelta(content, msgId),
             onReasoningStart: (msgId) => this.emitter.emitReasoningStart(msgId),
+            onReasoningDelta: (content, msgId) => this.emitter.emitReasoningDelta(content, msgId),
             onReasoningComplete: (msgId) => this.emitter.emitReasoningComplete(msgId),
-            // Token 使用量回调
-            onUsageUpdate: (usage) => this.emitter.emitUsageUpdate(usage),
-            // 响应验证配置
-            validatorOptions: this.validationOptions,
-            onValidationViolation: this.onValidationViolation,
+            onUsageUpdate: (usage, msgId) => {
+                this.emitter.emitUsageUpdate(usage, msgId);
+                this.updateMessageUsage(msgId, usage);
+            },
+            onStatusChange: (status, message, msgId, meta) => this.emitter.emitStatus(status, message, msgId, meta),
+        });
+
+        // 创建工具执行器
+        this.toolExecutor = new ToolExecutor({
+            toolRegistry: this.toolRegistry,
+            sessionId: this.session.getSessionId(),
+            memoryManager: this.session.getMemoryManager(),
+            streamCallback: this.streamCallback,
+            onToolCallCreated: (toolCalls, messageId, content) =>
+                this.emitter.emitToolCallCreated(toolCalls, messageId, content),
+            onToolCallStream: (toolCallId, output, messageId) =>
+                this.emitter.emitToolCallStream(toolCallId, output, messageId),
+            onToolCallResult: (toolCallId, result, status, resultMessageId) =>
+                this.emitter.emitToolCallResult(toolCallId, result, status, resultMessageId),
+            onCodePatch: (filePath, diff, messageId, language) =>
+                this.emitter.emitCodePatch(filePath, diff, messageId, language),
+            onMessageAdd: (msg) => this.session.addMessage(msg),
         });
     }
 
     // ==================== 公共 API ====================
 
     async execute(query: MessageContent, options?: LLMGenerateOptions): Promise<Message> {
-        const validation = this.validateInput(query);
-        if (!validation.valid) {
-            throw new AgentError(validation.error || 'Invalid input');
-        }
-
-        if (this.isBusy()) {
-            throw new AgentError(`Agent is not idle, current status: ${this.status}`);
-        }
-
-        await this.session.initialize();
-        this.initializeTask(query);
+        this.validateInput(query);
+        this.ensureIdle();
+        this.agentState.startTask();
+        this.pendingRetryReason = null;
 
         try {
+            await this.session.initialize();
+            this.eventBus.emit(EventType.TASK_START, {
+                timestamp: this.timeProvider.getCurrentTime(),
+                query: contentToText(query),
+            });
+            this.session.addMessage({ messageId: uuid(), role: 'user', content: query });
+
             await this.runLoop(options);
-            this.completeTask();
-            const lastMessage = this.session.getLastMessage();
-            if (!lastMessage) {
-                throw new Error('No message after execution');
+            if (this.agentState.isAborted()) {
+                throw new AgentAbortedError();
             }
-            return lastMessage;
+            this.completeTask();
+            return this.getFinalMessage();
         } catch (error) {
-            if (this.status !== AgentStatus.ABORTED) {
+            if (!this.agentState.isAborted()) {
                 this.failTask(error);
             }
             throw error;
         } finally {
-            await this.flushSessionPersistence();
+            await this.flushSession();
         }
     }
 
-    async executeWithResult(query: MessageContent): Promise<AgentExecutionResult> {
+    async executeWithResult(query: MessageContent, options?: LLMGenerateOptions): Promise<AgentExecutionResult> {
         try {
-            const finalMessage = await this.execute(query);
+            const finalMessage = await this.execute(query, options);
             return {
                 status: 'completed',
                 finalMessage,
-                loopCount: this.loopCount,
-                retryCount: this.retryCount,
+                loopCount: this.agentState.loopCount,
+                retryCount: this.agentState.totalRetryCount,
                 sessionId: this.session.getSessionId(),
             };
         } catch (error) {
-            const failure = this.lastFailure ?? this.buildFailure(error, this.sanitizeError(error));
-            const status = this.status === AgentStatus.ABORTED ? 'aborted' : 'failed';
+            const failure =
+                this.agentState.lastFailure ?? this.errorClassifier.buildFailure(error, this.agentState.status);
             return {
-                status,
+                status: this.agentState.status === AgentStatus.ABORTED ? 'aborted' : 'failed',
                 failure,
-                loopCount: this.loopCount,
-                retryCount: this.retryCount,
+                loopCount: this.agentState.loopCount,
+                retryCount: this.agentState.totalRetryCount,
                 sessionId: this.session.getSessionId(),
             };
         }
     }
+
+    abort(): void {
+        this.agentState.abort();
+        this.llmCaller.abort();
+        this.emitter.emitStatus(AgentStatus.ABORTED, 'Agent aborted by user.', undefined, {
+            source: 'agent',
+            phase: 'failure',
+        });
+    }
+
+    // ==================== 事件订阅 ====================
 
     on(type: EventType, listener: (data: unknown) => void): void {
         this.eventBus.on(type, listener);
@@ -227,6 +255,64 @@ export class Agent {
 
     off(type: EventType, listener: (data: unknown) => void): void {
         this.eventBus.off(type, listener);
+    }
+
+    private configureToolEventBridge(): void {
+        this.toolRegistry.setEventCallbacks({
+            onToolStart: (toolName, args) => {
+                this.eventBus.emit(EventType.TOOL_START, {
+                    timestamp: this.timeProvider.getCurrentTime(),
+                    toolName,
+                    arguments: args,
+                });
+            },
+            onToolSuccess: (toolName, duration, result) => {
+                this.eventBus.emit(EventType.TOOL_SUCCESS, {
+                    timestamp: this.timeProvider.getCurrentTime(),
+                    toolName,
+                    duration,
+                    resultLength: this.getPayloadLength(result),
+                });
+            },
+            onToolFailed: (toolName, error) => {
+                this.eventBus.emit(EventType.TOOL_FAILED, {
+                    timestamp: this.timeProvider.getCurrentTime(),
+                    toolName,
+                    error: this.normalizeToolError(error),
+                });
+            },
+        });
+    }
+
+    private getPayloadLength(value: unknown): number {
+        if (typeof value === 'string') {
+            return value.length;
+        }
+        try {
+            return JSON.stringify(value)?.length ?? 0;
+        } catch {
+            return 0;
+        }
+    }
+
+    private normalizeToolError(value: unknown): string {
+        if (value instanceof Error) {
+            return value.message || value.name;
+        }
+        if (typeof value === 'string') {
+            return value;
+        }
+        try {
+            return JSON.stringify(value) || String(value);
+        } catch {
+            return String(value);
+        }
+    }
+
+    // ==================== 状态查询 ====================
+
+    getStatus(): AgentStatus {
+        return this.agentState.status;
     }
 
     getMessages(): Message[] {
@@ -237,613 +323,699 @@ export class Agent {
         return this.session.getSessionId();
     }
 
-    getStatus(): AgentStatus {
-        return this.status;
-    }
+    // ==================== 内部方法：初始化与验证 ====================
 
-    abort(): void {
-        this.abortController?.abort();
-        this.status = AgentStatus.ABORTED;
-        this.lastFailure = {
-            code: 'AGENT_ABORTED',
-            userMessage: 'Task was aborted.',
-            internalMessage: 'Agent aborted by user.',
-        };
-        this.emitter.emitStatus(AgentStatus.ABORTED, 'Agent aborted by user.');
-    }
-
-    // ==================== 状态检查 ====================
-
-    private isBusy(): boolean {
-        return [AgentStatus.RUNNING, AgentStatus.THINKING].includes(this.status);
-    }
-
-    private checkComplete(): boolean {
-        const lastMessage = this.session.getLastMessage();
-        if (!lastMessage) return false;
-
-        // 用户消息：未开始处理
-        if (lastMessage.role === 'user') return false;
-
-        // 助手消息：检查是否有完成标记
-        if (lastMessage.role === 'assistant') {
-            // 有 finish_reason 表示响应完成
-            if (lastMessage.finish_reason) {
-                // 如果是工具调用，需要继续获取最终响应
-                if (lastMessage.finish_reason === 'tool_calls' || lastMessage.tool_calls) {
-                    return false;
-                }
-                if (this.isCompensationRetryCandidate(lastMessage)) {
-                    return false;
-                }
-                return true;
-            }
-            // 文本消息但没有工具调用，且有内容，也视为完成
-            if (
-                lastMessage.type === 'text' &&
-                this.hasMessageContent(lastMessage.content) &&
-                !lastMessage.tool_calls
-            ) {
-                return true;
-            }
-        }
-
-        // 工具消息：需要等待助手响应
-        if (lastMessage.role === 'tool') return false;
-
-        return false;
-    }
-
-    // ==================== 验证 ====================
-
-    private validateConfig(config: AgentOptions): void {
+    private validateAndGetProvider(config: AgentOptions): AgentOptions['provider'] {
         if (!config.provider) {
-            throw new AgentError('Provider is required');
+            throw new AgentConfigurationError('Provider is required');
+        }
+        return config.provider;
+    }
+
+    private validateInput(query: MessageContent): void {
+        const result = this.inputValidator.validate(query);
+        if (!result.valid) {
+            throw new AgentValidationError(result.error || 'Invalid input');
         }
     }
 
-    private validateInput(query: MessageContent): ValidationResult {
-        if (typeof query === 'string') {
-            return this.validateTextInput(query);
-        }
-
-        if (!Array.isArray(query) || query.length === 0) {
-            return { valid: false, error: 'Query content parts cannot be empty' };
-        }
-
-        for (const part of query) {
-            const partValidation = this.validateContentPart(part);
-            if (!partValidation.valid) {
-                return partValidation;
-            }
-        }
-
-        return { valid: true };
-    }
-
-    private validateTextInput(query: string): ValidationResult {
-        if (query.length === 0) {
-            return { valid: false, error: 'Query cannot be empty' };
-        }
-
-        if (query.length > 100000) {
-            return { valid: false, error: 'Query exceeds maximum length' };
-        }
-
-        return { valid: true };
-    }
-
-    private validateContentPart(part: InputContentPart): ValidationResult {
-        if (!part || typeof part !== 'object' || !('type' in part)) {
-            return { valid: false, error: 'Invalid content part structure' };
-        }
-
-        switch (part.type) {
-            case 'text':
-                return this.validateTextInput(part.text || '');
-            case 'image_url':
-                if (!part.image_url?.url) {
-                    return { valid: false, error: 'image_url part must include a valid url' };
-                }
-                return { valid: true };
-            case 'file':
-                if (!part.file?.file_id && !part.file?.file_data) {
-                    return { valid: false, error: 'file part must include file_id or file_data' };
-                }
-                return { valid: true };
-            case 'input_audio':
-                if (!part.input_audio?.data || !part.input_audio?.format) {
-                    return { valid: false, error: 'input_audio part must include data and format' };
-                }
-                return { valid: true };
-            case 'input_video':
-                if (!part.input_video?.url && !part.input_video?.file_id && !part.input_video?.data) {
-                    return { valid: false, error: 'input_video part must include url, file_id, or data' };
-                }
-                return { valid: true };
-            default:
-                return { valid: false, error: `Unsupported content part type: ${(part as { type?: string }).type}` };
+    private ensureIdle(): void {
+        if (this.agentState.isBusy()) {
+            throw new AgentBusyError(this.agentState.status);
         }
     }
 
-    private sanitizeError(error: unknown): SafeError {
-        if (error instanceof AgentError) {
-            return {
-                userMessage: error.message,
-                internalMessage: error.stack,
-            };
-        }
-
-        if (error instanceof ToolError) {
-            return {
-                userMessage: 'Tool execution failed. Please try again.',
-                internalMessage: error.message,
-            };
-        }
-
-        if (error instanceof Error) {
-            return {
-                userMessage: 'An unexpected error occurred. Please try again.',
-                internalMessage: error.message,
-            };
-        }
-
-        return {
-            userMessage: 'An unexpected error occurred. Please try again.',
-            internalMessage: String(error),
-        };
-    }
-
-    // ==================== 任务生命周期 ====================
-
-    private initializeTask(query: MessageContent): void {
-        this.taskStartTime = this.timeProvider.getCurrentTime();
-        this.loopCount = 0;
-        this.retryCount = 0;
-        this.compensationRetryCount = 0;
-        this.nextRetryDelayMs = this.defaultRetryDelayMs;
-        this.lastFailure = undefined;
-
-        this.session.addMessage(createUserMessage(query));
-    }
-
-    private contentToText(content: MessageContent): string {
-        if (typeof content === 'string') {
-            return content;
-        }
-
-        return content
-            .map((part) => {
-                switch (part.type) {
-                    case 'text':
-                        return part.text || '';
-                    case 'image_url':
-                        return `[image] ${part.image_url?.url || ''}`.trim();
-                    case 'file':
-                        return `[file] ${part.file?.filename || part.file?.file_id || ''}`.trim();
-                    case 'input_audio':
-                        return '[audio]';
-                    case 'input_video':
-                        return `[video] ${part.input_video?.url || part.input_video?.file_id || ''}`.trim();
-                    default:
-                        return '';
-                }
-            })
-            .filter(Boolean)
-            .join('\n');
-    }
-
-    private hasMessageContent(content: MessageContent): boolean {
-        if (typeof content === 'string') {
-            return content.length > 0;
-        }
-        return content.length > 0;
-    }
-
-    private isCompensationRetryCandidate(message: Message): boolean {
-        if (message.role !== 'assistant') return false;
-        if (message.finish_reason !== 'stop') return false;
-        if (Array.isArray(message.tool_calls) && message.tool_calls.length > 0) return false;
-        return !this.hasMessageContent(message.content);
-    }
-
-    private shouldSendMessageToLLM(message: Message): boolean {
-        if (message.role === 'system') return true;
-        if (message.role === 'assistant') {
-            if (Array.isArray(message.tool_calls) && message.tool_calls.length > 0) return true;
-            return this.hasMessageContent(message.content);
-        }
-        if (message.role === 'tool') {
-            const hasToolCallId = typeof message.tool_call_id === 'string' && message.tool_call_id.length > 0;
-            return hasToolCallId || this.hasMessageContent(message.content);
-        }
-        return this.hasMessageContent(message.content);
-    }
-
-    private getMessagesForLLM(): Message[] {
-        return this.session.getMessages().filter((message) => this.shouldSendMessageToLLM(message));
-    }
-
-    private throwIfCompensationRetryNeeded(): void {
-        const lastMessage = this.session.getLastMessage();
-        if (!lastMessage) return;
-        if (!this.isCompensationRetryCandidate(lastMessage)) return;
-        throw new CompensationRetryError('Assistant returned an empty stop response.');
-    }
-
-    private completeTask(): void {
-        this.status = AgentStatus.COMPLETED;
-        this.emitter.emitStatus(AgentStatus.COMPLETED, 'Task completed successfully');
-    }
-
-    private failTask(error: unknown): void {
-        this.status = AgentStatus.FAILED;
-        const safeError = this.sanitizeError(error);
-        this.lastFailure = this.buildFailure(error, safeError);
-
-        this.eventBus.emit(EventType.TASK_FAILED, {
-            timestamp: this.timeProvider.getCurrentTime(),
-            error: safeError.internalMessage || safeError.userMessage,
-            totalLoops: this.loopCount,
-            totalRetries: this.retryCount,
-        } as TaskFailedEvent);
-
-        this.emitter.emitStatus(AgentStatus.FAILED, safeError.userMessage);
-    }
-
-    private buildFailure(error: unknown, safeError: SafeError): AgentFailure {
-        return {
-            code: this.classifyFailureCode(error),
-            userMessage: safeError.userMessage,
-            internalMessage: safeError.internalMessage,
-        };
-    }
-
-    private classifyFailureCode(error: unknown): AgentFailureCode {
-        if (this.status === AgentStatus.ABORTED || isAbortedError(error) || this.isAbortLikeError(error)) {
-            return 'AGENT_ABORTED';
-        }
-        if (error instanceof AgentError && /maximum retries/i.test(error.message)) {
-            return 'AGENT_MAX_RETRIES_EXCEEDED';
-        }
-        if (error instanceof ToolError) {
-            return 'TOOL_EXECUTION_FAILED';
-        }
-        if (this.isTimeoutLikeError(error)) {
-            return 'LLM_TIMEOUT';
-        }
-        if (error instanceof LLMError) {
-            return 'LLM_REQUEST_FAILED';
-        }
-        return 'AGENT_RUNTIME_ERROR';
-    }
-
-    private isAbortLikeError(error: unknown): boolean {
-        if (!(error instanceof Error)) return false;
-        const message = `${error.name} ${error.message}`.toLowerCase();
-        return message.includes('abort') || message.includes('aborted');
-    }
-
-    private isTimeoutLikeError(error: unknown): boolean {
-        if (!(error instanceof Error)) return false;
-        const message = `${error.name} ${error.message}`.toLowerCase();
-        return (
-            message.includes('timeout')
-            || message.includes('timed out')
-            || message.includes('time out')
-            || message.includes('signal timed out')
-        );
-    }
-
-    // ==================== 主循环 ====================
-
-    private async runLoop(options?: LLMGenerateOptions): Promise<void> {
-        this.emitter.emitStatus(AgentStatus.RUNNING, 'Agent is running...');
-
-        while (this.loopCount < this.loopMax) {
-            if (this.retryCount > this.maxRetries) {
-                throw new AgentError(`Agent failed after maximum retries (${this.maxRetries}).`);
-            }
-
-            if (this.checkComplete()) {
-                break;
-            }
-
-            if (this.retryCount > 0) {
-                await this.handleRetry();
-            }
-
-            this.loopCount++;
-            this.status = AgentStatus.RUNNING;
-
-            try {
-                await this.executeLLMCall(options);
-                this.retryCount = 0;
-                this.compensationRetryCount = 0;
-                this.nextRetryDelayMs = this.defaultRetryDelayMs;
-            } catch (error) {
-                if (error instanceof CompensationRetryError) {
-                    if (this.compensationRetryCount >= this.maxCompensationRetries) {
-                        throw new AgentError(
-                            `Agent failed after maximum compensation retries (${this.maxCompensationRetries}).`
-                        );
-                    }
-                    this.compensationRetryCount++;
-                    this.status = AgentStatus.RETRYING;
-                    this.emitter.emitStatus(
-                        AgentStatus.RETRYING,
-                        `Agent is retrying immediately... (${this.compensationRetryCount}/${this.maxCompensationRetries})`
-                    );
-                    continue;
-                }
-             
-                if (!isRetryableError(error)) {
-                    throw error;
-                }
-                this.retryCount++;
-                this.nextRetryDelayMs = this.resolveRetryDelay(error);
-            }
-        }
-    }
-
-    private async handleRetry(): Promise<void> {
-        this.status = AgentStatus.RETRYING;
-        await this.timeProvider.sleep(this.nextRetryDelayMs);
-        this.emitter.emitStatus(
-            AgentStatus.RETRYING,
-            `Agent is retrying... (${this.retryCount}/${this.maxRetries})`
-        );
-    }
-
-  
-
-    private resolveRetryDelay(error: unknown): number {
-        if (error instanceof LLMRetryableError && typeof error.retryAfter === 'number' && error.retryAfter > 0) {
-            return error.retryAfter;
-        }
-        return this.defaultRetryDelayMs;
-    }
-
-    private normalizeOptionalPositiveMs(value: number | undefined): number | undefined {
+    private normalizeMs(value: number | undefined): number | undefined {
         if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
             return undefined;
         }
         return value;
     }
 
-    private normalizePositiveMs(value: number | undefined, fallback: number): number {
-        return this.normalizeOptionalPositiveMs(value) ?? fallback;
-    }
+    // ==================== 内部方法：主循环 ====================
 
-    // ==================== LLM 调用 ====================
+    private async runLoop(options?: LLMGenerateOptions): Promise<void> {
+        this.emitter.emitStatus(AgentStatus.RUNNING, 'Agent is running...', undefined, {
+            source: 'agent',
+            phase: 'lifecycle',
+        });
 
-    private async executeLLMCall(options?: LLMGenerateOptions): Promise<void> {
-        await this.session.compactBeforeLLMCall();
-
-        this.abortController = new AbortController();
-        this.streamProcessor.reset();
-
-        const messageId = uuid();
-        const requestTimeout = this.requestTimeoutMs ?? this.provider.getTimeTimeout();
-        const timeoutSignal = AbortSignal.any([
-            this.abortController.signal,
-            AbortSignal.timeout(requestTimeout),
-        ]);
-
-        const messages = this.getMessagesForLLM();
-        const llmOptions: LLMGenerateOptions = {
-            tools: this.toolRegistry.toLLMTools(),
-            abortSignal: timeoutSignal,
- thinking: this.thinking,
-            ...options,
-        };
-
-        try {
-            const response = this.stream
-                ? await this.executeStreamCall(messages, llmOptions, messageId)
-                : await this.executeNormalCall(messages, llmOptions);
-
-            if (!response) {
-                throw new AgentError('LLM returned no response');
+        while (true) {
+            if (this.agentState.isAborted()) {
+                break;
             }
 
-            await this.handleResponse(response, messageId);
-            this.throwIfCompensationRetryNeeded();
-        } finally {
-            this.cleanup();
-        }
-    }
+            if (this.checkComplete()) {
+                break;
+            }
 
-    private async executeStreamCall(
-        messages: Message[],
-        llmOptions: LLMGenerateOptions,
-        messageId: string
-    ): Promise<LLMResponse> {
-        this.emitter.emitStatus(AgentStatus.THINKING, 'Agent is thinking...', messageId);
+            if (this.agentState.isRetryExceeded()) {
+                const reasonSuffix = this.pendingRetryReason ? ` Last error: ${this.pendingRetryReason}` : '';
+                throw new AgentMaxRetriesExceededError(reasonSuffix || undefined);
+            }
 
-        this.streamProcessor.setMessageId(messageId);
+            if (!this.agentState.canContinue()) {
+                throw new AgentLoopExceededError(this.agentState.loopCount);
+            }
 
-        llmOptions.stream = true;
-        const streamResult = await this.provider.generate(messages, llmOptions);
-        const streamGenerator = streamResult as unknown as AsyncGenerator<Chunk>;
-
-        for await (const chunk of streamGenerator) {
-            this.streamProcessor.processChunk(chunk);
-        }
-
-        // 流结束后确保消息包含 usage
-        this.ensureMessageHasUsage(messageId);
-
-        return this.streamProcessor.buildResponse();
-    }
-
-    private async executeNormalCall(
-        messages: Message[],
-        llmOptions: LLMGenerateOptions
-    ): Promise<LLMResponse> {
-        const response = await this.provider.generate(messages, llmOptions);
-        return response as LLMResponse;
-    }
-
-    private cleanup(): void {
-        this.abortController = null;
-        this.streamProcessor.reset();
-    }
-
-    private async flushSessionPersistence(): Promise<void> {
-        try {
-            await this.session.sync();
-        } catch (error) {
-            // 持久化失败不应中断主流程，但要保留诊断信息
-            console.error('[Agent] Failed to sync session persistence:', error);
-        }
-    }
-
-    // ==================== 响应处理 ====================
-
-    private async handleResponse(response: LLMResponse, messageId: string): Promise<void> {
-        const choice = response.choices?.[0];
-
-        if (!choice) {
-            throw new AgentError('LLM response missing choices');
-        }
-
-        if (responseHasToolCalls(response)) {
-            await this.handleToolCallResponse(response, messageId);
-        } else {
-            this.handleTextResponse(response, messageId);
-        }
-    }
-
-    private handleTextResponse(response: LLMResponse, messageId: string): void {
-        const finishReason = getResponseFinishReason(response);
-
-        if (this.stream) {
-            // 流式模式下，确保消息的 finish_reason 被设置
-            if (finishReason) {
-                const lastMessage = this.session.getLastMessage();
-                if (lastMessage?.messageId === messageId && !lastMessage.finish_reason) {
-                    this.session.addMessage({
-                        ...lastMessage,
-                        finish_reason: finishReason,
-                    });
+            if (this.agentState.needsRetry()) {
+                await this.handleRetry();
+                if (this.agentState.isAborted()) {
+                    break;
                 }
             }
+
+            this.agentState.incrementLoop();
+            this.agentState.setStatus(AgentStatus.RUNNING);
+            this.eventBus.emit(EventType.TASK_PROGRESS, {
+                timestamp: this.timeProvider.getCurrentTime(),
+                loopCount: this.agentState.loopCount,
+                retryCount: this.agentState.retryCount,
+            });
+
+            try {
+                this.agentState.setStatus(AgentStatus.THINKING);
+                await this.executeLLMCall(options);
+                this.agentState.recordSuccess();
+            } catch (error) {
+                this.handleLoopError(error);
+            }
+        }
+    }
+
+    private handleLoopError(error: unknown): never | void {
+        // 可重试错误
+        if (isRetryableError(error)) {
+            const delay = this.resolveRetryDelay(error);
+            this.agentState.recordRetryableError(delay);
+            this.pendingRetryReason = this.formatRetryReason(error);
+            const stats = this.agentState.getStats();
+            this.eventBus.emit(EventType.TASK_RETRY, {
+                timestamp: this.timeProvider.getCurrentTime(),
+                retryCount: stats.retries,
+                maxRetries: stats.maxRetries,
+                reason: this.pendingRetryReason,
+            });
             return;
         }
 
-        const message = MessageBuilder.fromLLMResponse(response, messageId);
+        throw error;
+    }
+
+    private async handleRetry(): Promise<void> {
+        this.agentState.setStatus(AgentStatus.RETRYING);
+        await this.sleepWithAbort(this.agentState.nextRetryDelayMs);
+        if (this.agentState.isAborted()) {
+            return;
+        }
+        const stats = this.agentState.getStats();
+        const retryDelay = this.agentState.nextRetryDelayMs;
+        const reasonSuffix = this.pendingRetryReason ? ` - ${this.pendingRetryReason}` : '';
+        const retryReason = this.pendingRetryReason ?? undefined;
+        this.pendingRetryReason = null;
+        this.emitter.emitStatus(
+            AgentStatus.RETRYING,
+            `Retrying... (${stats.retries}/${stats.maxRetries}) after ${retryDelay}ms${reasonSuffix}`,
+            undefined,
+            {
+                source: 'agent',
+                phase: 'retry',
+                retry: {
+                    type: 'normal',
+                    attempt: stats.retries,
+                    max: stats.maxRetries,
+                    delayMs: retryDelay,
+                    nextRetryAt: this.timeProvider.getCurrentTime() + retryDelay,
+                    reason: retryReason,
+                },
+            }
+        );
+    }
+
+    private resolveRetryDelay(error: unknown): number {
+        if (error instanceof LLMRetryableError && typeof error.retryAfter === 'number' && error.retryAfter > 0) {
+            return error.retryAfter;
+        }
+        return this.agentState.nextRetryDelayMs;
+    }
+
+    private async sleepWithAbort(ms: number): Promise<void> {
+        const controller = this.agentState.abortController;
+        if (!controller) {
+            await this.timeProvider.sleep(ms);
+            return;
+        }
+        if (controller.signal.aborted) {
+            return;
+        }
+
+        await Promise.race([
+            this.timeProvider.sleep(ms),
+            new Promise<void>((resolve) => {
+                controller.signal.addEventListener('abort', () => resolve(), { once: true });
+            }),
+        ]);
+    }
+
+    private formatRetryReason(error: unknown): string {
+        if (!(error instanceof Error)) {
+            return String(error);
+        }
+
+        const withMeta = error as Error & { code?: unknown; errorType?: unknown };
+        const tags: string[] = [];
+        if (typeof withMeta.code === 'string' && withMeta.code) {
+            tags.push(withMeta.code);
+        }
+        if (typeof withMeta.errorType === 'string' && withMeta.errorType && !tags.includes(withMeta.errorType)) {
+            tags.push(withMeta.errorType);
+        }
+
+        const prefix = tags.length > 0 ? `[${tags.join('/')}] ` : '';
+        const message = `${prefix}${error.message}`.trim();
+        return message.length > 200 ? `${message.slice(0, 200)}...` : message;
+    }
+
+    // ==================== 内部方法：完成检测 ====================
+
+    private checkComplete(): boolean {
+        const lastMessage = this.session.getLastMessage();
+        if (!lastMessage) return false;
+
+        switch (lastMessage.role) {
+            case 'user':
+                return false;
+            case 'tool':
+                return false;
+            case 'assistant':
+                return this.checkAssistantComplete(lastMessage);
+            default:
+                return false;
+        }
+    }
+
+    private checkAssistantComplete(message: Message): boolean {
+        if (message.finish_reason) {
+            switch (message.finish_reason) {
+                case 'abort':
+                    return false;
+                case 'length': {
+                    // finish_reason=length 时，检查是否有未完成的内容或工具调用
+                    const hasTools = Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
+                    return this.hasAssistantOutput(message) && !hasTools;
+                }
+                case 'tool_calls':
+                    return false;
+            }
+
+            if (Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
+                return false;
+            }
+
+            if (this.isEmptyResponse(message)) {
+                return false;
+            }
+
+            return true;
+        }
+
+        const hasToolCalls = Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
+        return message.type === 'text' && this.hasAssistantOutput(message) && !hasToolCalls;
+    }
+
+    private isEmptyResponse(message: Message): boolean {
+        const hasToolCalls = Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
+        return message.role === 'assistant' && !hasToolCalls && !this.hasAssistantOutput(message);
+    }
+
+    private hasReasoningOutput(reasoning: unknown): reasoning is string {
+        return typeof reasoning === 'string' && reasoning.trim().length > 0;
+    }
+
+    private hasAssistantOutput(message: Pick<Message, 'content' | 'reasoning_content'>): boolean {
+        return hasContent(message.content) || this.hasReasoningOutput(message.reasoning_content);
+    }
+
+    private resolveAssistantContent(content: MessageContent, reasoning: unknown): MessageContent {
+        if (hasContent(content)) {
+            return content;
+        }
+        if (typeof reasoning === 'string' && reasoning.trim().length > 0) {
+            return reasoning;
+        }
+        return typeof content === 'string' ? content : '';
+    }
+
+    private isEmptyAssistantChoice(response: LLMResponse): boolean {
+        const choice = response.choices?.[0];
+        if (!choice) return false;
+
+        const toolCalls = choice.message?.tool_calls;
+        const hasToolCalls = Array.isArray(toolCalls) && toolCalls.length > 0;
+        if (hasToolCalls) return false;
+
+        const content = choice.message?.content || '';
+        const reasoning = choice.message?.reasoning_content;
+        return !hasContent(content) && !this.hasReasoningOutput(reasoning);
+    }
+
+    private async removeAssistantMessageFromContext(
+        messageId: string,
+        reason: 'empty_response' | 'invalid_response'
+    ): Promise<void> {
+        const target = this.session.getMessageById(messageId);
+        if (!target || target.role !== 'assistant') {
+            return;
+        }
+        await this.session.removeMessageById(messageId, reason);
+    }
+
+    // ==================== 内部方法：LLM 调用（委托给 LLMCaller） ====================
+
+    private async executeLLMCall(options?: LLMGenerateOptions): Promise<void> {
+        await this.session.compactBeforeLLMCall();
+        this.agentState.prepareLLMCall();
+
+        const messages = this.getMessagesForLLM();
+
+        // 验证消息列表有效性
+        if (messages.length === 0 || messages.every((m) => m.role === 'system')) {
+            throw new LLMRequestError('No valid messages to send to LLM');
+        }
+
+        const tools = this.toolRegistry.toLLMTools();
+        const abortSignal = this.createAbortSignal();
+
+        try {
+            // 传递 options 给 llmCaller，允许动态覆盖配置
+            const { response, messageId } = await this.llmCaller.execute(messages, tools, abortSignal, options);
+
+            try {
+                if (!response) {
+                    throw new LLMResponseInvalidError('LLM returned no response');
+                }
+
+                await this.handleResponse(response, messageId);
+
+                // 基于原始响应判定空响应，避免依赖 session 中是否已经写入 assistant 消息。
+                if (this.isEmptyAssistantChoice(response)) {
+                    await this.removeAssistantMessageFromContext(messageId, 'empty_response');
+                    throw new LLMRetryableError(
+                        'LLM returned empty response',
+                        AGENT_DEFAULTS.EMPTY_RESPONSE_RETRY_DELAY_MS,
+                        'EMPTY_RESPONSE'
+                    );
+                }
+            } catch (error) {
+                if (error instanceof LLMResponseInvalidError) {
+                    await this.removeAssistantMessageFromContext(messageId, 'invalid_response');
+                }
+                throw error;
+            }
+        } finally {
+            // LLMCaller 内部已清理
+        }
+    }
+
+    private createAbortSignal(): AbortSignal | undefined {
+        const controller = this.agentState.abortController;
+        return controller?.signal;
+    }
+
+    private updateMessageUsage(messageId: string, usage: Usage): void {
+        const message = this.session.getMessageById(messageId);
+        if (message && !message.usage) {
+            this.session.addMessage({ ...message, usage });
+        }
+    }
+
+    // ==================== 内部方法：响应处理 ====================
+
+    private async handleResponse(response: LLMResponse, messageId: string): Promise<void> {
+        const choice = response.choices?.[0];
+        if (!choice) {
+            throw new LLMResponseInvalidError('LLM response missing choices');
+        }
+
+        const finishReason = getResponseFinishReason(response);
+
+        // abort 完成原因触发重试
+        if (finishReason === 'abort') {
+            throw new LLMRetryableError('LLM request was aborted', AGENT_DEFAULTS.ABORT_RETRY_DELAY_MS, 'LLM_ABORT');
+        }
+
+        if (responseHasToolCalls(response)) {
+            await this.handleToolCallResponse(response, messageId, response.usage);
+        } else {
+            this.handleTextResponse(response, messageId, response.usage);
+        }
+    }
+
+    private handleTextResponse(response: LLMResponse, messageId: string, usage?: Usage): void {
+        const rawContent = response.choices?.[0]?.message?.content || '';
+        const reasoningContent = response.choices?.[0]?.message?.reasoning_content;
+        const resolvedContent = this.resolveAssistantContent(rawContent, reasoningContent);
+
+        if (this.stream) {
+            const finishReason = getResponseFinishReason(response);
+            const existing = this.session.getMessageById(messageId);
+
+            // 标准流式路径：消息已通过 onMessageUpdate 更新
+            if (existing) {
+                if (!hasContent(existing.content) && this.hasReasoningOutput(existing.reasoning_content)) {
+                    this.session.addMessage({
+                        ...existing,
+                        content: this.resolveAssistantContent(existing.content, existing.reasoning_content),
+                    });
+                }
+                this.updateMessageFinishReason(messageId, finishReason);
+                return;
+            }
+
+            // 兜底路径：某些 provider 在 stream=true 时直接返回完整响应（非增量）。
+            // 这种情况下需要主动发出文本事件并落库，否则 UI 会只显示 completed 而无正文。
+            const hasRawText = hasContent(rawContent);
+            if (hasRawText) {
+                this.emitter.emitTextStart(messageId);
+                this.emitter.emitTextDelta(contentToText(rawContent), messageId);
+                this.emitter.emitTextComplete(messageId);
+            } else if (this.hasReasoningOutput(reasoningContent)) {
+                this.emitter.emitReasoningStart(messageId);
+                this.emitter.emitReasoningDelta(reasoningContent, messageId);
+                this.emitter.emitReasoningComplete(messageId);
+            }
+            this.session.addMessage({
+                messageId,
+                role: 'assistant',
+                content: resolvedContent,
+                ...(this.hasReasoningOutput(reasoningContent) && { reasoning_content: reasoningContent }),
+                finish_reason: finishReason,
+                type: 'text',
+                ...(usage && { usage }),
+            });
+            return;
+        }
+        // 非流式模式需要手动创建消息
+        const message: Message = {
+            messageId,
+            role: 'assistant',
+            content: resolvedContent,
+            ...(this.hasReasoningOutput(reasoningContent) && { reasoning_content: reasoningContent }),
+            finish_reason: getResponseFinishReason(response),
+            type: 'text',
+            ...(usage && { usage }),
+        };
         this.session.addMessage(message);
     }
 
-    private async handleToolCallResponse(
-        response: LLMResponse,
-        messageId: string
-    ): Promise<void> {
+    private async handleToolCallResponse(response: LLMResponse, messageId: string, usage?: Usage): Promise<void> {
         const toolCalls = getResponseToolCalls(response);
         const finishReason = getResponseFinishReason(response);
 
-        // 保存 assistant 的工具调用消息（确保有 finish_reason）
-        if (!this.stream) {
-            const message = MessageBuilder.fromLLMResponse(response, messageId);
-            this.session.addMessage(message);
+        if (this.stream) {
+            // 流式模式下消息已通过 onMessageCreate 创建
+            this.updateMessageToolCalls(messageId, toolCalls, finishReason);
         } else {
-            // 流式模式下，更新消息添加 finish_reason 和 tool_calls（如果还没有）
-            const lastMessage = this.session.getLastMessage();
-            if (lastMessage?.messageId === messageId && !lastMessage.finish_reason) {
-                this.session.addMessage({
-                    ...lastMessage,
-                    finish_reason: finishReason || 'tool_calls',
-                    // 如果消息还没有 tool_calls，从响应中添加
-                    tool_calls: lastMessage.tool_calls || toolCalls,
-                    type: lastMessage.tool_calls || toolCalls ? 'tool-call' : lastMessage.type,
-                });
-            }
+            // 非流式模式需要手动创建消息
+            const message: Message = {
+                messageId,
+                role: 'assistant',
+                content: response.choices?.[0]?.message?.content || '',
+                tool_calls: toolCalls,
+                finish_reason: finishReason || 'tool_calls',
+                type: 'tool-call',
+                ...(usage && { usage }),
+            };
+            this.session.addMessage(message);
         }
 
-        // 触发工具调用回调 - 传递当前消息的 content
-        const currentMessage = this.session.getLastMessage();
-        const messageContent = currentMessage?.messageId === messageId
-            ? this.contentToText(currentMessage.content)
-            : '';
-        this.emitter.emitToolCallCreated(toolCalls, messageId, messageContent);
+        // 获取消息内容，传递给 ToolExecutor（内部会触发 onToolCallCreated 回调）
+        const currentMessage = this.session.getMessageById(messageId);
+        const content = currentMessage ? contentToText(currentMessage.content) : '';
 
-        // 在执行工具前注入最新会话上下文，确保工具可读取 session 级数据
-        const toolContext = this.injectToolContext();
+        // 委托给 ToolExecutor 执行工具
+        const executionResult = await this.toolExecutor.execute(toolCalls, messageId, content);
 
-        // 执行工具
-        const results = await this.toolRegistry.execute(toolCalls, toolContext as ToolContext);
-        this.recordToolResults(results);
-    }
-
-    private injectToolContext(): { sessionId: string; memoryManager?: unknown } {
-        const sessionId = this.session.getSessionId();
-        const memoryManager = this.session.getMemoryManager();
-        const context = {
-            sessionId,
-            ...(memoryManager ? { memoryManager } : {}),
-        };
-        return context;
-    }
-
-    private recordToolResults(results: ToolExecutionResult[]): void {
-        for (const result of results) {
-            const messageId = uuid();
-            const sanitized = this.sanitizeToolResult(result);
-
-            this.emitter.emitToolCallResult(result.tool_call_id, sanitized, result.result?.success ? 'success' : 'error', messageId);
-
-            this.session.addMessage(
-                createToolResultMessage(
-                    result.tool_call_id,
-                    safeToolResultToString(sanitized),
-                    messageId
-                )
+        // 检查工具执行结果
+        if (!executionResult.success) {
+            this.emitter.emitStatus(
+                AgentStatus.RUNNING,
+                `[warn] Tool execution partially or fully failed: ${executionResult.toolCount} tools executed`,
+                undefined,
+                {
+                    source: 'tool-executor',
+                    phase: 'tool',
+                }
             );
         }
     }
 
-    private sanitizeToolResult(result: ToolExecutionResult): unknown {
-        if (!result.result) return result;
+    // ==================== 内部方法：消息处理 ====================
 
-        const sanitized = { ...result.result };
-        const sensitiveKeys = ['password', 'token', 'secret', 'apiKey', 'api_key', 'authorization'];
+    private getMessagesForLLM(): Message[] {
+        const normalizedMessages = this.session
+            .getMessages()
+            .map((msg) => this.normalizeMessageForLLM(msg))
+            .filter((msg): msg is Message => !!msg)
+            .filter((msg) => this.shouldSendMessage(msg));
 
-        for (const key of sensitiveKeys) {
-            if (key in sanitized) {
-                sanitized[key] = '[REDACTED]';
-            }
-        }
-
-        return sanitized;
+        return this.enforceToolCallProtocol(normalizedMessages);
     }
 
-    private ensureMessageHasUsage(messageId: string): void {
-        const metadata = this.streamProcessor.getMetadata();
-        if (!metadata.usage) return;
+    private shouldSendMessage(message: Message): boolean {
+        switch (message.role) {
+            case 'system':
+                return true;
+            case 'assistant': {
+                const hasTools = Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
+                return !!(hasTools || this.hasAssistantOutput(message));
+            }
+            case 'tool':
+                return typeof message.tool_call_id === 'string' && message.tool_call_id.trim().length > 0;
+            default:
+                return hasContent(message.content);
+        }
+    }
 
-        const lastMessage = this.session.getLastMessage();
-        if (lastMessage?.messageId === messageId && !lastMessage.usage) {
+    private normalizeMessageForLLM(message: Message): Message | null {
+        if (message.role === 'assistant') {
+            const rawToolCalls = message.tool_calls;
+            if (Array.isArray(rawToolCalls) && rawToolCalls.length > 0) {
+                const validToolCalls = this.getValidToolCalls(rawToolCalls);
+                if (validToolCalls.length === 0) {
+                    if (!this.hasAssistantOutput(message)) {
+                        return null;
+                    }
+                    const rest = { ...message };
+                    delete rest.tool_calls;
+                    return { ...rest, type: rest.type === 'tool-call' ? 'text' : rest.type };
+                }
+
+                if (validToolCalls.length !== rawToolCalls.length) {
+                    return { ...message, tool_calls: validToolCalls, type: 'tool-call' };
+                }
+            }
+            return message;
+        }
+
+        if (message.role === 'tool') {
+            if (typeof message.tool_call_id !== 'string' || message.tool_call_id.trim().length === 0) {
+                return null;
+            }
+            return message;
+        }
+
+        return message;
+    }
+
+    private getValidToolCalls(toolCalls: ToolCall[]): ToolCall[] {
+        return toolCalls.filter((toolCall) => {
+            if (!toolCall || typeof toolCall !== 'object') return false;
+            const hasValidId = typeof toolCall.id === 'string' && toolCall.id.trim().length > 0;
+            const hasValidType = toolCall.type === 'function';
+            const hasValidFunction =
+                !!toolCall.function &&
+                typeof toolCall.function.name === 'string' &&
+                toolCall.function.name.trim().length > 0 &&
+                typeof toolCall.function.arguments === 'string';
+            return hasValidId && hasValidType && hasValidFunction;
+        });
+    }
+
+    /**
+     * 发送前修复/约束 tool call 协议：
+     * assistant(tool_calls) 后必须紧跟对应的 tool(result) 消息。
+     * - 缺失的 tool 结果会注入中断占位，避免 provider 400
+     * - 游离/不匹配的 tool 消息会被丢弃
+     */
+    private enforceToolCallProtocol(messages: Message[]): Message[] {
+        const fixed: Message[] = [];
+
+        for (let index = 0; index < messages.length; ) {
+            const message = messages[index];
+
+            if (message.role === 'assistant' && Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
+                const validToolCalls = this.getValidToolCalls(message.tool_calls);
+                if (validToolCalls.length === 0) {
+                    if (this.hasAssistantOutput(message)) {
+                        const rest = { ...message };
+                        delete rest.tool_calls;
+                        fixed.push({ ...rest, type: rest.type === 'tool-call' ? 'text' : rest.type });
+                    }
+                    index += 1;
+                    continue;
+                }
+
+                const assistantWithTools: Message =
+                    validToolCalls.length === message.tool_calls.length
+                        ? message
+                        : { ...message, tool_calls: validToolCalls, type: 'tool-call' };
+                fixed.push(assistantWithTools);
+
+                const expectedIds = new Set(validToolCalls.map((call) => call.id));
+                const respondedIds = new Set<string>();
+                let cursor = index + 1;
+
+                while (cursor < messages.length && messages[cursor].role === 'tool') {
+                    const toolMessage = messages[cursor];
+                    const toolCallId =
+                        typeof toolMessage.tool_call_id === 'string' ? toolMessage.tool_call_id.trim() : '';
+
+                    if (expectedIds.has(toolCallId) && !respondedIds.has(toolCallId)) {
+                        fixed.push(toolMessage);
+                        respondedIds.add(toolCallId);
+                    }
+                    cursor += 1;
+                }
+
+                for (const call of validToolCalls) {
+                    if (!respondedIds.has(call.id)) {
+                        fixed.push(this.createInterruptedToolResult(call.id));
+                    }
+                }
+
+                index = cursor;
+                continue;
+            }
+
+            if (message.role === 'tool') {
+                // 游离 tool 消息（未紧跟在 assistant tool_calls 后）直接丢弃
+                index += 1;
+                continue;
+            }
+
+            fixed.push(message);
+            index += 1;
+        }
+
+        return fixed;
+    }
+
+    private createInterruptedToolResult(toolCallId: string): Message {
+        return {
+            messageId: uuid(),
+            role: 'tool',
+            type: 'tool-result',
+            tool_call_id: toolCallId,
+            content: JSON.stringify({
+                success: false,
+                error: 'TOOL_CALL_INTERRUPTED',
+                interrupted: true,
+                message: 'Tool execution was interrupted before a result was produced.',
+            }),
+        };
+    }
+
+    private updateMessageFinishReason(messageId: string, finishReason?: FinishReason): void {
+        if (!finishReason) return;
+        const message = this.session.getMessageById(messageId);
+        if (message && !message.finish_reason) {
+            this.session.addMessage({ ...message, finish_reason: finishReason });
+        }
+    }
+
+    private updateMessageToolCalls(
+        messageId: string,
+        toolCalls: ReturnType<typeof getResponseToolCalls>,
+        finishReason?: FinishReason
+    ): void {
+        const message = this.session.getMessageById(messageId);
+        if (message && !message.finish_reason) {
             this.session.addMessage({
-                ...lastMessage,
-                usage: metadata.usage,
+                ...message,
+                finish_reason: finishReason || 'tool_calls',
+                tool_calls: message.tool_calls || toolCalls,
+                type: message.tool_calls || toolCalls ? 'tool-call' : message.type,
             });
         }
     }
 
+    // ==================== 内部方法：任务状态 ====================
 
-    // ==================== 测试方法 ====================
+    private completeTask(): void {
+        this.agentState.completeTask();
+        const stats = this.agentState.getStats();
+        this.eventBus.emit(EventType.TASK_SUCCESS, {
+            timestamp: this.timeProvider.getCurrentTime(),
+            totalLoops: stats.loops,
+            totalRetries: stats.totalRetries,
+            duration: stats.duration,
+        });
+        this.emitter.emitStatus(AgentStatus.COMPLETED, 'Task completed successfully', undefined, {
+            source: 'agent',
+            phase: 'completion',
+        });
+    }
+
+    private failTask(error: unknown): void {
+        const safeError = this.errorClassifier.sanitizeError(error);
+        const failure = this.errorClassifier.buildFailure(error, this.agentState.status);
+        this.agentState.failTask(failure);
+
+        const event: TaskFailedEvent = {
+            timestamp: this.timeProvider.getCurrentTime(),
+            error: safeError.internalMessage || safeError.userMessage,
+            totalLoops: this.agentState.loopCount,
+            totalRetries: this.agentState.totalRetryCount,
+        };
+        this.eventBus.emit(EventType.TASK_FAILED, event);
+
+        this.emitter.emitError(safeError.internalMessage || safeError.userMessage, 'task-failed');
+        this.emitter.emitStatus(AgentStatus.FAILED, safeError.userMessage, undefined, {
+            source: 'agent',
+            phase: 'failure',
+        });
+    }
+
+    private getFinalMessage(): Message {
+        const lastMessage = this.session.getLastMessage();
+        if (!lastMessage) {
+            throw new Error('No message after execution');
+        }
+        return lastMessage;
+    }
+
+    private async flushSession(): Promise<void> {
+        try {
+            await this.session.sync();
+        } catch (error) {
+            const reason = error instanceof Error ? error.message : String(error);
+            this.emitter.emitError(`Failed to sync session: ${reason}`, 'session-sync');
+        }
+    }
+
+    // ==================== 测试辅助方法 ====================
 
     getLoopCount(): number {
-        return this.loopCount;
+        return this.agentState.loopCount;
     }
 
     getRetryCount(): number {
-        return this.retryCount;
+        return this.agentState.totalRetryCount;
     }
 
     getTaskStartTime(): number {
-        return this.taskStartTime;
+        return this.agentState.taskStartTime;
     }
 
     getTokenInfo() {

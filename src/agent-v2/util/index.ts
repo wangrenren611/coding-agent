@@ -1,12 +1,11 @@
-export function safeParse(data: string): any | null {
-
-    if(!data){
+export function safeParse(data: string): unknown | null {
+    if (!data) {
         return null;
     }
 
     try {
         return JSON.parse(data);
-    } catch (error) {
+    } catch {
         return null;
     }
 }
@@ -18,7 +17,7 @@ export function safeParse(data: string): any | null {
  * @param maxLength - 最大字符串长度，超过则截断（默认 500KB）
  * @returns JSON 字符串，如果失败或数据为空则返回空字符串
  */
-export function safeJSONStringify(data: any, maxLength: number = 500 * 1024): string {
+export function safeJSONStringify(data: unknown, maxLength: number = 500 * 1024): string {
     if (!data) {
         return '';
     }

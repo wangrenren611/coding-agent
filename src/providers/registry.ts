@@ -7,7 +7,7 @@
 
 import { ProviderFactory } from './registry/provider-factory';
 import { MODEL_DEFINITIONS } from './registry/model-config';
-import type {ModelConfig, ModelId, ProviderType } from './types';
+import type { ModelConfig, ModelId, ProviderType } from './types';
 
 // 导出类型
 export type { ProviderType, ModelId, ModelConfig } from './types';
@@ -47,7 +47,7 @@ export class ProviderRegistry {
      * 获取所有模型配置
      */
     static listModels(): ModelConfig[] {
-        return Object.values(MODEL_DEFINITIONS).map(config => ({
+        return Object.values(MODEL_DEFINITIONS).map((config) => ({
             ...config,
             apiKey: undefined,
         }));
@@ -58,8 +58,8 @@ export class ProviderRegistry {
      */
     static listModelsByProvider(provider: ProviderType): ModelConfig[] {
         return Object.values(MODEL_DEFINITIONS)
-            .filter(m => m.provider === provider)
-            .map(config => ({
+            .filter((m) => m.provider === provider)
+            .map((config) => ({
                 ...config,
                 apiKey: undefined,
             }));
@@ -95,7 +95,7 @@ export class ProviderRegistry {
      */
     static getProviders(): ProviderType[] {
         const providers = new Set<ProviderType>();
-        Object.values(MODEL_DEFINITIONS).forEach(m => providers.add(m.provider));
+        Object.values(MODEL_DEFINITIONS).forEach((m) => providers.add(m.provider));
         return Array.from(providers);
     }
 }
@@ -106,14 +106,30 @@ export class ProviderRegistry {
 
 export const Models = {
     // GLM
-    get glm47(): ModelConfig { return { ...MODEL_DEFINITIONS['glm-4.7'], apiKey: undefined }; },
+    get glm47(): ModelConfig {
+        return { ...MODEL_DEFINITIONS['glm-4.7'], apiKey: undefined };
+    },
+    get glm5(): ModelConfig {
+        return { ...MODEL_DEFINITIONS['glm-5'], apiKey: undefined };
+    },
 
     // MiniMax
-    get minimax21(): ModelConfig { return { ...MODEL_DEFINITIONS['minimax-2.1'], apiKey: undefined }; },
+    get minimax25(): ModelConfig {
+        return { ...MODEL_DEFINITIONS['minimax-2.5'], apiKey: undefined };
+    },
 
     // Kimi
-    get kimiK25(): ModelConfig { return { ...MODEL_DEFINITIONS['kimi-k2.5'], apiKey: undefined }; },
+    get kimiK25(): ModelConfig {
+        return { ...MODEL_DEFINITIONS['kimi-k2.5'], apiKey: undefined };
+    },
 
     // DeepSeek
-    get deepseekChat(): ModelConfig { return { ...MODEL_DEFINITIONS['deepseek-chat'], apiKey: undefined }; },
+    get deepseekChat(): ModelConfig {
+        return { ...MODEL_DEFINITIONS['deepseek-chat'], apiKey: undefined };
+    },
+
+    // Qwen
+    get qwen35Plus(): ModelConfig {
+        return { ...MODEL_DEFINITIONS['qwen3.5-plus'], apiKey: undefined };
+    },
 };

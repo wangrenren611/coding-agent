@@ -2,7 +2,7 @@
  * Test utilities for tool testing
  */
 
-import { mkdir, rm, writeFile, readFile, copyFile } from 'fs/promises';
+import { mkdir, rm, writeFile, readFile } from 'fs/promises';
 import path from 'path';
 import { tmpdir } from 'os';
 
@@ -23,14 +23,14 @@ export class TestEnvironment {
         for (const callback of this.cleanupCallbacks) {
             try {
                 await callback();
-            } catch (error) {
+            } catch {
                 // Ignore cleanup errors
             }
         }
         this.cleanupCallbacks = [];
         try {
             await rm(this.testDir, { recursive: true, force: true });
-        } catch (error) {
+        } catch {
             // Ignore cleanup errors
         }
     }
@@ -128,8 +128,9 @@ Another line with DIFFERENT_TEXT to replace.
 Final line.
 `;
 
-export const LARGE_FILE_CONTENT = Array.from({ length: 1000 }, (_, i) =>
-    `Line ${i + 1}: Some content here with repeated patterns.`
+export const LARGE_FILE_CONTENT = Array.from(
+    { length: 1000 },
+    (_, i) => `Line ${i + 1}: Some content here with repeated patterns.`
 ).join('\n');
 
 export const MULTILINE_CONTENT = `function calculateSum(a: number, b: number): number {

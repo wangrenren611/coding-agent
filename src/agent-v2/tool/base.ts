@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { IMemoryManager } from '../memory/types';
+import type { AgentMessage } from '../agent/stream-types';
 
 /**
  * 统一的工具执行结果接口
@@ -21,9 +22,11 @@ export type ToolContext = {
     time: string;
     sessionId?: string;
     memoryManager?: IMemoryManager;
+    /** 流式输出回调（用于子 Agent 事件冒泡） */
+    streamCallback?: (message: AgentMessage) => void;
+    /** 工具执行输出回调 */
+    emitOutput?: (chunk: string) => void;
 };
-
-
 
 /**
  * 工具基类
@@ -57,19 +60,24 @@ export abstract class BaseTool<T extends z.ZodType> {
      */
     abstract execute(args?: z.infer<T>, context?: ToolContext): Promise<ToolResult> | ToolResult;
 
-
     /**
      * 创建成功结果
      */
-  protected result<T>({success, metadata, output }: { success: boolean, metadata: T, output: ToolResult['output'] }): ToolResult<T> {
+    protected result<T>({
+        success,
+        metadata,
+        output,
+    }: {
+        success: boolean;
+        metadata: T;
+        output: ToolResult['output'];
+    }): ToolResult<T> {
         return {
             success,
             metadata,
             output,
         };
-  }
-
-
+    }
 }
 
 export { z };

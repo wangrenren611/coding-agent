@@ -1,6 +1,6 @@
 /**
  * 核心类型定义
- * 
+ *
  * 这个文件包含 agent-v2 模块共享的基础类型，避免类型重复定义。
  * 设计原则：
  * 1. 单一职责：每个类型只在一个地方定义
@@ -9,6 +9,7 @@
  */
 
 import type { FinishReason, MessageContent, Usage, InputContentPart } from '../../providers';
+import type { ToolResult } from '../tool/base';
 
 // 从 providers 重导出共享类型，避免重复定义
 export type { ToolCall } from '../../providers';
@@ -79,11 +80,12 @@ export interface SafeError {
 export interface ToolExecutionResult {
     /** 工具调用 ID */
     tool_call_id: string;
+    /** 工具名称 */
+    name: string;
+    /** 原始参数 */
+    arguments: string;
     /** 执行结果 */
-    result?: {
-        success?: boolean;
-        [key: string]: unknown;
-    };
+    result: ToolResult;
 }
 
 // ==================== 事件类型 ====================
@@ -161,7 +163,7 @@ export function stringifyContentPart(part: InputContentPart): string {
  */
 export function hasContent(content: MessageContent): boolean {
     if (typeof content === 'string') {
-        return content.length > 0;
+        return content?.length > 0;
     }
-    return content.length > 0;
+    return content?.length > 0;
 }

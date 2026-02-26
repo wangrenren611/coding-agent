@@ -14,11 +14,25 @@ import { execaCommand } from 'execa';
 import { parse } from 'shell-quote';
 import stripAnsi from 'strip-ansi';
 import iconv from 'iconv-lite';
+import { spawn } from 'child_process';
+import { randomUUID } from 'crypto';
+import fs from 'fs';
+import path from 'path';
+import { tmpdir } from 'os';
+
+const runInBackgroundSchema = z.preprocess((value) => {
+    if (typeof value === 'string') {
+        const normalized = value.trim().toLowerCase();
+        if (normalized === 'true') return true;
+        if (normalized === 'false') return false;
+    }
+    return value;
+}, z.boolean());
 
 const schema = z.object({
     command: z.string().min(1).describe('The bash command to run').optional(),
     timeout: z.number().int().min(0).max(600000).describe('Command timeout in milliseconds').optional(),
-    // run_in_background: z.boolean().describe('Run in background').optional(),
+    run_in_background: runInBackgroundSchema.optional().describe('Run command in background'),
 });
 
 type BashPolicyMode = 'guarded' | 'permissive';
@@ -26,6 +40,26 @@ type BashPolicyMode = 'guarded' | 'permissive';
 interface PolicyDecision {
     allowed: boolean;
     reason?: string;
+}
+
+interface BunProcessLike {
+    exited: Promise<number>;
+    stdout: ReadableStream<Uint8Array> | null;
+    stderr: ReadableStream<Uint8Array> | null;
+    kill(): void;
+}
+
+interface BunRuntimeLike {
+    spawn(
+        command: string[],
+        options: {
+            cwd: string;
+            env: NodeJS.ProcessEnv;
+            stdin: 'ignore';
+            stdout: 'pipe';
+            stderr: 'pipe';
+        }
+    ): BunProcessLike;
 }
 
 const DANGEROUS_COMMANDS = new Set([
@@ -52,32 +86,119 @@ const DANGEROUS_COMMANDS = new Set([
 ]);
 
 const ALLOWED_COMMANDS = new Set([
-    'ls', 'pwd', 'cat', 'head', 'tail', 'echo', 'printf', 'wc', 'sort', 'uniq', 'cut',
-    'awk', 'sed', 'grep', 'egrep', 'fgrep', 'rg', 'find', 'stat', 'du', 'df', 'tree',
-    'which', 'whereis', 'dirname', 'basename', 'realpath', 'readlink', 'file', 'env', 'printenv',
-    'date', 'uname', 'whoami', 'id', 'hostname', 'ps', 'top', 'uptime',
-    'git', 'npm', 'pnpm', 'yarn', 'bun', 'node', 'npx', 'tsx', 'ts-node',
-    'python', 'python3', 'pip', 'pip3', 'uv', 'poetry', 'pytest',
-    'go', 'cargo', 'rustc', 'javac', 'java', 'mvn', 'gradle', 'dotnet',
-    'docker', 'docker-compose', 'kubectl', 'helm',
-    'make', 'cmake', 'ninja',
-    'cp', 'mv', 'mkdir', 'touch', 'ln', 'rm', 'rmdir', 'chmod', 'chown',
+    'agent-browser',
+    'ls',
+    'pwd',
+    'cat',
+    'head',
+    'tail',
+    'echo',
+    'printf',
+    'wc',
+    'sort',
+    'uniq',
+    'cut',
+    'awk',
+    'sed',
+    'grep',
+    'egrep',
+    'fgrep',
+    'rg',
+    'find',
+    'stat',
+    'du',
+    'df',
+    'tree',
+    'which',
+    'whereis',
+    'dirname',
+    'basename',
+    'realpath',
+    'readlink',
+    'file',
+    'env',
+    'printenv',
+    'date',
+    'uname',
+    'whoami',
+    'id',
+    'hostname',
+    'ps',
+    'top',
+    'uptime',
+    'git',
+    'npm',
+    'pnpm',
+    'yarn',
+    'bun',
+    'node',
+    'npx',
+    'tsx',
+    'ts-node',
+    'python',
+    'python3',
+    'pip',
+    'pip3',
+    'uv',
+    'poetry',
+    'pytest',
+    'go',
+    'cargo',
+    'rustc',
+    'javac',
+    'java',
+    'mvn',
+    'gradle',
+    'dotnet',
+    'docker',
+    'docker-compose',
+    'kubectl',
+    'helm',
+    'make',
+    'cmake',
+    'ninja',
+    'cp',
+    'mv',
+    'mkdir',
+    'touch',
+    'ln',
+    'rm',
+    'rmdir',
+    'chmod',
+    'chown',
     // Windows 文件操作命令
-    'del', 'rd', 'erase',
-    'tar', 'zip', 'unzip', 'gzip', 'gunzip',
-    'sh', 'bash', 'zsh',
-    'true', 'false', 'test',
-    'cd', 'export', 'unset', 'set', 'source',
+    'del',
+    'rd',
+    'erase',
+    'tar',
+    'zip',
+    'unzip',
+    'gzip',
+    'gunzip',
+    'sh',
+    'bash',
+    'zsh',
+    'true',
+    'false',
+    'test',
+    'cd',
+    'export',
+    'unset',
+    'set',
+    'source',
 ]);
 
 const DANGEROUS_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
     { pattern: /\brm\s+-rf\s+\/(\s|$)/i, reason: 'Refusing destructive root deletion command' },
     { pattern: /\brm\s+-rf\s+--no-preserve-root\b/i, reason: 'Refusing destructive root deletion command' },
-    { pattern: /:\(\)\s*\{\s*:\|\:&\s*\};:/, reason: 'Refusing fork bomb pattern' },
+    { pattern: /:\(\)\s*\{\s*:\|:&\s*\};:/, reason: 'Refusing fork bomb pattern' },
     { pattern: /\b(curl|wget)[^|\n]*\|\s*(sh|bash|zsh)\b/i, reason: 'Refusing remote script pipe execution' },
     { pattern: /\b(eval|source)\s+<\s*\((curl|wget)\b/i, reason: 'Refusing remote script evaluation' },
     { pattern: /\b(dd)\s+[^|\n]*\bof=\/dev\/(sd|disk|nvme|rdisk)/i, reason: 'Refusing raw disk write command' },
-    { pattern: />{1,2}\s*\/(etc|bin|sbin|usr|boot|dev|proc|sys)\b/i, reason: 'Refusing write redirection to protected system path' },
+    {
+        pattern: />{1,2}\s*\/(etc|bin|sbin|usr|boot|dev|proc|sys)\b/i,
+        reason: 'Refusing write redirection to protected system path',
+    },
     { pattern: /\btee\s+\/(etc|bin|sbin|usr|boot|dev|proc|sys)\b/i, reason: 'Refusing write to protected system path' },
     { pattern: /\b(sh|bash|zsh)\s+-[lc]\b/i, reason: 'Nested shell execution is blocked by policy' },
 ];
@@ -107,8 +228,17 @@ export default class BashTool extends BaseTool<typeof schema> {
         return typeof (process as { versions?: { bun?: string } }).versions?.bun === 'string';
     }
 
-    private async runWithNode(command: string, timeoutMs: number): Promise<{ exitCode: number; all: Buffer }> {
-        const result = await execaCommand(command, {
+    private decodeOutputChunk(chunk: Buffer): string {
+        const decoded = process.platform === 'win32' ? iconv.decode(chunk, 'gbk') : iconv.decode(chunk, 'utf8');
+        return stripAnsi(decoded || '');
+    }
+
+    private async runWithNode(
+        command: string,
+        timeoutMs: number,
+        onChunk?: (chunk: string) => void
+    ): Promise<{ exitCode: number; all: Buffer; streamed: boolean }> {
+        const subprocess = execaCommand(command, {
             all: true,
             reject: false,
             shell: true,
@@ -118,26 +248,49 @@ export default class BashTool extends BaseTool<typeof schema> {
             timeout: timeoutMs,
         });
 
-        const all = Buffer.isBuffer(result.all)
-            ? result.all
-            : Buffer.from(result.all ?? '');
+        let streamed = false;
+        const outputChunks: Buffer[] = [];
+        const allStream = subprocess.all;
+
+        if (allStream) {
+            allStream.on('data', (chunk: string | Buffer) => {
+                const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+                outputChunks.push(buffer);
+                const decoded = this.decodeOutputChunk(buffer);
+                if (decoded && onChunk) {
+                    streamed = true;
+                    onChunk(decoded);
+                }
+            });
+        }
+
+        const result = await subprocess;
+
+        const all =
+            outputChunks.length > 0
+                ? Buffer.concat(outputChunks)
+                : Buffer.isBuffer(result.all)
+                  ? result.all
+                  : Buffer.from(result.all ?? '');
 
         return {
             exitCode: result.exitCode ?? 1,
             all,
+            streamed,
         };
     }
 
-    private async runWithBun(command: string, timeoutMs: number): Promise<{ exitCode: number; all: Buffer }> {
-        const bun = (globalThis as { Bun?: any }).Bun;
+    private async runWithBun(
+        command: string,
+        timeoutMs: number
+    ): Promise<{ exitCode: number; all: Buffer; streamed: boolean }> {
+        const bun = (globalThis as { Bun?: BunRuntimeLike }).Bun;
         if (!bun || typeof bun.spawn !== 'function') {
             throw new Error('Bun runtime unavailable');
         }
 
         const shellCommand =
-            process.platform === 'win32'
-                ? ['cmd.exe', '/d', '/s', '/c', command]
-                : ['/bin/bash', '-lc', command];
+            process.platform === 'win32' ? ['cmd.exe', '/d', '/s', '/c', command] : ['/bin/bash', '-lc', command];
 
         const child = bun.spawn(shellCommand, {
             cwd: process.cwd(),
@@ -147,38 +300,69 @@ export default class BashTool extends BaseTool<typeof schema> {
             stderr: 'pipe',
         });
 
-        let killedByTimeout = false;
-        const timer = setTimeout(() => {
-            killedByTimeout = true;
-            try {
-                child.kill();
-            } catch {
-                // ignore kill errors
-            }
-        }, timeoutMs);
-
+        let timer: ReturnType<typeof setTimeout> | null = null;
         try {
-            const [stdoutAb, stderrAb, exitCode] = await Promise.all([
-                new Response(child.stdout).arrayBuffer(),
-                new Response(child.stderr).arrayBuffer(),
-                child.exited,
+            const exitState = await Promise.race([
+                child.exited.then((exitCode: number) => ({ timedOut: false as const, exitCode })),
+                new Promise<{ timedOut: true }>((resolve) => {
+                    timer = setTimeout(() => {
+                        try {
+                            child.kill();
+                        } catch {
+                            // ignore kill errors
+                        }
+                        resolve({ timedOut: true });
+                    }, timeoutMs);
+                }),
             ]);
 
-            const all = Buffer.concat([Buffer.from(stdoutAb), Buffer.from(stderrAb)]);
-            if (killedByTimeout) {
+            if (exitState.timedOut) {
                 return {
                     exitCode: 124,
-                    all: Buffer.concat([all, Buffer.from(`\nCommand timed out after ${timeoutMs}ms`)])
+                    all: Buffer.from(`Command timed out after ${timeoutMs}ms`),
+                    streamed: false,
                 };
             }
 
+            const [stdoutAb, stderrAb] = await Promise.all([
+                new Response(child.stdout).arrayBuffer(),
+                new Response(child.stderr).arrayBuffer(),
+            ]);
+            const all = Buffer.concat([Buffer.from(stdoutAb), Buffer.from(stderrAb)]);
+
             return {
-                exitCode: typeof exitCode === 'number' ? exitCode : 1,
+                exitCode: typeof exitState.exitCode === 'number' ? exitState.exitCode : 1,
                 all,
+                streamed: false,
             };
         } finally {
-            clearTimeout(timer);
+            if (timer) clearTimeout(timer);
         }
+    }
+
+    private runInBackground(command: string): { pid: number | undefined; logPath: string } {
+        const logPath = path.join(tmpdir(), `agent-bash-bg-${Date.now()}-${randomUUID().slice(0, 8)}.log`);
+        fs.writeFileSync(logPath, '', { flag: 'a' });
+
+        const quotedLogPath =
+            process.platform === 'win32' ? `"${logPath.replace(/"/g, '""')}"` : `'${logPath.replace(/'/g, `'\\''`)}'`;
+        const redirectedCommand = `${command} >> ${quotedLogPath} 2>&1`;
+
+        const shellCommand =
+            process.platform === 'win32'
+                ? ['cmd.exe', '/d', '/s', '/c', redirectedCommand]
+                : ['/bin/bash', '-lc', redirectedCommand];
+
+        const child = spawn(shellCommand[0], shellCommand.slice(1), {
+            cwd: process.cwd(),
+            env: process.env,
+            detached: true,
+            stdio: 'ignore',
+            windowsHide: true,
+        });
+
+        child.unref();
+        return { pid: child.pid, logPath };
     }
 
     private extractSegmentCommands(command: string): string[] {
@@ -260,12 +444,12 @@ export default class BashTool extends BaseTool<typeof schema> {
      * - 底层异常（执行失败）→ throw 供 Registry 捕获
      */
     async execute(args: z.infer<typeof this.schema>, _context?: ToolContext): Promise<ToolResult> {
-        const { command, timeout, } = args;
+        const { command, timeout, run_in_background } = args;
 
         if (!command) {
             return this.result({
                 success: false,
-                metadata: { error: 'COMMAND_REQUIRED' } as any,
+                metadata: { error: 'COMMAND_REQUIRED' },
                 output: 'COMMAND_REQUIRED: Command is required',
             });
         }
@@ -274,29 +458,56 @@ export default class BashTool extends BaseTool<typeof schema> {
         if (!policy.allowed) {
             return this.result({
                 success: false,
-                metadata: { error: 'COMMAND_BLOCKED_BY_POLICY' } as any,
+                metadata: { error: 'COMMAND_BLOCKED_BY_POLICY' },
                 output: `COMMAND_BLOCKED_BY_POLICY: ${policy.reason || 'Command not allowed'}`,
             });
         }
-        
+
+        if (run_in_background) {
+            try {
+                const { pid, logPath } = this.runInBackground(command);
+                const pidText = typeof pid === 'number' ? String(pid) : 'unknown';
+                return this.result({
+                    success: true,
+                    metadata: {
+                        command,
+                        pid,
+                        logPath,
+                        run_in_background: true,
+                    },
+                    output: `BACKGROUND_STARTED: pid=${pidText}, log=${logPath}`,
+                });
+            } catch (error) {
+                return this.result({
+                    success: false,
+                    metadata: { error: 'BACKGROUND_START_FAILED' },
+                    output: `BACKGROUND_START_FAILED: ${String(error)}`,
+                });
+            }
+        }
+
         const timeoutMs = this.getEffectiveTimeout(timeout);
         try {
             const result = this.isBunRuntime()
                 ? await this.runWithBun(command, timeoutMs)
-                : await this.runWithNode(command, timeoutMs);
+                : await this.runWithNode(command, timeoutMs, (chunk) => _context?.emitOutput?.(chunk));
 
-            const rawStr = process.platform === 'win32'
-                ? iconv.decode(result.all, 'gbk')
-                : iconv.decode(result.all, 'utf8');
+            const rawStr =
+                process.platform === 'win32' ? iconv.decode(result.all, 'gbk') : iconv.decode(result.all, 'utf8');
 
             let finalOutput = stripAnsi(rawStr || '');
 
             const isTruncated = finalOutput.length > 10000;
 
             if (isTruncated) {
-                finalOutput = finalOutput.slice(0, 4000) +
-                    "\n\n[... Output Truncated for Brevity ...]\n\n" +
+                finalOutput =
+                    finalOutput.slice(0, 4000) +
+                    '\n\n[... Output Truncated for Brevity ...]\n\n' +
                     finalOutput.slice(-4000);
+            }
+
+            if (!result.streamed && finalOutput) {
+                _context?.emitOutput?.(finalOutput);
             }
 
             if (result.exitCode === 0) {
@@ -311,18 +522,16 @@ export default class BashTool extends BaseTool<typeof schema> {
             } else {
                 return this.result({
                     success: false,
-                    metadata: { error: `EXIT_CODE_${result.exitCode}` } as any,
+                    metadata: { error: `EXIT_CODE_${result.exitCode}` },
                     output: `EXIT_CODE_${result.exitCode}: Command failed with exit code ${result.exitCode}\n${finalOutput}`,
                 });
             }
-
         } catch (error) {
             return this.result({
                 success: false,
-                metadata: { error: 'EXECUTION_FAILED' } as any,
+                metadata: { error: 'EXECUTION_FAILED' },
                 output: `EXECUTION_FAILED: ${command} execution failed: ${error}`,
             });
         }
-
     }
 }

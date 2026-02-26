@@ -33,23 +33,12 @@ export class StandardAdapter extends BaseAPIAdapter {
      * 转换请求 - 基础实现
      */
     transformRequest(options?: LLMRequest): LLMRequest {
-        const {
-            model,
-            max_tokens,
-            messages,
-            temperature,
-            stream,
-            tools,
-            thinking,
-            abortSignal,
-            ...rest
-        } = options || {} as LLMRequest & { abortSignal?: AbortSignal; thinking?: unknown };
+        const { model, max_tokens, messages, temperature, stream, tools, thinking, abortSignal, ...rest } =
+            options || ({} as LLMRequest & { abortSignal?: AbortSignal; thinking?: unknown });
         void thinking;
         void abortSignal;
 
-        const extras = Object.fromEntries(
-            Object.entries(rest).filter(([, value]) => value !== undefined)
-        );
+        const extras = Object.fromEntries(Object.entries(rest).filter(([, value]) => value !== undefined));
 
         const body: LLMRequest = {
             ...extras,
@@ -83,7 +72,6 @@ export class StandardAdapter extends BaseAPIAdapter {
     transformResponse(response: Record<string, unknown>): LLMResponse {
         const data = response as LLMResponse;
 
-
         if (!data.choices || data.choices.length === 0) {
             // 提供更详细的错误信息，帮助调试
             const responseStr = JSON.stringify(response, null, 2);
@@ -99,7 +87,7 @@ export class StandardAdapter extends BaseAPIAdapter {
     getHeaders(apiKey: string): Headers {
         return new Headers({
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`,
+            Authorization: `Bearer ${apiKey}`,
         });
     }
 

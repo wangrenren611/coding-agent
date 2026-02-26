@@ -1,0 +1,1 @@
+Uncaught SyntaxError: The requested module '/node_modules/.vite/deps/lucide-react.js?v=45b48be4' does not provide an export named 'Tool' (at 10-summary.jsx:8:3)

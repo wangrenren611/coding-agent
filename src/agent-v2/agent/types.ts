@@ -12,44 +12,71 @@ import type { Message } from '../session/types';
 import type { ResponseValidatorOptions, ValidationResult } from './response-validator';
 
 export enum AgentStatus {
-  THINKING = 'thinking',
-  RUNNING = 'running',
-  COMPLETED = 'completed',
-  FAILED = 'failed',
-  RETRYING = 'retrying',
-  IDLE = 'idle',
-  ABORTED = 'aborted',
+    THINKING = 'thinking',
+    RUNNING = 'running',
+    COMPLETED = 'completed',
+    FAILED = 'failed',
+    RETRYING = 'retrying',
+    IDLE = 'idle',
+    ABORTED = 'aborted',
 }
 
 export type StreamCallback = <T extends AgentMessage>(message: T) => void;
 
 export type AgentFailureCode =
-  | 'AGENT_ABORTED'
-  | 'AGENT_MAX_RETRIES_EXCEEDED'
-  | 'LLM_TIMEOUT'
-  | 'TOOL_EXECUTION_FAILED'
-  | 'LLM_REQUEST_FAILED'
-  | 'AGENT_RUNTIME_ERROR';
+    // Agent 状态错误
+    | 'AGENT_ABORTED'
+    | 'AGENT_BUSY'
+    | 'AGENT_RUNTIME_ERROR'
+    // 重试相关
+    | 'AGENT_MAX_RETRIES_EXCEEDED'
+    | 'AGENT_LOOP_EXCEEDED'
+    // 配置和验证错误
+    | 'AGENT_CONFIGURATION_ERROR'
+    | 'AGENT_VALIDATION_ERROR'
+    // LLM 相关
+    | 'LLM_TIMEOUT'
+    | 'LLM_REQUEST_FAILED'
+    | 'LLM_RESPONSE_INVALID'
+    // 工具相关
+    | 'TOOL_EXECUTION_FAILED';
+
+/**
+ * 所有有效的失败错误码数组，用于验证
+ */
+export const AGENT_FAILURE_CODES: readonly AgentFailureCode[] = [
+    'AGENT_ABORTED',
+    'AGENT_BUSY',
+    'AGENT_RUNTIME_ERROR',
+    'AGENT_MAX_RETRIES_EXCEEDED',
+    'AGENT_LOOP_EXCEEDED',
+    'AGENT_CONFIGURATION_ERROR',
+    'AGENT_VALIDATION_ERROR',
+    'LLM_TIMEOUT',
+    'LLM_REQUEST_FAILED',
+    'LLM_RESPONSE_INVALID',
+    'TOOL_EXECUTION_FAILED',
+] as const;
 
 export interface AgentFailure {
-  code: AgentFailureCode;
-  userMessage: string;
-  internalMessage?: string;
+    code: AgentFailureCode;
+    userMessage: string;
+    internalMessage?: string;
 }
 
 export interface AgentExecutionResult {
-  status: 'completed' | 'failed' | 'aborted';
-  finalMessage?: Message;
-  failure?: AgentFailure;
-  loopCount: number;
-  retryCount: number;
-  sessionId: string;
+    status: 'completed' | 'failed' | 'aborted';
+    finalMessage?: Message;
+    failure?: AgentFailure;
+    loopCount: number;
+    retryCount: number;
+    sessionId: string;
 }
 
 /**
  * Agent 配置选项
  */
-export interface AgentOptions{
+export interface AgentOptions {
     /** LLM Provider */
     provider: LLMProvider;
     /** 系统提示词 */
@@ -58,9 +85,15 @@ export interface AgentOptions{
     toolRegistry?: ToolRegistry;
     /** 最大重试次数（默认 10） */
     maxRetries?: number;
-    /** 单次 LLM 请求超时时间（毫秒，默认使用 provider 配置） */
+    /**
+     * 单次 LLM 请求超时时间（毫秒）
+     *
+     * - 默认值：5 分钟
+     * - 如果不设置，使用 Provider.getTimeTimeout() 的返回值
+     * - 超时后会触发重试机制（最多 maxRetries 次）
+     */
     requestTimeout?: number;
-    /** 重试等待时间（毫秒，默认 1000 * 60 * 10） */
+    /** 重试等待时间（毫秒，默认 5000） */
     retryDelayMs?: number;
     /** 是否启用流式输出 */
     stream?: boolean;
@@ -84,4 +117,6 @@ export interface AgentOptions{
     validationOptions?: Partial<ResponseValidatorOptions>;
     /** 验证失败回调 */
     onValidationViolation?: (result: ValidationResult) => void;
+    /** 最大循环次数（默认 3000） */
+    maxLoops?: number;
 }

@@ -11,32 +11,43 @@ import { WebFetchTool } from '../web-fetch';
 import { AgentConfig, SubagentType } from './shared';
 
 export const SubagentTypeSchema = z.enum([
-  SubagentType.Bash,
-  SubagentType.GeneralPurpose,
-  SubagentType.Explore,
-  SubagentType.Plan,
-  SubagentType.UiSketcher,
-  SubagentType.BugAnalyzer,
-  SubagentType.CodeReviewer,
+    SubagentType.Bash,
+    SubagentType.GeneralPurpose,
+    SubagentType.Explore,
+    SubagentType.Plan,
+    SubagentType.UiSketcher,
+    SubagentType.BugAnalyzer,
+    SubagentType.CodeReviewer,
 ]);
 
 export const AGENT_CONFIGS: Record<SubagentType, AgentConfig> = {
-  [SubagentType.Bash]: {
-    tools: [BashTool],
-    systemPrompt: `You are a shell execution specialist.
+    [SubagentType.Bash]: {
+        tools: [BashTool],
+        systemPrompt: `You are a shell execution specialist.
 Run commands safely and explain outcomes clearly.
 Prefer concise outputs and avoid unrelated work.`,
-    maxRetries: 5,
-  },
-  [SubagentType.GeneralPurpose]: {
-    tools: [BashTool, GlobTool, GrepTool, ReadFileTool, WriteFileTool, SurgicalEditTool, BatchReplaceTool, LspTool, WebSearchTool, WebFetchTool],
-    systemPrompt: `You are a general software engineering sub-agent.
+        maxRetries: 5,
+    },
+    [SubagentType.GeneralPurpose]: {
+        tools: [
+            BashTool,
+            GlobTool,
+            GrepTool,
+            ReadFileTool,
+            WriteFileTool,
+            SurgicalEditTool,
+            BatchReplaceTool,
+            LspTool,
+            WebSearchTool,
+            WebFetchTool,
+        ],
+        systemPrompt: `You are a general software engineering sub-agent.
 Handle multi-step tasks pragmatically, verify your work, and keep responses concise.`,
-    maxRetries: 10,
-  },
-  [SubagentType.Explore]: {
-    tools: [GlobTool, GrepTool, ReadFileTool, WebSearchTool, WebFetchTool],
-    systemPrompt: `You are a file search specialist. You excel at thoroughly navigating and exploring codebases.
+        maxRetries: 10,
+    },
+    [SubagentType.Explore]: {
+        tools: [GlobTool, GrepTool, ReadFileTool, WebSearchTool, WebFetchTool],
+        systemPrompt: `You are a file search specialist. You excel at thoroughly navigating and exploring codebases.
 
 Your strengths:
 - Rapidly finding files using glob patterns
@@ -55,30 +66,30 @@ Guidelines:
 
 Complete the user's search request efficiently and report your findings clearly.
 `,
-    maxRetries: 8,
-  },
-  [SubagentType.Plan]: {
-    tools: [GlobTool, GrepTool, ReadFileTool, LspTool, WebSearchTool, WebFetchTool],
-    systemPrompt: `You are a software architecture planner.
+        maxRetries: 8,
+    },
+    [SubagentType.Plan]: {
+        tools: [GlobTool, GrepTool, ReadFileTool, LspTool, WebSearchTool, WebFetchTool],
+        systemPrompt: `You are a software architecture planner.
 Produce concrete implementation plans with tradeoffs, risks, and sequencing.`,
-    maxRetries: 8,
-  },
-  [SubagentType.UiSketcher]: {
-    tools: [BashTool, GlobTool, GrepTool, ReadFileTool, WebSearchTool, WebFetchTool],
-    systemPrompt: `You are a UI sketching specialist.
+        maxRetries: 8,
+    },
+    [SubagentType.UiSketcher]: {
+        tools: [BashTool, GlobTool, GrepTool, ReadFileTool, WebSearchTool, WebFetchTool],
+        systemPrompt: `You are a UI sketching specialist.
 Translate requirements into clear, textual interface concepts and layout structures.`,
-    maxRetries: 6,
-  },
-  [SubagentType.BugAnalyzer]: {
-    tools: [BashTool, GlobTool, GrepTool, ReadFileTool, WriteFileTool, LspTool],
-    systemPrompt: `You are a debugging specialist.
+        maxRetries: 6,
+    },
+    [SubagentType.BugAnalyzer]: {
+        tools: [BashTool, GlobTool, GrepTool, ReadFileTool, WriteFileTool, LspTool],
+        systemPrompt: `You are a debugging specialist.
 Trace execution paths, identify root causes, and propose minimal-risk fixes.`,
-    maxRetries: 10,
-  },
-  [SubagentType.CodeReviewer]: {
-    tools: [BashTool, GlobTool, GrepTool, ReadFileTool, LspTool, WebSearchTool, WebFetchTool],
-    systemPrompt: `You are an elite code reviewer.
+        maxRetries: 10,
+    },
+    [SubagentType.CodeReviewer]: {
+        tools: [BashTool, GlobTool, GrepTool, ReadFileTool, LspTool, WebSearchTool, WebFetchTool],
+        systemPrompt: `You are an elite code reviewer.
 Prioritize correctness, security, performance, and reliability findings.`,
-    maxRetries: 8,
-  },
+        maxRetries: 8,
+    },
 };
