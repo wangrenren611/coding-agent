@@ -21,9 +21,11 @@ export const operatorPrompt = ({ directory, language = 'Chinese' }: { directory:
     let custom = '';
     try {
         const claudeInstructions = fs.readFileSync(path.resolve(process.cwd(), directory, 'CLAUDE.md'), 'utf-8');
-        const palInstructions = fs.readFileSync(path.resolve(process.cwd(), directory, 'plan.md'), 'utf-8');
-        custom = `CLAUDE.md instructions:\n${claudeInstructions}\n plan.md instructions:\n${palInstructions}`;
-    } catch {}
+        // const palInstructions = fs.readFileSync(path.resolve(process.cwd(), directory, 'plan.md'), 'utf-8');  plan.md instructions:\n${palInstructions}
+        custom = `CLAUDE.md instructions:\n${claudeInstructions}\n`;
+    } catch {
+        custom = '';
+    }
 
     return `${provider}\n${environment}\n${custom}\n`;
 };
