@@ -15,6 +15,11 @@ import type { BaseTool } from './base';
 import type { ToolResult } from './base';
 import type { LLMProvider } from '../../providers';
 import { z } from 'zod';
+import {
+    TruncationService,
+    createTruncationMiddleware,
+    type TruncationServiceConfig,
+} from '../truncation';
 
 /**
  * 获取所有默认工具实例
@@ -54,14 +59,47 @@ export function getDefaultTools(
 }
 
 /**
+ * 创建默认工具注册表配置
+ */
+export interface CreateDefaultToolRegistryConfig extends ToolRegistryConfig {
+    /** LLM 提供者（用于 TaskTool） */
+    provider?: LLMProvider;
+    /** 截断服务配置（可选，传入则启用截断） */
+    truncation?: TruncationServiceConfig | boolean;
+}
+
+/**
  * 创建默认工具注册表
  * @param config 工具注册表配置
  * @param provider LLM 提供者（用于 TaskTool）
  * @returns 配置好的工具注册表
  */
-export const createDefaultToolRegistry = (config: ToolRegistryConfig, provider?: LLMProvider) => {
-    const toolRegistry = new ToolRegistry(config);
-    toolRegistry.register(getDefaultTools(config.workingDirectory, provider));
+export const createDefaultToolRegistry = (
+    config: ToolRegistryConfig | CreateDefaultToolRegistryConfig,
+    provider?: LLMProvider
+) => {
+    // 兼容旧参数格式
+    const registryConfig: ToolRegistryConfig = {
+        workingDirectory: config.workingDirectory,
+        toolTimeout: config.toolTimeout,
+    };
+    const actualProvider = 'provider' in config ? config.provider : provider;
+    const truncationConfig = 'truncation' in config ? config.truncation : undefined;
+
+    const toolRegistry = new ToolRegistry(registryConfig);
+    toolRegistry.register(getDefaultTools(registryConfig.workingDirectory, actualProvider));
+
+    // 如果配置了截断，设置截断中间件
+    if (truncationConfig) {
+        const truncationService =
+            truncationConfig === true
+                ? new TruncationService() // 使用默认配置
+                : new TruncationService(truncationConfig);
+
+        const middleware = createTruncationMiddleware({ service: truncationService });
+        toolRegistry.setTruncationMiddleware(middleware);
+    }
+
     return toolRegistry;
 };
 
@@ -91,3 +129,26 @@ export type { BaseTool, ToolResult };
 // 导出 Skill 相关
 export { SkillTool, createSkillTool, defaultSkillTool } from '../skill';
 export type { Skill, SkillMetadata, SkillLoaderOptions, SkillToolResult } from '../skill';
+
+// 导出截断相关
+export {
+    TruncationService,
+    createTruncationMiddleware,
+    DEFAULT_TRUNCATION_CONFIG,
+    TOOL_TRUNCATION_CONFIGS,
+    DefaultTruncationStrategy,
+    TruncationStorage,
+} from '../truncation';
+export type {
+    TruncationServiceConfig,
+    TruncationMiddleware,
+    TruncationMiddlewareConfig,
+    TruncationConfig,
+    TruncationOptions,
+    TruncationContext,
+    TruncationResult,
+    TruncationEvent,
+    TruncationEventCallback,
+    ITruncationStorage,
+    TruncationStrategy,
+} from '../truncation';
