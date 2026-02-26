@@ -1,4 +1,4 @@
-# Coding Agent 核心逻辑深度分析与 Claude Code 对比
+# [Coding Agent 核心逻辑深度分析与 Claude Code 对比](AGENT_CORE_ANALYSIS.md)
 
 > 文档版本：v1.0  
 > 生成日期：2026-02-26  
