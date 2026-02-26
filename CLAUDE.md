@@ -264,6 +264,139 @@ const agent = new Agent({
 - 错误分类：可恢复错误 vs 不可恢复错误
 - 重试次数和延迟可配置
 
+---
+
+## Git 提交规范
+
+### CI 检查流程
+
+**提交代码前必须执行完整的 CI 检查**：
+
+```bash
+# 1. 格式检查
+pnpm format:check
+
+# 2. 类型检查
+pnpm typecheck
+
+# 3. 代码检查
+pnpm lint
+
+# 4. 单元测试
+pnpm test
+
+# 5. 构建检查（可选）
+pnpm build
+```
+
+### 完整提交流程
+
+```bash
+# Step 1: 确保在正确的分支
+git checkout feature/your-feature-branch
+
+# Step 2: 执行格式化（修复格式问题）
+pnpm format
+
+# Step 3: 执行所有 CI 检查
+pnpm format:check && pnpm typecheck && pnpm lint
+
+# Step 4: 运行测试
+pnpm test
+
+# Step 5: 暂存修改的文件
+git add <具体文件路径>
+
+# Step 6: 提交代码（使用规范的 commit message）
+git commit -m "feat(module): 简短描述"
+
+# Step 7: 合并到目标分支（如 develop）
+git checkout develop
+git merge feature/your-feature-branch
+
+# Step 8: 推送到远程
+git push origin develop
+git push origin feature/your-feature-branch
+```
+
+### Commit Message 规范
+
+使用 [Conventional Commits](https://www.conventionalcommits.org/) 格式：
+
+```
+<type>(<scope>): <subject>
+
+<body>
+
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+```
+
+#### Type 类型
+
+| Type | 说明 | 示例 |
+|------|------|------|
+| `feat` | 新功能 | `feat(truncation): 实现工具输出截断模块` |
+| `fix` | Bug 修复 | `fix(agent): 修复重试逻辑错误` |
+| `docs` | 文档更新 | `docs(readme): 更新安装说明` |
+| `style` | 代码格式（不影响功能） | `style: fix prettier formatting issues` |
+| `refactor` | 代码重构 | `refactor(tool): 重构工具注册表` |
+| `test` | 测试相关 | `test(truncation): 添加边界条件测试` |
+| `chore` | 构建/工具相关 | `chore: 更新依赖版本` |
+
+#### Scope 范围
+
+常用 scope：
+- `agent` - Agent 核心
+- `tool` - 工具系统
+- `truncation` - 截断模块
+- `permission` - 权限系统
+- `provider` - Provider 层
+- `session` - 会话管理
+- `memory` - 持久化存储
+- `cli` - CLI 应用
+
+### 分支命名规范
+
+```
+<type>/<description>
+
+# 示例
+feature/permission-truncation
+fix/agent-retry-logic
+refactor/tool-registry
+docs/api-documentation
+```
+
+### CI 失败处理
+
+如果 CI 失败，按以下步骤修复：
+
+1. **Prettier 格式问题**
+   ```bash
+   pnpm format
+   git add . && git commit -m "style: fix prettier formatting issues"
+   ```
+
+2. **TypeScript 类型错误**
+   ```bash
+   pnpm typecheck  # 查看具体错误
+   # 修复后重新检查
+   ```
+
+3. **ESLint 错误**
+   ```bash
+   pnpm lint        # 查看错误
+   pnpm lint:fix    # 自动修复可修复的问题
+   ```
+
+4. **测试失败**
+   ```bash
+   pnpm test        # 查看失败测试
+   # 修复后重新运行
+   ```
+
+---
+
 ## Browser Automation
 Use `agent-browser` for web automation. Run `agent-browser --help` for all commands.
 

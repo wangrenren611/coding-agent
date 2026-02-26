@@ -161,7 +161,9 @@ export class ErrorClassifier {
             message.includes('timeout') ||
             message.includes('timed out') ||
             message.includes('time out') ||
-            message.includes('signal timed out')
+            message.includes('signal timed out') ||
+            message.includes('body timeout') ||
+            message.includes('terminated')
         );
     }
 

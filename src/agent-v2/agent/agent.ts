@@ -553,7 +553,8 @@ export class Agent {
     }
 
     private hasAssistantOutput(message: Pick<Message, 'content' | 'reasoning_content'>): boolean {
-        return hasContent(message.content) || this.hasReasoningOutput(message.reasoning_content);
+        return hasContent(message.content);
+        //|| this.hasReasoningOutput(message.reasoning_content);
     }
 
     private resolveAssistantContent(content: MessageContent, reasoning: unknown): MessageContent {

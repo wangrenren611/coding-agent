@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { ToolSchema } from './type';
 import { ToolCall } from '../../providers';
 import { safeParse } from '../util';
+import type { TruncationMiddleware, TruncationContext } from '../truncation';
 
 /** 默认工具执行超时时间（毫秒） */
 const DEFAULT_TOOL_TIMEOUT = 300000; // 5分钟
@@ -56,6 +57,7 @@ export class ToolRegistry {
     private tools: Map<string, BaseTool<z.ZodType>> = new Map();
     private toolTimeout: number;
     private eventCallbacks?: ToolEventCallbacks;
+    private truncationMiddleware?: TruncationMiddleware;
 
     constructor(config: ToolRegistryConfig) {
         this.workingDirectory = config.workingDirectory;
@@ -81,6 +83,15 @@ export class ToolRegistry {
             ...this.eventCallbacks,
             ...callbacks,
         };
+    }
+
+    /**
+     * 设置截断中间件
+     *
+     * @param middleware 截断中间件函数
+     */
+    setTruncationMiddleware(middleware: TruncationMiddleware): void {
+        this.truncationMiddleware = middleware;
     }
 
     /**
@@ -246,6 +257,22 @@ export class ToolRegistry {
                               );
 
                     const duration = Date.now() - startTime;
+
+                    // 应用截断中间件
+                    if (this.truncationMiddleware && result.output) {
+                        const truncationContext: TruncationContext = {
+                            toolName: name,
+                            sessionId: context?.sessionId,
+                        };
+                        try {
+                            const truncatedResult = await this.truncationMiddleware(name, result, truncationContext);
+                            result.output = truncatedResult.output;
+                            result.metadata = truncatedResult.metadata;
+                        } catch (truncationError) {
+                            // 截断失败不影响工具执行结果，仅记录日志
+                            console.error('[Truncation] Middleware error:', truncationError);
+                        }
+                    }
 
                     if ((result as ToolResult).success === true) {
                         this.eventCallbacks?.onToolSuccess?.(name, duration, result);
