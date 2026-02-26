@@ -413,4 +413,92 @@ describe('Session persistence queue', () => {
         expect(inHistory[0].excludedFromContext).toBe(true);
         expect(inHistory[0].excludedReason).toBe('empty_response');
     });
+    it('should detect and filter tool calls with truncated/malformed arguments JSON', async () => {
+        const sessionId = 'session-truncated-arguments';
+        const session = new Session({
+            sessionId,
+            systemPrompt: 'test',
+            memoryManager,
+        });
+        await session.initialize();
+
+        // 模拟流式中断场景：arguments 是半截的 JSON
+        session.addMessage({
+            messageId: 'assistant-truncated',
+            role: 'assistant',
+            content: '',
+            type: 'tool-call',
+            finish_reason: null, // 中断时 finish_reason 为 null
+            tool_calls: [
+                // 合法的 tool call
+                { id: 'call_valid', type: 'function', index: 0, function: { name: 'read_file', arguments: '{"path": "test.txt"}' } },
+                // 半截 JSON（流式中断）
+                { id: 'call_truncated', type: 'function', index: 1, function: { name: 'write_file', arguments: '{"path": "test.' } },
+                // 完全非法的 JSON
+                { id: 'call_invalid', type: 'function', index: 2, function: { name: 'bash', arguments: '{not: valid}' } },
+                // 空 arguments（允许，无参数的工具调用）
+                { id: 'call_empty', type: 'function', index: 3, function: { name: 'list_dir', arguments: '' } },
+            ],
+        });
+        await session.sync();
+
+        await memoryManager.close();
+        memoryManager = createMemoryManager({
+            type: 'file',
+            connectionString: tempDir,
+        });
+        await memoryManager.initialize();
+
+        const resumed = new Session({
+            sessionId,
+            systemPrompt: 'test',
+            memoryManager,
+        });
+        await resumed.initialize();
+        await resumed.compactBeforeLLMCall();
+
+        const messages = resumed.getMessages();
+
+        // 只保留合法的 tool calls（valid + empty）
+        const assistantMessage = messages.find((msg) => msg.messageId === 'assistant-truncated');
+        expect(assistantMessage).toBeDefined();
+        const toolCalls = assistantMessage!.tool_calls;
+        expect(toolCalls).toBeDefined();
+        expect(toolCalls!.length).toBe(2);
+
+        const validIds = toolCalls!.map((call) => call.id).sort();
+        expect(validIds).toEqual(['call_empty', 'call_valid']);
+
+        // 被过滤的 tool calls（truncated/invalid）会被直接丢弃
+        // 合法的 tool calls（call_valid, call_empty）因为没有对应的 tool result，会被创建中断修复消息
+        const toolMessages = messages.filter((msg) => msg.role === 'tool');
+
+        // 应该有 2 个修复消息：call_valid 和 call_empty（它们是合法的 tool calls，但缺失响应）
+        expect(toolMessages).toHaveLength(2);
+
+        const repairedIds = toolMessages
+            .filter((msg) => String(msg.content).includes('TOOL_CALL_INTERRUPTED'))
+            .map((msg) => (msg as any).tool_call_id)
+            .sort();
+
+        // 修复的是合法的 tool calls（call_valid 和 call_empty）
+        // 而不是被过滤的非法 tool calls（call_truncated 和 call_invalid）
+        expect(repairedIds).toEqual(['call_empty', 'call_valid']);
+
+        // 验证：assistant 消息中只保留了合法的 tool calls
+        const retainedToolCallIds = toolCalls.map((call) => call.id).sort();
+        expect(retainedToolCallIds).toEqual(['call_empty', 'call_valid']);
+
+        // 验证：保留的 tool calls 的 arguments 都是合法 JSON
+        const allValidJson = toolCalls.every((call) => {
+            if (!call.function?.arguments) return true;
+            try {
+                JSON.parse(call.function.arguments);
+                return true;
+            } catch {
+                return false;
+            }
+        });
+        expect(allValidJson).toBe(true);
+    });
 });

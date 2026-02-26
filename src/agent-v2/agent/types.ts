@@ -88,7 +88,7 @@ export interface AgentOptions {
     /**
      * 单次 LLM 请求超时时间（毫秒）
      *
-     * - 默认值：3 分钟（180,000ms）
+     * - 默认值：5 分钟
      * - 如果不设置，使用 Provider.getTimeTimeout() 的返回值
      * - 超时后会触发重试机制（最多 maxRetries 次）
      */

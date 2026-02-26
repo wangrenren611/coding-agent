@@ -530,7 +530,32 @@ export class Session {
                 typeof toolCall.function.name === 'string' &&
                 toolCall.function.name.trim().length > 0 &&
                 typeof toolCall.function.arguments === 'string';
-            return hasValidId && hasValidType && hasValidFunction;
+            if (!hasValidId || !hasValidType || !hasValidFunction) return false;
+
+            // 额外验证：arguments 必须是合法 JSON（防止流式中断导致的半截 JSON）
+            if (!this.isValidJsonArguments(toolCall.function.arguments)) {
+                return false;
+            }
+
+            return true;
         });
+    }
+
+    /**
+     * 验证 tool_call 的 arguments 是否是合法 JSON
+     * 空字符串视为合法（允许无参数的工具调用）
+     */
+    private isValidJsonArguments(argumentsStr: string): boolean {
+        // 空字符串允许（无参数的工具调用）
+        if (!argumentsStr || argumentsStr.trim().length === 0) {
+            return true;
+        }
+
+        try {
+            JSON.parse(argumentsStr);
+            return true;
+        } catch {
+            return false;
+        }
     }
 }

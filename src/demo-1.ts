@@ -20,6 +20,14 @@ const BLUE = '\x1b[34m';
 const MAGENTA = '\x1b[35m';
 const RESET = '\x1b[0m';
 
+function parseRequestTimeoutMs(envValue: string | undefined): number {
+    const parsed = Number(envValue);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+        return 1000 * 60 * 10; // 10 分钟
+    }
+    return parsed;
+}
+
 // 状态追踪
 let isReasoning = false;
 let isTexting = false;
@@ -257,12 +265,13 @@ async function demo1() {
                 directory: process.cwd(),
                 language: 'Chinese',
             }),
-            // 单次 LLM 请求超时（5 分钟）
-            requestTimeout: 1000 * 60 * 3,
+            // 单次 LLM 请求超时（默认 5 分钟，可用 AGENT_REQUEST_TIMEOUT_MS 覆盖）
+            requestTimeout: parseRequestTimeoutMs(process.env.AGENT_REQUEST_TIMEOUT_MS),
             // 如需恢复会话，请取消注释并填入有效 sessionId
             //    sessionId: 'agent-7',
             // sessionId: 'agent-8',
-            sessionId: 'agent-31',
+           sessionId: 'agent-32',
+            //  sessionId: 'agent-33',
             //   sessionId:'18a09614-bb1e-4f06-b685-d040ff08c3aa',
 
             stream: true,
