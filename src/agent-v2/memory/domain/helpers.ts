@@ -68,7 +68,10 @@ export function upsertHistoryMessage(
     };
 }
 
-export function upsertContextMessage(messages: Message[], message: Message): { messages: Message[]; inserted: boolean } {
+export function upsertContextMessage(
+    messages: Message[],
+    message: Message
+): { messages: Message[]; inserted: boolean } {
     const next = [...messages];
     const last = next[next.length - 1];
     if (last?.messageId === message.messageId) {

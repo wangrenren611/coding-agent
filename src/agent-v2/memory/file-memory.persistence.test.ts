@@ -130,10 +130,16 @@ describe('FileMemoryManager persistence', () => {
 
         await hybridMemory.close();
 
-        await expect(fs.access(path.join(shortPath, 'contexts', `${encodeURIComponent(sessionId)}.json`))).resolves.toBeUndefined();
+        await expect(
+            fs.access(path.join(shortPath, 'contexts', `${encodeURIComponent(sessionId)}.json`))
+        ).resolves.toBeUndefined();
 
-        await expect(fs.access(path.join(midPath, 'sessions', `${encodeURIComponent(sessionId)}.json`))).resolves.toBeUndefined();
-        await expect(fs.access(path.join(midPath, 'histories', `${encodeURIComponent(sessionId)}.json`))).resolves.toBeUndefined();
+        await expect(
+            fs.access(path.join(midPath, 'sessions', `${encodeURIComponent(sessionId)}.json`))
+        ).resolves.toBeUndefined();
+        await expect(
+            fs.access(path.join(midPath, 'histories', `${encodeURIComponent(sessionId)}.json`))
+        ).resolves.toBeUndefined();
 
         await expect(
             fs.access(path.join(midPath, 'tasks', `task-list-${encodeURIComponent(sessionId)}.json`))
@@ -141,7 +147,9 @@ describe('FileMemoryManager persistence', () => {
         await expect(
             fs.access(path.join(midPath, 'subtask-runs', `subtask-run-${encodeURIComponent('hybrid-run-1')}.json`))
         ).resolves.toBeUndefined();
-        await expect(fs.access(path.join(midPath, 'compactions', `${encodeURIComponent(sessionId)}.json`))).resolves.toBeUndefined();
+        await expect(
+            fs.access(path.join(midPath, 'compactions', `${encodeURIComponent(sessionId)}.json`))
+        ).resolves.toBeUndefined();
     });
 
     it('should upsert streamed assistant message instead of duplicating history entries', async () => {

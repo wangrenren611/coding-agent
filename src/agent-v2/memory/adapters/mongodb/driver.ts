@@ -70,20 +70,22 @@ export function resolveMongoRuntimeConfig(
     const connectionFromEnv = readString(process.env[connectionEnvKey]);
     const resolvedConnectionString = readString(connectionString) || connectionFromConfig || connectionFromEnv;
     if (!resolvedConnectionString) {
-        throw new Error(
-            `MongoDB backend requires connectionString (mongodb://...) or env ${connectionEnvKey}.`
-        );
+        throw new Error(`MongoDB backend requires connectionString (mongodb://...) or env ${connectionEnvKey}.`);
     }
 
     const dbNameFromConfig = readString(rawConfig?.dbName);
     const dbNameFromEnv = readString(process.env[dbNameEnvKey]);
     const resolvedDbName =
-        dbNameFromConfig || dbNameFromEnv || resolveDbNameFromConnectionString(resolvedConnectionString) || 'agent_memory';
+        dbNameFromConfig ||
+        dbNameFromEnv ||
+        resolveDbNameFromConnectionString(resolvedConnectionString) ||
+        'agent_memory';
     const collectionPrefix =
         readString(rawConfig?.collectionPrefix) || readString(process.env[collectionPrefixEnvKey]) || 'memory_';
     const moduleName = readString(rawConfig?.moduleName) || 'mongodb';
     const clientOptions = asObject(rawConfig?.clientOptions);
-    const moduleLoader = typeof rawConfig?.moduleLoader === 'function' ? (rawConfig.moduleLoader as () => Promise<unknown>) : undefined;
+    const moduleLoader =
+        typeof rawConfig?.moduleLoader === 'function' ? (rawConfig.moduleLoader as () => Promise<unknown>) : undefined;
 
     return {
         connectionString: resolvedConnectionString,

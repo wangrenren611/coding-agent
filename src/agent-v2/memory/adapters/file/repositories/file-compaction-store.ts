@@ -7,7 +7,10 @@ import { encodeEntityFileName, safeDecodeEntityFileName } from '../filename-code
 export class FileCompactionStore implements CompactionStore {
     private readonly dirPath: string;
 
-    constructor(basePath: string, private readonly io: AtomicJsonStore) {
+    constructor(
+        basePath: string,
+        private readonly io: AtomicJsonStore
+    ) {
         this.dirPath = path.join(basePath, 'compactions');
     }
 

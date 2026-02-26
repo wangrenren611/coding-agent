@@ -298,7 +298,10 @@ export class SessionContextService {
         context.updatedAt = now;
         session.updatedAt = now;
 
-        await Promise.all([this.stores.contexts.save(sessionId, context), this.stores.sessions.save(sessionId, session)]);
+        await Promise.all([
+            this.stores.contexts.save(sessionId, context),
+            this.stores.sessions.save(sessionId, session),
+        ]);
     }
 
     async compactContext(sessionId: string, options: CompactContextOptions): Promise<CompactionRecord> {
@@ -337,7 +340,9 @@ export class SessionContextService {
         });
 
         const previousMessageCount = context.messages.length;
-        context.messages = systemMessage ? [systemMessage, summaryMessage, ...keptMessages] : [summaryMessage, ...keptMessages];
+        context.messages = systemMessage
+            ? [systemMessage, summaryMessage, ...keptMessages]
+            : [summaryMessage, ...keptMessages];
         context.version += 1;
         context.lastCompactionId = recordId;
         context.updatedAt = now;

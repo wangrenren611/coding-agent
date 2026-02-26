@@ -7,7 +7,10 @@ import { encodeEntityFileName, safeDecodeEntityFileName } from '../filename-code
 export class FileHistoryStore implements HistoryStore {
     private readonly dirPath: string;
 
-    constructor(basePath: string, private readonly io: AtomicJsonStore) {
+    constructor(
+        basePath: string,
+        private readonly io: AtomicJsonStore
+    ) {
         this.dirPath = path.join(basePath, 'histories');
     }
 

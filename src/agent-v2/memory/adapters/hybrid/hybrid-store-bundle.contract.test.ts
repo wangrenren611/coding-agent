@@ -2,7 +2,14 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import type { CompactionRecord, CurrentContext, HistoryMessage, SessionData, SubTaskRunData, TaskData } from '../../types';
+import type {
+    CompactionRecord,
+    CurrentContext,
+    HistoryMessage,
+    SessionData,
+    SubTaskRunData,
+    TaskData,
+} from '../../types';
 import { createHybridStoreBundle } from './hybrid-store-bundle';
 import { createFakeMongoModuleLoader, resetFakeMongoServer } from '../mongodb/test-utils/fake-mongo-module';
 

@@ -7,7 +7,10 @@ import { encodeSubTaskRunFileName, safeDecodeSubTaskRunFileName } from '../filen
 export class FileSubTaskRunStore implements SubTaskRunStore {
     private readonly dirPath: string;
 
-    constructor(basePath: string, private readonly io: AtomicJsonStore) {
+    constructor(
+        basePath: string,
+        private readonly io: AtomicJsonStore
+    ) {
         this.dirPath = path.join(basePath, 'subtask-runs');
     }
 

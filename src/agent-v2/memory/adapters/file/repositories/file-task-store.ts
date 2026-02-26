@@ -7,7 +7,10 @@ import { encodeTaskListFileName, safeDecodeTaskListFileName } from '../filename-
 export class FileTaskStore implements TaskStore {
     private readonly dirPath: string;
 
-    constructor(basePath: string, private readonly io: AtomicJsonStore) {
+    constructor(
+        basePath: string,
+        private readonly io: AtomicJsonStore
+    ) {
         this.dirPath = path.join(basePath, 'tasks');
     }
 

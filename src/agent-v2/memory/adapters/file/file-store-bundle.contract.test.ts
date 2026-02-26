@@ -3,7 +3,14 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { createFileStoreBundle } from './file-store-bundle';
-import type { CompactionRecord, CurrentContext, HistoryMessage, SessionData, SubTaskRunData, TaskData } from '../../types';
+import type {
+    CompactionRecord,
+    CurrentContext,
+    HistoryMessage,
+    SessionData,
+    SubTaskRunData,
+    TaskData,
+} from '../../types';
 
 describe('File store bundle contract', () => {
     let tempDir: string;

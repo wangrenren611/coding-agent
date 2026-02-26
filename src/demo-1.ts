@@ -255,7 +255,7 @@ async function demo1() {
     let agent: Agent | undefined;
     try {
         agent = new Agent({
-            provider: ProviderRegistry.createFromEnv('qwen3.5-plus', {
+            provider: ProviderRegistry.createFromEnv('glm-5', {
                 temperature: 0.3,
             }),
             systemPrompt: operatorPrompt({
@@ -268,7 +268,7 @@ async function demo1() {
             //    sessionId: 'agent-7',
             // sessionId: 'agent-8',
             // sessionId: 'agent-32',
-            //  sessionId: 'agent-33',
+            sessionId: 'agent-35',
             //   sessionId:'18a09614-bb1e-4f06-b685-d040ff08c3aa',
 
             stream: true,
