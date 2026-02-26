@@ -74,6 +74,8 @@ const AGENT_DEFAULTS = {
     EMPTY_RESPONSE_RETRY_DELAY_MS: 100,
     /** 默认流式缓冲区大小（字节） */
     BUFFER_SIZE: 100000,
+    /** 默认空闲超时（毫秒）- 3 分钟，用于流式请求 */
+    IDLE_TIMEOUT_MS: 3 * 60 * 1000,
 } as const;
 
 // ==================== Agent 类 ====================
@@ -91,6 +93,7 @@ export class Agent {
     private readonly thinking?: boolean;
     private readonly requestTimeoutMs?: number;
     private pendingRetryReason: string | null = null;
+    private readonly idleTimeoutMs: number;
 
     // 内部组件
     private readonly agentState: AgentState;
@@ -107,6 +110,7 @@ export class Agent {
         this.streamCallback = config.streamCallback;
         this.thinking = config.thinking;
         this.requestTimeoutMs = this.normalizeMs(config.requestTimeout);
+        this.idleTimeoutMs = config.idleTimeout ?? AGENT_DEFAULTS.IDLE_TIMEOUT_MS;
 
         this.timeProvider = config.timeProvider ?? new DefaultTimeProvider();
         this.eventBus = new EventBus();
@@ -145,6 +149,7 @@ export class Agent {
             stream: this.stream,
             maxBufferSize: config.maxBufferSize ?? AGENT_DEFAULTS.BUFFER_SIZE,
             requestTimeoutMs: this.requestTimeoutMs,
+            idleTimeoutMs: this.idleTimeoutMs,
             thinking: this.thinking,
             timeProvider: this.timeProvider,
             validatorOptions: config.validationOptions,

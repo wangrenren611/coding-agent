@@ -109,6 +109,10 @@ export interface StreamProcessorOptions {
     validatorOptions?: Partial<ResponseValidatorOptions>;
     /** 验证失败回调 */
     onValidationViolation?: (result: ValidationResult) => void;
+    // ==================== 超时控制回调 ====================
+
+    /** 重置空闲超时回调（每次收到 chunk 时调用） */
+    onResetIdleTimeout?: () => void;
 }
 
 // ==================== 主类 ====================
@@ -130,6 +134,9 @@ export class StreamProcessor {
 
     // 响应验证器
     private readonly validator: ResponseValidator;
+
+    // 空闲超时重置回调
+    private resetIdleTimeoutCallback?: () => void;
 
     constructor(options: StreamProcessorOptions) {
         this.options = options;
@@ -168,6 +175,14 @@ export class StreamProcessor {
     }
 
     /**
+     * 设置空闲超时重置回调
+     * LLMCaller 会调用此方法传递一个回调，每次收到 chunk 时调用
+     */
+    setResetIdleTimeout(callback: () => void): void {
+        this.resetIdleTimeoutCallback = callback;
+    }
+
+    /**
      * 处理单个 chunk
      *
      * 处理顺序：
@@ -179,6 +194,9 @@ export class StreamProcessor {
      */
     processChunk(chunk: Chunk): void {
         if (this.state.aborted) return;
+
+        // 每次收到 chunk 就重置空闲超时
+        this.resetIdleTimeoutCallback?.();
 
         const finishReason = getFinishReason(chunk);
 
