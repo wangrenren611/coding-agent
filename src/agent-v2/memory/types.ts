@@ -370,11 +370,27 @@ export interface IMemoryManager {
 /**
  * MemoryManager 配置选项
  */
+export type SupportedMemoryManagerType = 'file' | 'mysql' | 'redis' | 'mongodb' | 'hybrid';
+
+export interface MemoryBackendDescriptor {
+    type: 'file' | 'mysql' | 'redis' | 'mongodb';
+    connectionString?: string;
+    config?: Record<string, unknown>;
+}
+
+export interface HybridMemoryConfig {
+    shortTerm?: MemoryBackendDescriptor;
+    midTerm?: MemoryBackendDescriptor;
+    longTerm?: MemoryBackendDescriptor;
+}
+
 export interface MemoryManagerOptions {
-    /** 存储类型，当前仅支持 file */
-    type: 'file' | string;
+    /** 存储类型 */
+    type: SupportedMemoryManagerType | string;
     /** 存储路径/连接字符串 */
     connectionString?: string;
-    /** 其他配置参数 */
-    config?: Record<string, unknown>;
+    /** 其他配置参数（hybrid 模式可传 tier 配置） */
+    config?: Record<string, unknown> & {
+        hybrid?: HybridMemoryConfig;
+    };
 }

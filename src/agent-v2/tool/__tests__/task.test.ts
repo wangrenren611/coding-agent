@@ -333,7 +333,7 @@ describe('Task tools', () => {
         }
     });
 
-    it('should migrate legacy task-list.json data into memory manager storage', async () => {
+    it('should ignore legacy task-list.json when memory manager storage is enabled', async () => {
         const legacyTask = {
             id: '1',
             subject: 'Legacy task',
@@ -354,13 +354,13 @@ describe('Task tools', () => {
         const list = withContext(new TaskListTool());
         const listed = await list.execute();
         expect(listed.success).toBe(true);
-        expect(listed.metadata?.count).toBe(1);
+        expect(listed.metadata?.count).toBe(0);
 
         const storedTasks = await memoryManager.queryTasks({
             sessionId,
             parentTaskId: MANAGED_TASK_PARENT_ID,
         });
-        expect(storedTasks).toHaveLength(1);
+        expect(storedTasks).toHaveLength(0);
     });
 
     it('should persist foreground task run metadata without duplicating full messages', async () => {

@@ -146,19 +146,7 @@ export async function loadTasks(sessionId?: string, memoryManager?: IMemoryManag
             .map(mapTaskDataToManagedTask)
             .filter((task): task is ManagedTask => task !== null)
             .sort((a, b) => compareTaskIds(a.id, b.id));
-        if (managedTasks.length > 0) {
-            return managedTasks;
-        }
-
-        const legacyFilePath = resolveTaskFilePath(sessionId);
-        const legacyTasks = await loadTasksFromFile(legacyFilePath);
-        if (legacyTasks.length > 0) {
-            for (const task of legacyTasks) {
-                await memoryManager.saveTask(mapManagedTaskToTaskData(task, sessionId));
-            }
-            return legacyTasks.sort((a, b) => compareTaskIds(a.id, b.id));
-        }
-        return [];
+        return managedTasks;
     }
 
     if (!sessionId) {

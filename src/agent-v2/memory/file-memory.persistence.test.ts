@@ -43,6 +43,107 @@ describe('FileMemoryManager persistence', () => {
         ).toThrow('Unsupported memory manager type: sqlite');
     });
 
+    it('should allow mysql type but fail on initialize until adapter is implemented', async () => {
+        const mysqlMemory = createMemoryManager({
+            type: 'mysql',
+            connectionString: 'mysql://localhost:3306/agent_memory',
+        });
+
+        await expect(mysqlMemory.initialize()).rejects.toThrow('Memory backend "mysql" is not implemented yet.');
+        await mysqlMemory.close();
+    });
+
+    it('should fail mongodb initialize with clear install guidance when driver is missing', async () => {
+        const mongodbMemory = createMemoryManager({
+            type: 'mongodb',
+            connectionString: 'mongodb://localhost:27017/agent_memory',
+            config: {
+                moduleName: '__missing_mongodb_driver__',
+            },
+        });
+
+        await expect(mongodbMemory.initialize()).rejects.toThrow(
+            'MongoDB backend requires npm package "__missing_mongodb_driver__"'
+        );
+        await mongodbMemory.close();
+    });
+
+    it('should route hybrid storage to different file tiers', async () => {
+        const shortPath = path.join(tempDir, 'hybrid-short');
+        const midPath = path.join(tempDir, 'hybrid-mid');
+
+        const hybridMemory = createMemoryManager({
+            type: 'hybrid',
+            config: {
+                hybrid: {
+                    shortTerm: {
+                        type: 'file',
+                        connectionString: shortPath,
+                    },
+                    midTerm: {
+                        type: 'file',
+                        connectionString: midPath,
+                    },
+                },
+            },
+        });
+
+        await hybridMemory.initialize();
+
+        const sessionId = await hybridMemory.createSession('hybrid-session', 'hybrid system');
+        await hybridMemory.addMessageToContext(sessionId, {
+            messageId: 'hybrid-user-1',
+            role: 'user',
+            content: 'hello',
+            type: 'text',
+        });
+        await hybridMemory.saveTask({
+            id: 'hybrid-task-1',
+            taskId: 'hybrid-task-1',
+            sessionId,
+            status: 'pending',
+            title: 'hybrid task',
+        });
+        await hybridMemory.saveSubTaskRun({
+            id: 'hybrid-run-1',
+            runId: 'hybrid-run-1',
+            parentSessionId: sessionId,
+            childSessionId: `${sessionId}::subtask::hybrid-run-1`,
+            mode: 'foreground',
+            status: 'running',
+            description: 'hybrid run',
+            prompt: 'hybrid run',
+            subagentType: 'explore',
+            startedAt: Date.now(),
+            toolsUsed: [],
+        });
+
+        await hybridMemory.compactContext(sessionId, {
+            keepLastN: 0,
+            summaryMessage: {
+                messageId: 'hybrid-summary-1',
+                role: 'assistant',
+                content: 'summary',
+                type: 'summary',
+            },
+        });
+
+        await hybridMemory.close();
+
+        await expect(fs.access(path.join(shortPath, 'contexts', `${encodeURIComponent(sessionId)}.json`))).resolves.toBeUndefined();
+
+        await expect(fs.access(path.join(midPath, 'sessions', `${encodeURIComponent(sessionId)}.json`))).resolves.toBeUndefined();
+        await expect(fs.access(path.join(midPath, 'histories', `${encodeURIComponent(sessionId)}.json`))).resolves.toBeUndefined();
+
+        await expect(
+            fs.access(path.join(midPath, 'tasks', `task-list-${encodeURIComponent(sessionId)}.json`))
+        ).resolves.toBeUndefined();
+        await expect(
+            fs.access(path.join(midPath, 'subtask-runs', `subtask-run-${encodeURIComponent('hybrid-run-1')}.json`))
+        ).resolves.toBeUndefined();
+        await expect(fs.access(path.join(midPath, 'compactions', `${encodeURIComponent(sessionId)}.json`))).resolves.toBeUndefined();
+    });
+
     it('should upsert streamed assistant message instead of duplicating history entries', async () => {
         const sessionId = await memoryManager.createSession('session-stream-upsert', 'test system');
         const usage = createUsage(28);
