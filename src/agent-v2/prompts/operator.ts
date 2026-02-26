@@ -2,7 +2,7 @@ import path from 'path';
 import fs from 'fs';
 import { buildSystemPrompt } from './system';
 
-export const operatorPrompt = ({ directory, language = 'Chinese' }: { directory: string; language: string }) => {
+export const operatorPrompt = ({ directory, language = 'Chinese' }: { directory: string; language: string;  }) => {
     const provider = buildSystemPrompt({ language });
 
     // 判断当前目录是否为 git 仓库

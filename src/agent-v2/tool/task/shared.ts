@@ -129,41 +129,30 @@ Available agent types and the tools they have access to:
   When calling this agent, specify the thoroughness level: "quick" for basic searches,
   "medium" for moderate exploration, or "very thorough" for comprehensive analysis
   across multiple locations and naming conventions.
-  Tools: All tools except Task, ExitPlanMode, Edit, Write, NotebookEdit
 
 - Plan: Software architect agent for designing implementation plans.
   Use this when you need to plan the implementation strategy for a task.
   Returns step-by-step plans, identifies critical files, and considers architectural
   trade-offs.
-  Tools: All tools except Task, ExitPlanMode, Edit, Write, NotebookEdit
 
-- claude-code-guide: Use this agent when you ask questions (e.g., "Can Claude...",
-  "Does Claude...", "How do I...") about: (1) Claude Code (the CLI tool) - features,
-  hooks, slash commands, MCP servers, settings, IDE integrations, keyboard shortcuts;
-  (2) Claude Agent SDK - building custom agents; (3) Claude API (formerly Anthropic API)
-  - API usage, tool use, Anthropic SDK usage.
-  IMPORTANT: Before spawning a new agent, check if there is already a running or
-  recently completed claude-code-guide agent that you can resume using the "resume" parameter.
-  Tools: Glob, Grep, Read, WebFetch, WebSearch
 
 - ui-sketcher: Universal UI Blueprint Engineer that transforms any functional requirement
   into visual ASCII interface designs, user stories, and interaction specifications.
   Excels at converting brief descriptions into comprehensive user journeys with spatial
   layout visualization.
-  Tools: Bash, Glob, Grep, Read, WebFetch, TodoWrite, WebSearch, BashOutput, KillShell,
-  ListMcpResourcesTool, ReadMcpResourceTool
+
 
 - bug-analyzer: Expert debugger specialized in deep code execution flow analysis and root
   cause investigation. Use when you need to analyze code execution paths, build execution
   chain diagrams, trace variable state changes, or perform deep root cause analysis.
-  Tools: read_file, write_file, run_bash_command, search_files, grep
+
 
 - code-reviewer: Elite code review expert specializing in modern AI-powered code analysis,
   security vulnerabilities, performance optimization, and production reliability. Masters
   static analysis tools, security scanning, and configuration review with 2024/2025 best
   practices. Open-sourced by @wshonson.
   Use PROACTIVELY for code quality assurance. Open-sourced by @wshonson.
-  Tools: All tools
+
 
 Usage notes:
 - Always include a short description (3-5 words) summarizing what the agent will do.

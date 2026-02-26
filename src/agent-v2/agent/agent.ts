@@ -29,7 +29,7 @@ import { Session } from '../session';
 import { ToolRegistry } from '../tool/registry';
 import { EventBus, EventType } from '../eventbus';
 import { Message } from '../session/types';
-import { createDefaultToolRegistry } from '../tool';
+import { createDefaultToolRegistry, createPlanModeToolRegistry } from '../tool';
 
 import {
     AgentAbortedError,
@@ -117,8 +117,11 @@ export class Agent {
         this.inputValidator = new InputValidator();
         this.errorClassifier = new ErrorClassifier();
 
+        // 处理 Plan 模式的系统提示词
+        const systemPrompt = this.buildSystemPrompt(config.systemPrompt ?? '', config.planMode);
+
         this.session = new Session({
-            systemPrompt: config.systemPrompt ?? '',
+            systemPrompt,
             memoryManager: config.memoryManager,
             sessionId: config.sessionId,
             enableCompaction: config.enableCompaction,
@@ -126,8 +129,16 @@ export class Agent {
             provider: this.provider,
         });
 
-        this.toolRegistry =
-            config.toolRegistry ?? createDefaultToolRegistry({ workingDirectory: process.cwd() }, this.provider);
+        // 根据 planMode 选择不同的工具注册表
+        if (config.toolRegistry) {
+            this.toolRegistry = config.toolRegistry;
+        } else if (config.planMode) {
+            // Plan 模式使用独立的只读工具注册表
+            this.toolRegistry = createPlanModeToolRegistry({ workingDirectory: process.cwd() }, this.provider);
+        } else {
+            // 普通模式使用完整工具注册表
+            this.toolRegistry = createDefaultToolRegistry({ workingDirectory: process.cwd() }, this.provider);
+        }
         this.configureToolEventBridge();
 
         this.agentState = new AgentState({
@@ -176,6 +187,7 @@ export class Agent {
             sessionId: this.session.getSessionId(),
             memoryManager: this.session.getMemoryManager(),
             streamCallback: this.streamCallback,
+            planMode: config.planMode,
             onToolCallCreated: (toolCalls, messageId, content) =>
                 this.emitter.emitToolCallCreated(toolCalls, messageId, content),
             onToolCallStream: (toolCallId, output, messageId) =>
@@ -312,6 +324,82 @@ export class Agent {
         } catch {
             return String(value);
         }
+    }
+
+    /**
+     * 构建系统提示词，根据 planMode 添加额外指令
+     */
+    private buildSystemPrompt(basePrompt: string, planMode?: boolean): string {
+        if (!planMode) {
+            return basePrompt;
+        }
+
+        const planModeInstruction = `
+
+# ⚠️ CRITICAL: You are in Plan Mode
+
+In this mode, you **MUST** create a plan first using the **plan_create** tool. You **CANNOT** write code or create files directly.
+
+## What You MUST Do
+1. **Analyze** the requirements and explore the codebase
+2. **Create a plan** using plan_create tool - this is MANDATORY
+3. **Stop** after creating the plan - do NOT implement it
+
+## What You CAN Do
+- Read files (read_file, glob, grep, lsp)
+- Search the web (web_search, web_fetch)
+- Use tasks to delegate exploration (task, task_create, task_get, task_list, task_update, task_stop)
+
+## What You CANNOT Do
+- ❌ write_file - FORBIDDEN
+- ❌ precise_replace, batch_replace - FORBIDDEN
+- ❌ bash - FORBIDDEN
+
+## How to Create a Plan
+
+Use the **plan_create** tool to create a detailed implementation plan:
+
+\`\`\`
+plan_create({
+  title: "Implementation Plan Title",
+  content: \`
+# Plan Title
+
+## Overview
+Brief description of what will be implemented.
+
+## Technical Approach
+Key technical decisions and approach.
+
+## Implementation Steps
+
+### Step 1: Step Title
+- Description of the step
+- Files to create/modify
+- Expected output
+
+### Step 2: Step Title
+- Description of the step
+- Files to create/modify
+- Expected output
+
+## Acceptance Criteria
+- [ ] Criteria 1
+- [ ] Criteria 2
+\`
+})
+\`\`\`
+
+## ⚠️ IMPORTANT
+- You MUST call plan_create before finishing
+- You MUST NOT attempt to write files or execute code
+- The plan will be executed by another agent in execution mode
+- Your job is ONLY to analyze and plan, not to implement
+
+When you have created the plan, say "I have created the implementation plan. The plan is ready for execution."
+`;
+
+        return basePrompt + planModeInstruction;
     }
 
     // ==================== 状态查询 ====================

@@ -10,6 +10,7 @@ import { LspTool } from './lsp';
 import { TaskCreateTool, TaskGetTool, TaskListTool, TaskStopTool, TaskTool, TaskUpdateTool } from './task';
 import { ToolRegistry } from './registry';
 import { SkillTool } from '../skill';
+import { PlanCreateTool } from '../plan/tools';
 import type { ToolRegistryConfig } from './registry';
 import type { BaseTool } from './base';
 import type { ToolResult } from './base';
@@ -46,6 +47,9 @@ export function getDefaultTools(
         new SkillTool(),
     ];
 
+    // 添加 Plan 工具
+    tools.push(new PlanCreateTool());
+
     // TaskTool 需要 provider，只有在有 provider 时才添加
     if (provider) {
         tools.push(new TaskTool(provider, workingDir));
@@ -62,6 +66,46 @@ export interface CreateDefaultToolRegistryConfig extends ToolRegistryConfig {
     provider?: LLMProvider;
     /** 截断服务配置（可选，传入则启用截断） */
     truncation?: TruncationServiceConfig | boolean;
+}
+
+/**
+ * 获取 Plan 模式下的只读工具实例
+ * Plan 模式只允许使用只读工具和 Plan 相关工具
+ * @param workingDir 工作目录
+ * @returns Plan 模式允许的工具数组
+ */
+export function getPlanModeTools(
+    workingDir: string = process.cwd(),
+    provider?: LLMProvider
+): Array<BaseTool<z.ZodType>> {
+    const tools: Array<BaseTool<z.ZodType>> = [
+        // 文件读取（只读）
+        new GlobTool(),
+        new ReadFileTool(),
+        new GrepTool(),
+        new LspTool(),
+        // 网络（只读）
+        new WebSearchTool(),
+        new WebFetchTool(),
+        // Task 工具 - 用于探索和分析
+        new TaskCreateTool(),
+        new TaskGetTool(),
+        new TaskListTool(),
+        new TaskUpdateTool(),
+        new TaskStopTool(),
+        // Skill
+        new SkillTool(),
+    ];
+
+    // 添加 Plan 工具
+    tools.push(new PlanCreateTool());
+
+    // TaskTool 需要 provider
+    if (provider) {
+        tools.push(new TaskTool(provider, workingDir));
+    }
+
+    return tools;
 }
 
 /**
@@ -95,6 +139,28 @@ export const createDefaultToolRegistry = (
         const middleware = createTruncationMiddleware({ service: truncationService });
         toolRegistry.setTruncationMiddleware(middleware);
     }
+
+    return toolRegistry;
+};
+
+/**
+ * 创建 Plan 模式专用的工具注册表
+ * 只包含只读工具和 Plan 相关工具
+ * @param config 工具注册表配置
+ * @returns 配置好的 Plan 模式工具注册表
+ */
+export const createPlanModeToolRegistry = (
+    config: ToolRegistryConfig,
+    provider?: LLMProvider
+) => {
+    const registryConfig: ToolRegistryConfig = {
+        workingDirectory: config.workingDirectory,
+        toolTimeout: config.toolTimeout,
+    };
+
+    const toolRegistry = new ToolRegistry(registryConfig);
+    // 只注册 Plan 模式允许的工具
+    toolRegistry.register(getPlanModeTools(registryConfig.workingDirectory, provider));
 
     return toolRegistry;
 };
