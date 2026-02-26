@@ -47,11 +47,7 @@ export type TruncationMiddleware = (
 export function createTruncationMiddleware(config: TruncationMiddlewareConfig): TruncationMiddleware {
     const { service, skipTools = [], shouldTruncate } = config;
 
-    return async (
-        toolName: string,
-        result: ToolResult,
-        context: TruncationContext
-    ): Promise<ToolResult> => {
+    return async (toolName: string, result: ToolResult, context: TruncationContext): Promise<ToolResult> => {
         // 没有输出，直接返回
         if (!result.output) {
             return result;

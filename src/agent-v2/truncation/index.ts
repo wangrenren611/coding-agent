@@ -50,11 +50,7 @@ export { TruncationService, type TruncationServiceConfig } from './service';
 export { TruncationStorage } from './storage';
 
 // 中间件导出
-export {
-    createTruncationMiddleware,
-    type TruncationMiddlewareConfig,
-    type TruncationMiddleware,
-} from './middleware';
+export { createTruncationMiddleware, type TruncationMiddlewareConfig, type TruncationMiddleware } from './middleware';
 
 // 策略导出
 export { BaseTruncationStrategy, DefaultTruncationStrategy } from './strategies';

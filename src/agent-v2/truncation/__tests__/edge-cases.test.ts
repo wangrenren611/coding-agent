@@ -88,7 +88,7 @@ describe('Boundary Conditions', () => {
             });
             const content = 'x'.repeat(1024 * 1024); // 1MB
             const result = await largeService.output(content, { toolName: 'test' });
-            
+
             expect(result.truncated).toBe(true);
             expect(result.content.length).toBeLessThan(content.length);
         });
@@ -99,7 +99,7 @@ describe('Boundary Conditions', () => {
             });
             const content = Array(100000).fill('line').join('\n');
             const result = await linesService.output(content, { toolName: 'test' });
-            
+
             expect(result.truncated).toBe(true);
         }, 10000); // 10s timeout
     });
@@ -187,7 +187,7 @@ describe('Storage Error Handling', () => {
     it('should read saved file correctly', async () => {
         const content = 'test content with unicode 你好';
         const savedPath = await storage.save(content, { toolName: 'test' });
-        
+
         const readContent = await storage.read(savedPath);
         expect(readContent).toBe(content);
     });
@@ -214,7 +214,7 @@ describe('Storage Error Handling', () => {
 
     it('should not cleanup recent files', async () => {
         await storage.save('recent content', { toolName: 'test' });
-        
+
         // cleanup with 7 days should not remove recent files
         const cleaned = await storage.cleanup(7);
         expect(cleaned).toBe(0);
@@ -233,7 +233,7 @@ describe('Storage Error Handling', () => {
 describe('Service Error Handling', () => {
     it('should emit error event when storage fails', async () => {
         const events: any[] = [];
-        
+
         // Create a mock storage that always fails
         const mockStorage = {
             save: vi.fn().mockRejectedValue(new Error('Storage failed')),
@@ -254,7 +254,7 @@ describe('Service Error Handling', () => {
         // Should return original content on error
         expect(result.truncated).toBe(false);
         expect(result.content).toBe(content);
-        
+
         // Should emit error event
         expect(events).toHaveLength(1);
         expect(events[0].type).toBe('error');
@@ -361,7 +361,7 @@ describe('Strategy Edge Cases', () => {
 
     it('should handle empty content', () => {
         expect(strategy.needsTruncation('', { maxLines: 10, maxBytes: 1000 } as any)).toBe(false);
-        
+
         const result = strategy.truncate('', { maxLines: 10, maxBytes: 1000, direction: 'head' } as any);
         expect(result.content).toBe('');
     });
@@ -369,7 +369,7 @@ describe('Strategy Edge Cases', () => {
     it('should handle single very long line that exceeds byte limit', () => {
         const content = 'x'.repeat(10000);
         const result = strategy.truncate(content, { maxLines: 100, maxBytes: 100, direction: 'head' } as any);
-        
+
         expect(result.removedBytes).toBeGreaterThan(0);
         expect(result.content.length).toBeLessThanOrEqual(100);
     });
@@ -383,7 +383,7 @@ describe('Strategy Edge Cases', () => {
         // Create content where each line is exactly 10 bytes
         const content = '1234567890\n'.repeat(100);
         const result = strategy.truncate(content, { maxLines: 100, maxBytes: 55, direction: 'head' } as any);
-        
+
         // Should truncate due to byte limit
         expect(result.removedBytes).toBeDefined();
     });
@@ -405,14 +405,14 @@ describe('Concurrency', () => {
         });
 
         const content = Array(100).fill('line').join('\n');
-        
+
         // Run 10 concurrent requests
         const promises = Array(10)
             .fill(null)
             .map((_, i) => service.output(content, { toolName: `test${i}` }));
 
         const results = await Promise.all(promises);
-        
+
         // All should be truncated
         results.forEach((result) => {
             expect(result.truncated).toBe(true);
@@ -424,14 +424,14 @@ describe('Concurrency', () => {
         const storage = new TruncationStorage(testDir);
 
         const content = 'test content';
-        
+
         // Run concurrent saves
         const promises = Array(10)
             .fill(null)
             .map((_, i) => storage.save(content, { toolName: `test${i}` }));
 
         const paths = await Promise.all(promises);
-        
+
         // All paths should be unique
         const uniquePaths = new Set(paths);
         expect(uniquePaths.size).toBe(10);
@@ -495,7 +495,7 @@ describe('Configuration Validation', () => {
         });
 
         const content = 'line1\nline2\nline3\nline4\nline5\nline6\nline7';
-        
+
         // bash tool should use tail
         const result = await service.output(content, { toolName: 'bash' });
         expect(result.content.indexOf('truncated')).toBeLessThan(result.content.indexOf('line5'));

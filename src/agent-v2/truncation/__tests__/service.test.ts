@@ -98,7 +98,7 @@ describe('TruncationService', () => {
 
         it('should allow per-call options override', async () => {
             const content = Array(20).fill('line').join('\n');
-            
+
             // skip truncation via options
             const result = await service.output(content, {
                 toolName: 'test',

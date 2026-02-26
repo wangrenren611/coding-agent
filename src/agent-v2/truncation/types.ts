@@ -101,7 +101,10 @@ export interface TruncationStrategy {
      * @param config 截断配置
      * @returns 截断后的内容和统计信息
      */
-    truncate(content: string, config: TruncationConfig): {
+    truncate(
+        content: string,
+        config: TruncationConfig
+    ): {
         content: string;
         removedLines?: number;
         removedBytes?: number;

@@ -15,11 +15,7 @@ import type { BaseTool } from './base';
 import type { ToolResult } from './base';
 import type { LLMProvider } from '../../providers';
 import { z } from 'zod';
-import {
-    TruncationService,
-    createTruncationMiddleware,
-    type TruncationServiceConfig,
-} from '../truncation';
+import { TruncationService, createTruncationMiddleware, type TruncationServiceConfig } from '../truncation';
 
 /**
  * 获取所有默认工具实例
