@@ -1,12 +1,13 @@
 /**
  * ============================================================================
- * Plan Agent Demo - 演示 Plan 功能的完整工作流程（简化版）
+ * Plan Agent Demo - 演示 Plan 功能的完整工作流程
  * ============================================================================
  *
  * 工作流程：
  * 1. Plan 模式阶段 (planMode: true)
  *    - 只读操作：探索代码库、搜索文件
  *    - 使用 plan_create 创建 Markdown 文档
+ *    - 系统提示词包含 Plan Mode 指令
  *
  * 2. 执行模式阶段 (planMode: false)
  *    - 读取 Plan Markdown 文档
@@ -221,7 +222,7 @@ function handleStreamMessage(message: AgentMessage) {
 
 async function runPlanDemo() {
     console.log('='.repeat(60));
-    console.log(`${MAGENTA}📋 Plan Agent Demo (简化版)${RESET}`);
+    console.log(`${MAGENTA}📋 Plan Agent Demo${RESET}`);
     console.log('='.repeat(60));
     console.log();
 
@@ -236,6 +237,7 @@ async function runPlanDemo() {
     await memoryManager.initialize();
 
     // 初始化 Plan 存储
+    // createPlanStorage(baseDir) - 在指定目录下创建 plans/ 子目录
     const planStorage = createPlanStorage(MEMORY_PATH);
 
     const query = process.argv[2] || '分析 src/agent-v2/plan 目录的代码结构，并创建一个实现计划';
@@ -246,11 +248,17 @@ async function runPlanDemo() {
         console.log(`${MAGENTA}📌 阶段 1: Plan 模式 - 分析需求并创建计划${RESET}`);
         console.log(`${MAGENTA}══════════════════════════════════════════════════════════${RESET}\n`);
 
-        const basePrompt = operatorPrompt({ directory: process.cwd(), language: 'Chinese' });
+        // Plan 模式使用 operatorPrompt({ planMode: true })
+        // 系统提示词会自动包含 Plan Mode 指令
+        const planSystemPrompt = operatorPrompt({
+            directory: process.cwd(),
+            language: 'Chinese',
+            planMode: true, // 🔑 自动追加 Plan Mode 指令
+        });
 
         const planAgent = new Agent({
             provider: ProviderRegistry.createFromEnv('qwen3.5-plus', { temperature: 0.3 }),
-            systemPrompt: basePrompt,
+            systemPrompt: planSystemPrompt,
             planMode: true, // 🔑 启用 Plan 模式（只读工具 + plan_create）
             requestTimeout: parseRequestTimeoutMs(process.env.AGENT_REQUEST_TIMEOUT_MS),
             stream: true,
@@ -272,6 +280,7 @@ async function runPlanDemo() {
         console.log('-'.repeat(60));
 
         // ==================== 获取 Plan 文档 ====================
+        // 使用 getBySession(sessionId) O(1) 查询
         const sessionId = planAgent.getSessionId();
         const plan = await planStorage.getBySession(sessionId);
 
@@ -283,6 +292,7 @@ async function runPlanDemo() {
 
         console.log(`\n${GREEN}📄 找到 Plan:${RESET}`);
         console.log(`   ID: ${plan.meta.id}`);
+        console.log(`   Session: ${plan.meta.sessionId}`);
         console.log(`   标题: ${plan.meta.title}`);
         console.log(`   文件: ${plan.meta.filePath}`);
 
@@ -291,9 +301,16 @@ async function runPlanDemo() {
         console.log(`${MAGENTA}🚀 阶段 2: 执行模式 - Agent 根据 Plan 执行${RESET}`);
         console.log(`${MAGENTA}══════════════════════════════════════════════════════════${RESET}\n`);
 
+        // 执行模式使用 operatorPrompt({ planMode: false }) 或不传 planMode
+        const executionSystemPrompt = operatorPrompt({
+            directory: process.cwd(),
+            language: 'Chinese',
+            planMode: false, // 不包含 Plan Mode 指令
+        });
+
         const executionAgent = new Agent({
             provider: ProviderRegistry.createFromEnv('qwen3.5-plus', { temperature: 0.3 }),
-            systemPrompt: basePrompt,
+            systemPrompt: executionSystemPrompt,
             // planMode: false, // 默认就是执行模式（完整工具）
             requestTimeout: parseRequestTimeoutMs(process.env.AGENT_REQUEST_TIMEOUT_MS),
             stream: true,
