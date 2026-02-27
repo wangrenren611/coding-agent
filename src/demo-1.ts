@@ -291,7 +291,7 @@ async function demo1() {
         // });
 
         // 执行查询
-        const query = process.argv[2] || '处理："./query.text"';
+        const query = process.argv[2] || '这个是我执行demo-plan的过程，分析问题，找出解决方案："./query.text"';
         console.log(`${CYAN}❯${RESET} ${query}\n`);
 
         const response = await agent.execute(query);
