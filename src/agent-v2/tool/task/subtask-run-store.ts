@@ -61,6 +61,10 @@ export async function saveSubTaskRunRecord(
     run: Omit<SubTaskRunData, 'createdAt' | 'updatedAt'>
 ): Promise<'memory_manager' | 'memory_fallback'> {
     if (memoryManager) {
+        // 确保 MemoryManager 已初始化
+        if (memoryManager.waitForInitialization) {
+            await memoryManager.waitForInitialization();
+        }
         await memoryManager.saveSubTaskRun(run);
         return 'memory_manager';
     }
@@ -80,6 +84,10 @@ export async function getSubTaskRunRecord(
     runId: string
 ): Promise<SubTaskRunData | null> {
     if (memoryManager) {
+        // 确保 MemoryManager 已初始化
+        if (memoryManager.waitForInitialization) {
+            await memoryManager.waitForInitialization();
+        }
         return memoryManager.getSubTaskRun(runId);
     }
     return subTaskRunFallbackStore.get(runId) || null;

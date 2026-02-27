@@ -105,6 +105,11 @@ export class Session {
     private async doInitialize(): Promise<void> {
         if (!this.memoryManager) return;
 
+        // 确保 MemoryManager 已初始化（如果支持 waitForInitialization）
+        if (this.memoryManager.waitForInitialization) {
+            await this.memoryManager.waitForInitialization();
+        }
+
         const existingSession = await this.memoryManager.getSession(this.sessionId);
 
         if (existingSession) {
