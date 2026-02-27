@@ -3,7 +3,13 @@ import { Agent } from './agent-v2/agent/agent';
 import { ProviderRegistry } from './providers';
 
 import fs from 'fs';
-import { AgentMessage, AgentMessageType, BaseAgentEvent, SubagentEventMessage } from './agent-v2/agent/stream-types';
+import {
+    AgentMessage,
+    AgentMessageType,
+    BaseAgentEvent,
+    SubagentEventMessage,
+    ToolCallCreatedMessage,
+} from './agent-v2/agent/stream-types';
 import { createMemoryManager } from './agent-v2';
 import { operatorPrompt } from './agent-v2/prompts/operator';
 
@@ -27,22 +33,229 @@ function parseRequestTimeoutMs(envValue: string | undefined): number {
     return parsed;
 }
 
+// ==================== 子 Agent 输出缓冲系统 ====================
+
+interface SubagentBuffer {
+    taskId: string;
+    subagentType: string;
+    callId?: string;
+    childSessionId: string;
+    lines: string[];
+    startTime: number;
+    status: 'running' | 'completed' | 'failed' | 'aborted';
+}
+
+// 子 Agent 输出缓冲区：按 task_id 存储
+const subagentBuffers = new Map<string, SubagentBuffer>();
+
+// 待匹配的 task 工具调用
+const pendingTaskCallIds: string[] = [];
+const taskIdToCallId = new Map<string, string>();
+
+// 活跃子 Agent 任务 ID 列表（按创建顺序）
+const activeTaskIds: string[] = [];
+
 // 状态追踪
 let lastStatusSignature = '';
 
 // 子 Agent 缩进前缀
-const SUBAGENT_PREFIX = '  '; // 2 空格缩进
-
-// 子 Agent 渲染状态：按 task_id 聚合打印
-const pendingTaskCallIds: string[] = [];
-const taskIdToCallId = new Map<string, string>();
-const openedSubagentTasks = new Set<string>();
-const closedSubagentTasks = new Set<string>();
+const SUBAGENT_PREFIX = '  ';
 
 /**
- * 处理单个事件消息
- * @param message 事件消息
- * @param indent 缩进级别（用于子 Agent 事件）
+ * 将消息格式化为带缩进的字符串
+ */
+function formatMessageWithIndent(message: BaseAgentEvent, indent: string): string[] {
+    const lines: string[] = [];
+
+    switch (message.type) {
+        case AgentMessageType.REASONING_START:
+            lines.push(`${indent}${GRAY}┌─ 💭 思考过程${RESET}`);
+            break;
+
+        case AgentMessageType.REASONING_DELTA:
+            // 推理增量内容，按行分割
+            if (message.payload.content) {
+                const content = message.payload.content;
+                lines.push(`${indent}${GRAY}${content}${RESET}`);
+            }
+            break;
+
+        case AgentMessageType.REASONING_COMPLETE:
+            lines.push(`${indent}${GRAY}└─ 思考完成${RESET}`);
+            lines.push('');
+            break;
+
+        case AgentMessageType.TEXT_START:
+            lines.push(`${indent}${GREEN}┌─ 🤖 回复${RESET}`);
+            break;
+
+        case AgentMessageType.TEXT_DELTA:
+            if (message.payload.content) {
+                const content = message.payload.content;
+                lines.push(`${indent}${content}`);
+            }
+            break;
+
+        case AgentMessageType.TEXT_COMPLETE:
+            lines.push(`${indent}${GREEN}└─ 回复完成${RESET}`);
+            break;
+
+        case AgentMessageType.TOOL_CALL_CREATED: {
+            const tools = (message as ToolCallCreatedMessage).payload.tool_calls.map(
+                (call) => `${call.toolName}(${call.args.slice(0, 50)}${call.args.length > 50 ? '...' : ''})`
+            );
+            lines.push(`${indent}${YELLOW}🔧 工具调用:${RESET} ${tools.join(', ')}`);
+            break;
+        }
+
+        case AgentMessageType.TOOL_CALL_RESULT: {
+            const status = message.payload.status === 'success' ? '✅' : '❌';
+            const resultPreview =
+                typeof message.payload.result === 'string'
+                    ? message.payload.result.slice(0, 100)
+                    : JSON.stringify(message.payload.result).slice(0, 100);
+            lines.push(`${indent}${status} 工具结果 [${message.payload.callId}]: ${resultPreview}`);
+            break;
+        }
+
+        case AgentMessageType.STATUS: {
+            const state = message.payload.state;
+            const statusIcons: Record<string, string> = {
+                idle: '⏸️',
+                thinking: '🤔',
+                running: '▶️',
+                completed: '✅',
+                failed: '❌',
+                aborted: '🛑',
+                retrying: '🔄',
+            };
+            const icon = statusIcons[state] || '📋';
+            lines.push(
+                `${indent}${icon} 状态: ${state}${message.payload.message ? ` - ${message.payload.message}` : ''}`
+            );
+            break;
+        }
+
+        case AgentMessageType.USAGE_UPDATE: {
+            const usage = message.payload.usage;
+            lines.push(
+                `${indent}${GRAY}📊 Token: ${CYAN}${usage.total_tokens}${RESET} ` +
+                    `(输入: ${usage.prompt_tokens}, 输出: ${usage.completion_tokens})`
+            );
+            break;
+        }
+
+        case AgentMessageType.ERROR:
+            lines.push(`${indent}❌ 错误: ${message.payload.error}`);
+            if (message.payload.phase) {
+                lines.push(`${indent}   阶段: ${message.payload.phase}`);
+            }
+            break;
+
+        case AgentMessageType.CODE_PATCH:
+            lines.push(`${indent}📝 代码变更: ${message.payload.path}`);
+            break;
+
+        default:
+            break;
+    }
+
+    return lines;
+}
+
+/**
+ * 缓冲子 Agent 事件
+ */
+function bufferSubagentEvent(message: SubagentEventMessage) {
+    const { task_id, subagent_type, child_session_id, event } = message.payload;
+
+    // 关联 task_id 和 call_id
+    if (!taskIdToCallId.has(task_id) && pendingTaskCallIds.length > 0) {
+        const matchedCallId = pendingTaskCallIds.shift();
+        if (matchedCallId) {
+            taskIdToCallId.set(task_id, matchedCallId);
+        }
+    }
+
+    // 获取或创建缓冲区
+    let buffer = subagentBuffers.get(task_id);
+    if (!buffer) {
+        buffer = {
+            taskId: task_id,
+            subagentType: subagent_type,
+            callId: taskIdToCallId.get(task_id),
+            childSessionId: child_session_id,
+            lines: [],
+            startTime: Date.now(),
+            status: 'running',
+        };
+        subagentBuffers.set(task_id, buffer);
+        activeTaskIds.push(task_id);
+    }
+
+    const indent = SUBAGENT_PREFIX;
+
+    // 处理嵌套的子 Agent 事件
+    if (event.type === AgentMessageType.SUBAGENT_EVENT) {
+        // 递归处理嵌套子 Agent（暂时简化处理）
+        const nestedEvent = event as SubagentEventMessage;
+        const nestedLines = formatMessageWithIndent(nestedEvent.payload.event as BaseAgentEvent, indent + indent);
+        buffer.lines.push(...nestedLines);
+    } else {
+        // 普通事件
+        const lines = formatMessageWithIndent(event as BaseAgentEvent, indent);
+        buffer.lines.push(...lines);
+
+        // 检查终态
+        if (event.type === AgentMessageType.STATUS) {
+            const state = event.payload.state;
+            if (['completed', 'failed', 'aborted'].includes(state)) {
+                buffer.status = state as 'completed' | 'failed' | 'aborted';
+                flushSubagentBuffer(task_id);
+            }
+        }
+    }
+}
+
+/**
+ * 输出单个子 Agent 的缓冲内容
+ */
+function flushSubagentBuffer(taskId: string) {
+    const buffer = subagentBuffers.get(taskId);
+    if (!buffer) return;
+
+    const indent = '';
+    const statusIcon = buffer.status === 'completed' ? '✅' : buffer.status === 'failed' ? '❌' : '🛑';
+
+    // 输出任务头部
+    process.stdout.write('\n');
+    console.log(`${indent}${BLUE}┌─ 🔄 子 Agent [${buffer.subagentType}] ${statusIcon}${RESET}`);
+    console.log(`${indent}${BLUE}│ task_id: ${buffer.taskId}${RESET}`);
+    if (buffer.callId) {
+        console.log(`${indent}${BLUE}│ tool_call: ${buffer.callId}${RESET}`);
+    }
+    const elapsed = Math.floor((Date.now() - buffer.startTime) / 1000);
+    console.log(`${indent}${BLUE}│ 耗时: ${elapsed}s${RESET}`);
+    console.log(`${indent}${BLUE}├─────────────────────────────────────────${RESET}`);
+
+    // 输出缓冲的内容
+    for (const line of buffer.lines) {
+        console.log(line);
+    }
+
+    // 输出任务尾部
+    console.log(`${indent}${BLUE}└─────────────────────────────────────────${RESET}`);
+
+    // 清理
+    subagentBuffers.delete(taskId);
+    const idx = activeTaskIds.indexOf(taskId);
+    if (idx >= 0) {
+        activeTaskIds.splice(idx, 1);
+    }
+}
+
+/**
+ * 处理主 Agent 事件（实时输出）
  */
 function handleSingleMessage(message: BaseAgentEvent, indent: string = '') {
     switch (message.type) {
@@ -81,6 +294,7 @@ function handleSingleMessage(message: BaseAgentEvent, indent: string = '') {
             const tools = message.payload.tool_calls.map(
                 (call) => `${call.toolName}(${call.args.slice(0, 50)}${call.args.length > 50 ? '...' : ''})`
             );
+            // 记录 task 类型的工具调用，用于关联子 Agent
             for (const call of message.payload.tool_calls) {
                 if (call.toolName === 'task') {
                     pendingTaskCallIds.push(call.callId);
@@ -90,13 +304,6 @@ function handleSingleMessage(message: BaseAgentEvent, indent: string = '') {
             console.log(`${indent}${YELLOW}🔧 工具调用:${RESET}`, tools.join(', '));
             break;
         }
-
-        // case AgentMessageType.TOOL_CALL_STREAM:
-        //     // 工具执行中的流式输出（如终端输出）
-        //     if (message.payload.output) {
-        //         process.stdout.write(`${indent}${GRAY}${message.payload.output}${RESET}`);
-        //     }
-        //     break;
 
         case AgentMessageType.TOOL_CALL_RESULT: {
             const status = message.payload.status === 'success' ? '✅' : '❌';
@@ -135,14 +342,11 @@ function handleSingleMessage(message: BaseAgentEvent, indent: string = '') {
         // ==================== Token 使用量更新 ====================
         case AgentMessageType.USAGE_UPDATE: {
             const usage = message.payload.usage;
-            const cumulative = message.payload.cumulative;
-
             process.stdout.write('\n');
             console.log(
                 `${indent}${GRAY}📊 Token 使用: ` +
                     `${CYAN}${usage.total_tokens}${RESET} ` +
-                    `(输入: ${usage.prompt_tokens}, 输出: ${usage.completion_tokens})` +
-                    (cumulative ? ` | 累计: ${cumulative.total_tokens}` : '')
+                    `(输入: ${usage.prompt_tokens}, 输出: ${usage.completion_tokens})`
             );
             break;
         }
@@ -164,70 +368,21 @@ function handleSingleMessage(message: BaseAgentEvent, indent: string = '') {
             break;
 
         default:
-            // 未处理的消息类型
             break;
     }
 }
 
 /**
- * 处理子 Agent 事件冒泡
- */
-function handleSubagentEvent(message: SubagentEventMessage, indent: string = '') {
-    const { task_id, subagent_type, child_session_id, event } = message.payload;
-
-    if (!taskIdToCallId.has(task_id) && pendingTaskCallIds.length > 0) {
-        const matchedCallId = pendingTaskCallIds.shift();
-        if (matchedCallId) {
-            taskIdToCallId.set(task_id, matchedCallId);
-        }
-    }
-
-    if (!openedSubagentTasks.has(task_id)) {
-        const linkedCallId = taskIdToCallId.get(task_id);
-        process.stdout.write('\n');
-        console.log(`${indent}${BLUE}┌─ 🔄 子 Agent [${subagent_type}]${RESET}`);
-        console.log(`${indent}${BLUE}│ task_id: ${task_id}${RESET}`);
-        if (linkedCallId) {
-            console.log(`${indent}${BLUE}│ tool_call: ${linkedCallId}${RESET}`);
-        }
-        console.log(`${indent}${BLUE}│ child_session: ${child_session_id}${RESET}`);
-        console.log(`${indent}${BLUE}├─────────────────────────────────────────${RESET}`);
-        openedSubagentTasks.add(task_id);
-    }
-
-    const childIndent = indent + SUBAGENT_PREFIX;
-
-    // 处理内部事件
-    if (event.type === AgentMessageType.SUBAGENT_EVENT) {
-        // 如果内部事件也是 SUBAGENT_EVENT，递归处理
-        handleSubagentEvent(event as SubagentEventMessage, childIndent);
-    } else {
-        // 普通事件，带缩进处理
-        handleSingleMessage(event as BaseAgentEvent, childIndent);
-
-        // 子 Agent 事件尾（在终态时打印）
-        if (
-            event.type === AgentMessageType.STATUS &&
-            !closedSubagentTasks.has(task_id) &&
-            ['completed', 'failed', 'aborted'].includes(event.payload.state)
-        ) {
-            console.log(`${indent}${BLUE}└─────────────────────────────────────────${RESET}`);
-            closedSubagentTasks.add(task_id);
-        }
-    }
-}
-
-/**
- * 统一流式消息处理 - 支持推理内容和子 Agent 事件
+ * 统一流式消息处理 - 子 Agent 输出缓冲，主 Agent 实时输出
  */
 function handleStreamMessage(message: AgentMessage) {
     switch (message.type) {
-        // ==================== 子 Agent 事件冒泡 ====================
+        // ==================== 子 Agent 事件冒泡（缓冲） ====================
         case AgentMessageType.SUBAGENT_EVENT:
-            handleSubagentEvent(message);
+            bufferSubagentEvent(message);
             break;
 
-        // ==================== 其他事件（主 Agent） ====================
+        // ==================== 主 Agent 事件（实时输出） ====================
         default:
             handleSingleMessage(message as BaseAgentEvent);
             break;
