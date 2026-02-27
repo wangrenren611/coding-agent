@@ -55,9 +55,7 @@ describe('ToolExecutor Plan Mode 阻止逻辑', () => {
             });
 
             // 应该抛出错误
-            await expect(
-                executor.execute([writeToolCall], 'msg-1', 'test content')
-            ).rejects.toThrow();
+            await expect(executor.execute([writeToolCall], 'msg-1', 'test content')).rejects.toThrow();
 
             try {
                 await executor.execute([writeToolCall], 'msg-1', 'test content');
@@ -76,9 +74,9 @@ describe('ToolExecutor Plan Mode 阻止逻辑', () => {
                 command: 'echo test',
             });
 
-            await expect(
-                executor.execute([bashToolCall], 'msg-1', 'test content')
-            ).rejects.toThrow(LLMResponseInvalidError);
+            await expect(executor.execute([bashToolCall], 'msg-1', 'test content')).rejects.toThrow(
+                LLMResponseInvalidError
+            );
         });
 
         it('Plan Mode 下应该阻止 precise_replace 工具', async () => {
@@ -91,9 +89,9 @@ describe('ToolExecutor Plan Mode 阻止逻辑', () => {
                 newText: 'new',
             });
 
-            await expect(
-                executor.execute([editToolCall], 'msg-1', 'test content')
-            ).rejects.toThrow(LLMResponseInvalidError);
+            await expect(executor.execute([editToolCall], 'msg-1', 'test content')).rejects.toThrow(
+                LLMResponseInvalidError
+            );
         });
 
         it('Plan Mode 下应该阻止 batch_replace 工具', async () => {
@@ -105,9 +103,9 @@ describe('ToolExecutor Plan Mode 阻止逻辑', () => {
                 replacements: [],
             });
 
-            await expect(
-                executor.execute([batchToolCall], 'msg-1', 'test content')
-            ).rejects.toThrow(LLMResponseInvalidError);
+            await expect(executor.execute([batchToolCall], 'msg-1', 'test content')).rejects.toThrow(
+                LLMResponseInvalidError
+            );
         });
 
         it('Plan Mode 下应该允许 read_file 工具', async () => {
@@ -115,7 +113,7 @@ describe('ToolExecutor Plan Mode 阻止逻辑', () => {
             const executor = new ToolExecutor(config);
 
             const readToolCall = createToolCall('read_file', {
-                filePath: '/etc/hosts',  // 这个文件通常存在
+                filePath: '/etc/hosts', // 这个文件通常存在
             });
 
             // 这个应该不会抛出 Plan Mode 错误（可能因为文件不存在失败，但不是 Plan Mode 阻止）
@@ -212,7 +210,7 @@ describe('ToolExecutor Plan Mode 阻止逻辑', () => {
         it('应该正确传递 workingDirectory', async () => {
             const customWorkingDir = '/custom/working/dir';
             const registry = new ToolRegistry({ workingDirectory: customWorkingDir });
-            
+
             const config: ToolExecutorConfig = {
                 toolRegistry: registry,
                 sessionId: 'test-session',
@@ -225,7 +223,7 @@ describe('ToolExecutor Plan Mode 阻止逻辑', () => {
             };
 
             new ToolExecutor(config);
-            
+
             // 验证 registry 的 workingDirectory 被正确设置
             expect(registry.workingDirectory).toBe(customWorkingDir);
         });
@@ -235,7 +233,7 @@ describe('ToolExecutor Plan Mode 阻止逻辑', () => {
         it('Plan Mode 工具注册表不应该包含写工具', () => {
             const planModeRegistry = createPlanModeToolRegistry({ workingDirectory: process.cwd() });
             const tools = planModeRegistry.toLLMTools();
-            const toolNames = tools.map(t => t.function.name);
+            const toolNames = tools.map((t) => t.function.name);
 
             expect(toolNames).not.toContain('write_file');
             expect(toolNames).not.toContain('bash');
@@ -246,7 +244,7 @@ describe('ToolExecutor Plan Mode 阻止逻辑', () => {
         it('Plan Mode 工具注册表应该包含只读工具', () => {
             const planModeRegistry = createPlanModeToolRegistry({ workingDirectory: process.cwd() });
             const tools = planModeRegistry.toLLMTools();
-            const toolNames = tools.map(t => t.function.name);
+            const toolNames = tools.map((t) => t.function.name);
 
             expect(toolNames).toContain('read_file');
             expect(toolNames).toContain('glob');
@@ -257,7 +255,7 @@ describe('ToolExecutor Plan Mode 阻止逻辑', () => {
         it('默认工具注册表应该包含所有工具', () => {
             const defaultRegistry = createDefaultToolRegistry({ workingDirectory: process.cwd() });
             const tools = defaultRegistry.toLLMTools();
-            const toolNames = tools.map(t => t.function.name);
+            const toolNames = tools.map((t) => t.function.name);
 
             expect(toolNames).toContain('read_file');
             expect(toolNames).toContain('write_file');
@@ -278,9 +276,7 @@ describe('ToolExecutor 辅助方法', () => {
             const executor = new ToolExecutor(config);
 
             // 空工具列表应该抛出验证错误
-            await expect(
-                executor.execute([], 'msg-1', 'test content')
-            ).rejects.toThrow();
+            await expect(executor.execute([], 'msg-1', 'test content')).rejects.toThrow();
         });
     });
 });

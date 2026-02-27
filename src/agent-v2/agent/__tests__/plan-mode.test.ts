@@ -18,11 +18,13 @@ class MockProvider {
     async generate(_messages: unknown[], _options?: LLMGenerateOptions) {
         this.callCount++;
         const response: LLMResponse = {
-            messages: [{
-                messageId: 'msg-1',
-                role: 'assistant',
-                content: 'Hello',
-            }],
+            messages: [
+                {
+                    messageId: 'msg-1',
+                    role: 'assistant',
+                    content: 'Hello',
+                },
+            ],
             usage: { inputTokens: 10, outputTokens: 5 },
             finishReason: 'stop',
         };
@@ -70,7 +72,7 @@ describe('Agent Plan Mode', () => {
             });
 
             const messages = agent.getMessages();
-            const systemMessage = messages.find(m => m.role === 'system');
+            const systemMessage = messages.find((m) => m.role === 'system');
 
             expect(systemMessage).toBeDefined();
             expect(systemMessage?.content).toContain('Plan Mode');
@@ -90,7 +92,7 @@ describe('Agent Plan Mode', () => {
             });
 
             const messages = agent.getMessages();
-            const systemMessage = messages.find(m => m.role === 'system');
+            const systemMessage = messages.find((m) => m.role === 'system');
 
             expect(systemMessage).toBeDefined();
             expect(systemMessage?.content).not.toContain('Plan Mode');
@@ -109,7 +111,7 @@ describe('Agent Plan Mode', () => {
             });
 
             const messages = agent.getMessages();
-            const systemMessage = messages.find(m => m.role === 'system');
+            const systemMessage = messages.find((m) => m.role === 'system');
 
             expect(systemMessage).toBeDefined();
             expect(systemMessage?.content).not.toContain('Plan Mode');
@@ -129,7 +131,7 @@ describe('Agent Plan Mode', () => {
             });
 
             const messages = agent.getMessages();
-            const systemMessage = messages.find(m => m.role === 'system');
+            const systemMessage = messages.find((m) => m.role === 'system');
 
             // 检查关键指令
             expect(systemMessage?.content).toContain('MUST');
@@ -150,7 +152,7 @@ describe('Agent Plan Mode', () => {
             });
 
             const messages = agent.getMessages();
-            const systemMessage = messages.find(m => m.role === 'system');
+            const systemMessage = messages.find((m) => m.role === 'system');
 
             expect(systemMessage?.content).toContain('write_file');
             expect(systemMessage?.content).toContain('FORBIDDEN');
@@ -170,7 +172,7 @@ describe('Agent Plan Mode', () => {
             });
 
             const messages = agent.getMessages();
-            const systemMessage = messages.find(m => m.role === 'system');
+            const systemMessage = messages.find((m) => m.role === 'system');
 
             expect(systemMessage?.content).toContain('plan_create');
             expect(systemMessage?.content).toContain('Implementation Steps');

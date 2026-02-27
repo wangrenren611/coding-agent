@@ -497,7 +497,9 @@ describe('Agent 完成条件判断测试', () => {
                 (m) =>
                     m?.role === 'assistant' &&
                     Array.isArray(m?.tool_calls) &&
-                    m.tool_calls.some((call: { id?: string }) => typeof call?.id !== 'string' || call.id.trim().length === 0)
+                    m.tool_calls.some(
+                        (call: { id?: string }) => typeof call?.id !== 'string' || call.id.trim().length === 0
+                    )
             );
             expect(malformedAssistant).toBeUndefined();
         });

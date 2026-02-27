@@ -150,10 +150,7 @@ export const createDefaultToolRegistry = (
  * @param config 工具注册表配置
  * @returns 配置好的 Plan 模式工具注册表
  */
-export const createPlanModeToolRegistry = (
-    config: ToolRegistryConfig,
-    provider?: LLMProvider
-) => {
+export const createPlanModeToolRegistry = (config: ToolRegistryConfig, provider?: LLMProvider) => {
     const registryConfig: ToolRegistryConfig = {
         workingDirectory: config.workingDirectory,
         planBaseDir: config.planBaseDir,

@@ -9,19 +9,10 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { Agent } from '../../agent/agent';
 import { ToolRegistry } from '../../tool/registry';
-import {
-    createPlanModeToolRegistry,
-    createDefaultToolRegistry,
-    getPlanModeTools,
-    getDefaultTools,
-} from '../../tool';
+import { createPlanModeToolRegistry, createDefaultToolRegistry, getPlanModeTools, getDefaultTools } from '../../tool';
 import { PlanCreateTool } from '../tools';
 import { FilePlanStorage, createPlanStorage, getPlanFilePath, PlanStorageError } from '../storage';
-import {
-    isToolAllowedInPlanMode,
-    READ_ONLY_TOOLS,
-    BLOCKED_TOOL_PATTERNS,
-} from '../plan-mode';
+import { isToolAllowedInPlanMode, READ_ONLY_TOOLS, BLOCKED_TOOL_PATTERNS } from '../plan-mode';
 import { operatorPrompt } from '../../prompts/operator';
 import type { ToolContext } from '../../tool/base';
 import type { LLMGenerateOptions, LLMResponse, LLMProvider } from '../../../providers/types';
