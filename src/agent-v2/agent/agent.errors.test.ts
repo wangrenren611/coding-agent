@@ -44,7 +44,7 @@ import {
 } from './errors';
 
 import { ErrorClassifier } from './error-classifier';
-import { AGENT_FAILURE_CODES, AgentFailureCode } from './types';
+import { AGENT_FAILURE_CODES } from './types';
 
 // Mock Provider
 class MockProvider {
@@ -54,7 +54,7 @@ class MockProvider {
     public responseIndex = 0;
     public responseDelay = 0;
 
-    async generate(messages: unknown[]) {
+    async generate(_messages: unknown[]) {
         this.callCount++;
 
         // 模拟延迟
@@ -556,7 +556,7 @@ describe('Agent 错误抛出测试', () => {
         it('缺少 provider 应该抛出 AgentConfigurationError', () => {
             expect(() => {
                 new Agent({
-                    provider: null as any,
+                    provider: null as unknown as LLMProvider,
                     systemPrompt: 'Test',
                 });
             }).toThrow(AgentConfigurationError);
@@ -566,7 +566,7 @@ describe('Agent 错误抛出测试', () => {
     describe('验证错误', () => {
         it('空输入应该抛出 AgentValidationError', async () => {
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -577,7 +577,7 @@ describe('Agent 错误抛出测试', () => {
 
         it('纯空白输入应该抛出 AgentValidationError', async () => {
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -593,7 +593,7 @@ describe('Agent 错误抛出测试', () => {
             mockProvider.responseDelay = 3000;
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -627,7 +627,7 @@ describe('Agent 错误抛出测试', () => {
             };
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -660,7 +660,7 @@ describe('Agent 错误抛出测试', () => {
             };
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -701,7 +701,7 @@ describe('Agent 错误抛出测试', () => {
             ];
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -724,7 +724,7 @@ describe('Agent 错误抛出测试', () => {
             ];
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -739,7 +739,7 @@ describe('Agent 错误抛出测试', () => {
     describe('成功场景', () => {
         it('正常执行应该返回 completed 状态', async () => {
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,

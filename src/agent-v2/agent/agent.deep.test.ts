@@ -9,7 +9,6 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Agent } from './agent';
-import { ProviderRegistry } from '../../providers/registry';
 import { createMemoryManager } from '../memory';
 import { KimiAdapter } from '../../providers/adapters/kimi';
 import { StandardAdapter } from '../../providers/adapters/standard';
@@ -64,7 +63,7 @@ describe('Agent 参数传递深度测试', () => {
     describe('thinking 参数传递', () => {
         it('应该在 AgentOptions 中接受 thinking 参数', () => {
             const options: AgentOptions = {
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 thinking: true,
             };
 
@@ -79,7 +78,7 @@ describe('Agent 参数传递深度测试', () => {
             await memoryManager.initialize();
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'You are a helpful assistant.',
                 thinking: true,
                 stream: false,
@@ -102,7 +101,7 @@ describe('Agent 参数传递深度测试', () => {
             await memoryManager.initialize();
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'You are a helpful assistant.',
                 thinking: false,
                 stream: false,
@@ -124,7 +123,7 @@ describe('Agent 参数传递深度测试', () => {
             await memoryManager.initialize();
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'You are a helpful assistant.',
                 stream: false,
                 memoryManager,
@@ -147,7 +146,7 @@ describe('Agent 参数传递深度测试', () => {
             await memoryManager.initialize();
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'You are a helpful assistant.',
                 stream: false,
                 memoryManager,
@@ -168,7 +167,7 @@ describe('Agent 参数传递深度测试', () => {
             await memoryManager.initialize();
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'You are a helpful assistant.',
                 stream: false,
                 memoryManager,
@@ -278,7 +277,7 @@ describe('Session 逻辑测试', () => {
         await memoryManager.initialize();
 
         const agent = new Agent({
-            provider: mockProvider as any,
+            provider: mockProvider as unknown as LLMProvider,
             systemPrompt: 'You are a helpful assistant.',
             stream: false,
             memoryManager,
@@ -304,13 +303,13 @@ describe('Session 逻辑测试', () => {
         await memoryManager2.initialize();
 
         const agent1 = new Agent({
-            provider: mockProvider as any,
+            provider: mockProvider as unknown as LLMProvider,
             stream: false,
             memoryManager: memoryManager1,
         });
 
         const agent2 = new Agent({
-            provider: mockProvider as any,
+            provider: mockProvider as unknown as LLMProvider,
             stream: false,
             memoryManager: memoryManager2,
         });

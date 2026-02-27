@@ -29,7 +29,7 @@ import { Session } from '../session';
 import { ToolRegistry } from '../tool/registry';
 import { EventBus, EventType } from '../eventbus';
 import { Message } from '../session/types';
-import { createDefaultToolRegistry } from '../tool';
+import { createDefaultToolRegistry, createPlanModeToolRegistry } from '../tool';
 
 import {
     AgentAbortedError,
@@ -117,8 +117,11 @@ export class Agent {
         this.inputValidator = new InputValidator();
         this.errorClassifier = new ErrorClassifier();
 
+        // 系统提示词由调用者构建（如 operatorPrompt），Agent 不再内部处理 planMode
+        const systemPrompt = config.systemPrompt ?? '';
+
         this.session = new Session({
-            systemPrompt: config.systemPrompt ?? '',
+            systemPrompt,
             memoryManager: config.memoryManager,
             sessionId: config.sessionId,
             enableCompaction: config.enableCompaction,
@@ -126,8 +129,22 @@ export class Agent {
             provider: this.provider,
         });
 
-        this.toolRegistry =
-            config.toolRegistry ?? createDefaultToolRegistry({ workingDirectory: process.cwd() }, this.provider);
+        // 根据 planMode 选择不同的工具注册表
+        if (config.toolRegistry) {
+            this.toolRegistry = config.toolRegistry;
+        } else if (config.planMode) {
+            // Plan 模式使用独立的只读工具注册表
+            this.toolRegistry = createPlanModeToolRegistry(
+                { workingDirectory: process.cwd(), planBaseDir: config.planBaseDir },
+                this.provider
+            );
+        } else {
+            // 普通模式使用完整工具注册表
+            this.toolRegistry = createDefaultToolRegistry(
+                { workingDirectory: process.cwd(), planBaseDir: config.planBaseDir },
+                this.provider
+            );
+        }
         this.configureToolEventBridge();
 
         this.agentState = new AgentState({
@@ -176,6 +193,7 @@ export class Agent {
             sessionId: this.session.getSessionId(),
             memoryManager: this.session.getMemoryManager(),
             streamCallback: this.streamCallback,
+            planMode: config.planMode,
             onToolCallCreated: (toolCalls, messageId, content) =>
                 this.emitter.emitToolCallCreated(toolCalls, messageId, content),
             onToolCallStream: (toolCallId, output, messageId) =>

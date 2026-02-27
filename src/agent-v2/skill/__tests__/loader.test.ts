@@ -2,8 +2,8 @@
  * Tests for skill/loader.ts
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { SkillLoader, getSkillLoader, initializeSkillLoader } from '../loader';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { SkillLoader, getSkillLoader } from '../loader';
 import {
     SkillTestEnvironment,
     SAMPLE_SKILL_CONTENT,
