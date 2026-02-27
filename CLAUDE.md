@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> Coding Agent 项目开发指南 - 为 Claude Code 提供项目上下文
+> Coding Agent 项目开发指南 
 
 ## 项目概述
 
@@ -22,32 +22,7 @@ Coding Agent 是一个生产级的 AI 编码助手框架，采用**协调器模�
 - **Vitest** - 单元测试框架
 - **Zod** - 运行时类型验证
 
-## 项目结构
 
-```
-coding-agent/
-├── src/
-│   ├── agent-v2/           # Agent v2 核心实现
-│   │   ├── agent/          # Agent 引擎
-│   │   │   ├── core/       # 核心组件 (状态、LLM调用、工具执行、重试策略)
-│   │   │   ├── agent.ts    # Agent 主类
-│   │   │   ├── types.ts    # 类型定义
-│   │   │   └── stream-processor.ts  # 流式处理
-│   │   ├── session/        # 会话管理
-│   │   ├── memory/         # 持久化存储
-│   │   ├── tool/           # 工具系统
-│   │   ├── eventbus/       # 事件总线
-│   │   ├── prompts/        # 提示词模板
-│   │   └── util/           # 工具函数
-│   ├── providers/          # LLM Provider 层
-│   │   ├── adapters/       # Provider 适配器
-│   │   ├── http/           # HTTP 客户端
-│   │   └── registry/       # Provider 注册表
-│   └── cli/                # CLI 应用
-├── docs/                   # 文档
-├── data/                   # 运行时数据
-└── test-agent/             # 测试适配器
-```
 
 ## 核心架构
 
@@ -135,36 +110,6 @@ pnpm cli
 - 使用 Vitest 的 `describe`、`it`、`expect`
 - 每个测试应该独立，不依赖其他测试的状态
 
-## 重要文件路径
-
-### Agent 核心
-
-- `src/agent-v2/agent/agent.ts` - Agent 主类
-- `src/agent-v2/agent/core/agent-state.ts` - 状态管理
-- `src/agent-v2/agent/core/llm-caller.ts` - LLM 调用
-- `src/agent-v2/agent/core/tool-executor.ts` - 工具执行
-- `src/agent-v2/agent/core/retry-strategy.ts` - 重试策略
-
-### 工具系统
-
-- `src/agent-v2/tool/registry.ts` - 工具注册表
-- `src/agent-v2/tool/base.ts` - 工具基类
-- `src/agent-v2/tool/file.ts` - 文件操作工具
-- `src/agent-v2/tool/bash.ts` - Shell 执行工具
-- `src/agent-v2/tool/grep.ts` - 搜索工具
-- `src/agent-v2/tool/task.ts` - 子任务工具
-
-### Provider 层
-
-- `src/providers/registry.ts` - Provider 注册表
-- `src/providers/openai-compatible.ts` - OpenAI 兼容 Provider
-- `src/providers/adapters/` - 各厂商适配器
-
-### 会话与存储
-
-- `src/agent-v2/session/index.ts` - 会话管理
-- `src/agent-v2/session/compaction.ts` - 上下文压缩
-- `src/agent-v2/memory/file-memory.ts` - 文件持久化
 
 ## 内置工具列表
 

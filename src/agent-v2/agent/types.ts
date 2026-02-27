@@ -128,4 +128,8 @@ export interface AgentOptions {
     onValidationViolation?: (result: ValidationResult) => void;
     /** 最大循环次数（默认 3000） */
     maxLoops?: number;
+    /** Plan 模式（只读模式，只能使用只读工具） */
+    planMode?: boolean;
+    /** Plan 存储目录（默认使用 process.cwd()） */
+    planBaseDir?: string;
 }

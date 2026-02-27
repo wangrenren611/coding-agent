@@ -7,6 +7,7 @@
  * 1. 执行工具调用
  * 2. 记录工具结果
  * 3. 敏感信息脱敏
+ * 4. Plan 模式工具限制
  */
 
 import { v4 as uuid } from 'uuid';
@@ -19,6 +20,7 @@ import type { Message } from '../../session/types';
 import { sanitizeToolResult as sanitizeToolResultUtil, toolResultToString } from '../../security';
 import { safeParse } from '../../util';
 import { LLMResponseInvalidError } from '../errors';
+import { READ_ONLY_TOOLS, BLOCKED_TOOL_PATTERNS } from '../../plan/plan-mode';
 
 const PATCH_PATH_KEYS = new Set(['filePath', 'path', 'targetPath', 'fromPath', 'toPath']);
 const MAX_SNAPSHOT_BYTES = 300 * 1024;
@@ -43,6 +45,8 @@ export interface ToolExecutorConfig {
     memoryManager?: ToolContext['memoryManager'];
     /** 流式输出回调（用于子 Agent 事件冒泡） */
     streamCallback?: ToolContext['streamCallback'];
+    /** Plan 模式（只读模式） */
+    planMode?: boolean;
 
     // 回调
     /** 工具调用创建回调 */
@@ -93,6 +97,17 @@ export class ToolExecutor {
             throw error;
         }
 
+        // Plan 模式下检查工具是否允许执行
+        if (this.config.planMode) {
+            const blockedTools = this.getPlanModeBlockedTools(toolCalls);
+            if (blockedTools.length > 0) {
+                throw new LLMResponseInvalidError(
+                    `Plan Mode: Cannot execute write operations. Blocked tools: ${blockedTools.join(', ')}. ` +
+                    `Only read-only operations are allowed in Plan Mode.`
+                );
+            }
+        }
+
         // 触发工具调用创建回调
         this.config.onToolCallCreated?.(toolCalls, messageId, messageContent);
 
@@ -132,6 +147,7 @@ export class ToolExecutor {
             environment: process.env.NODE_ENV || 'development',
             platform: process.platform,
             time: new Date().toISOString(),
+            workingDirectory: process.cwd(),
         };
 
         if (this.config.memoryManager) {
@@ -143,6 +159,39 @@ export class ToolExecutor {
         }
 
         return context;
+    }
+
+    /**
+     * 获取 Plan 模式下被阻止的工具列表
+     */
+    private getPlanModeBlockedTools(toolCalls: ToolCall[]): string[] {
+        const blocked: string[] = [];
+        const allowedTools = new Set(READ_ONLY_TOOLS);
+
+        for (const toolCall of toolCalls) {
+            const toolName = toolCall.function?.name;
+            if (!toolName) continue;
+
+            // 检查黑名单模式
+            let isBlocked = false;
+            for (const pattern of BLOCKED_TOOL_PATTERNS) {
+                if (pattern.test(toolName)) {
+                    isBlocked = true;
+                    break;
+                }
+            }
+
+            // 检查白名单
+            if (!isBlocked && !allowedTools.has(toolName)) {
+                isBlocked = true;
+            }
+
+            if (isBlocked) {
+                blocked.push(toolName);
+            }
+        }
+
+        return blocked;
     }
 
     /**

@@ -258,6 +258,7 @@ async function demo1() {
             provider: ProviderRegistry.createFromEnv('glm-5', {
                 temperature: 0.3,
             }),
+            //  planMode: true,
             systemPrompt: operatorPrompt({
                 directory: process.cwd(),
                 language: 'Chinese',
@@ -268,7 +269,8 @@ async function demo1() {
             //    sessionId: 'agent-7',
             // sessionId: 'agent-8',
             // sessionId: 'agent-32',
-            sessionId: 'agent-37',
+            sessionId: 'agent-38.1',
+            // sessionId: 'agent-39',
             //   sessionId:'18a09614-bb1e-4f06-b685-d040ff08c3aa',
 
             stream: true,
@@ -289,7 +291,7 @@ async function demo1() {
         // });
 
         // 执行查询
-        const query = process.argv[2] || '你好，请介绍一下你自己';
+        const query = process.argv[2] || '这个是我执行demo-plan的过程，分析问题，找出解决方案："./query.text"';
         console.log(`${CYAN}❯${RESET} ${query}\n`);
 
         const response = await agent.execute(query);

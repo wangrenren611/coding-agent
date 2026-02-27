@@ -8,7 +8,6 @@ export default tseslint.config(
     ignores: [
       '**/dist/**',
       '**/node_modules/**',
-      '**/*.test.ts',
       '**/cli-ui/**/*',
       '**/cli-ink/**/*',
       '**/ui/cli/**/*',

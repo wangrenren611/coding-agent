@@ -31,6 +31,8 @@ export class ToolCallValidationError extends Error {
 export interface ToolRegistryConfig {
     /** 工作目录 */
     workingDirectory: string;
+    /** Plan 存储目录（默认使用 workingDirectory） */
+    planBaseDir?: string;
     /** 单个工具执行超时时间（毫秒，默认 300000） */
     toolTimeout?: number;
 }
@@ -54,6 +56,7 @@ export interface ToolEventCallbacks {
  */
 export class ToolRegistry {
     workingDirectory: string;
+    planBaseDir?: string;
     private tools: Map<string, BaseTool<z.ZodType>> = new Map();
     private toolTimeout: number;
     private eventCallbacks?: ToolEventCallbacks;
@@ -61,14 +64,17 @@ export class ToolRegistry {
 
     constructor(config: ToolRegistryConfig) {
         this.workingDirectory = config.workingDirectory;
+        this.planBaseDir = config.planBaseDir;
         this.toolTimeout = config.toolTimeout ?? DEFAULT_TOOL_TIMEOUT;
     }
 
     private buildToolContext(ctx?: ExecutionContext): ToolContext {
         return {
-            environment: this.workingDirectory,
+            environment: process.env.NODE_ENV || 'development',
             platform: process.platform,
             time: new Date().toISOString(),
+            workingDirectory: this.workingDirectory,
+            planBaseDir: this.planBaseDir,
             sessionId: ctx?.sessionId,
             memoryManager: ctx?.memoryManager,
             streamCallback: ctx?.streamCallback,
