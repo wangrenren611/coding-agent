@@ -14,7 +14,8 @@ export type BuildPlanModePromptOptions = {
  *
  * 合并了原 plan.txt 和 planModeInstruction 的内容
  */
-export const buildPlanModePrompt = (_options: BuildPlanModePromptOptions = {}): string => `
+export const buildPlanModePrompt = (_options: BuildPlanModePromptOptions = {}): string =>
+    `
 <system-reminder>
 # Plan Mode - System Reminder
 

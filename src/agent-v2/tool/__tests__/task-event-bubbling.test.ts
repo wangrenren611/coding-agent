@@ -112,8 +112,10 @@ describe('Subagent Event Bubbling', () => {
     let eventCollector: EventCollector;
     let toolContext: ToolContext;
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const withContext = <T extends { execute: (...args: any[]) => any }>(tool: T): T => {
         const rawExecute = tool.execute.bind(tool);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (tool as any).execute = (args?: unknown) => rawExecute(args as never, toolContext);
         return tool;
     };

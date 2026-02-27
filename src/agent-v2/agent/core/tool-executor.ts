@@ -103,7 +103,7 @@ export class ToolExecutor {
             if (blockedTools.length > 0) {
                 throw new LLMResponseInvalidError(
                     `Plan Mode: Cannot execute write operations. Blocked tools: ${blockedTools.join(', ')}. ` +
-                    `Only read-only operations are allowed in Plan Mode.`
+                        `Only read-only operations are allowed in Plan Mode.`
                 );
             }
         }

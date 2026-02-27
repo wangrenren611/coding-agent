@@ -24,12 +24,7 @@ import { Agent } from './agent-v2/agent/agent';
 import { ProviderRegistry } from './providers';
 import { createMemoryManager } from './agent-v2';
 import { operatorPrompt } from './agent-v2/prompts/operator';
-import {
-    AgentMessage,
-    AgentMessageType,
-    BaseAgentEvent,
-    SubagentEventMessage,
-} from './agent-v2/agent/stream-types';
+import { AgentMessage, AgentMessageType, BaseAgentEvent, SubagentEventMessage } from './agent-v2/agent/stream-types';
 import { createPlanStorage } from './agent-v2/plan';
 
 dotenv.config({ path: './.env.development' });

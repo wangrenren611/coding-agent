@@ -140,7 +140,8 @@ describe('Task tools', () => {
     let toolContext: ToolContext;
     const withContext = <T extends { execute: (...args: unknown[]) => unknown }>(tool: T): T => {
         const rawExecute = tool.execute.bind(tool);
-        (tool as unknown as { execute: (args?: unknown) => unknown }).execute = (args?: unknown) => rawExecute(args as never, toolContext);
+        (tool as unknown as { execute: (args?: unknown) => unknown }).execute = (args?: unknown) =>
+            rawExecute(args as never, toolContext);
         return tool;
     };
 

@@ -32,10 +32,7 @@ export class PlanCreateTool extends BaseTool<typeof planCreateSchema> {
     description = PLAN_CREATE_DESCRIPTION;
     schema = planCreateSchema;
 
-    async execute(
-        args: z.infer<typeof this.schema>,
-        context?: ToolContext
-    ): Promise<ToolResult> {
+    async execute(args: z.infer<typeof this.schema>, context?: ToolContext): Promise<ToolResult> {
         const sessionId = context?.sessionId;
         if (!sessionId) {
             return this.result({

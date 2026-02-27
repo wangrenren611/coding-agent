@@ -171,12 +171,7 @@ describe('Plan Tools', () => {
         });
 
         it('应该处理 planBaseDir 不存在的情况（自动创建）', async () => {
-            const nonExistentDir = path.join(
-                process.cwd(),
-                'test-plans-auto-create',
-                'nested',
-                'dir'
-            );
+            const nonExistentDir = path.join(process.cwd(), 'test-plans-auto-create', 'nested', 'dir');
             try {
                 const result = await tool.execute(
                     {

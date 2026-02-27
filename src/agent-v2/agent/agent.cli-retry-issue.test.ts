@@ -152,8 +152,16 @@ describe('CLI 场景：补偿重试超过限制后重新发送消息', () => {
             (m) => m.role === 'assistant' && (typeof m.content === 'string' ? m.content === '' : true)
         );
         expect(emptyAssistantInHistoryAfterFirst.length).toBeGreaterThan(0);
-        expect(emptyAssistantInHistoryAfterFirst.every((m: { excludedFromContext?: boolean; excludedReason?: string }) => m.excludedFromContext === true)).toBe(true);
-        expect(emptyAssistantInHistoryAfterFirst.every((m: { excludedFromContext?: boolean; excludedReason?: string }) => m.excludedReason === 'empty_response')).toBe(true);
+        expect(
+            emptyAssistantInHistoryAfterFirst.every(
+                (m: { excludedFromContext?: boolean; excludedReason?: string }) => m.excludedFromContext === true
+            )
+        ).toBe(true);
+        expect(
+            emptyAssistantInHistoryAfterFirst.every(
+                (m: { excludedFromContext?: boolean; excludedReason?: string }) => m.excludedReason === 'empty_response'
+            )
+        ).toBe(true);
 
         // 场景 2：用户重新发送新消息（使用同一个 sessionId）
         mockProvider.reset();
@@ -212,8 +220,16 @@ describe('CLI 场景：补偿重试超过限制后重新发送消息', () => {
             (m) => m.role === 'assistant' && (typeof m.content === 'string' ? m.content === '' : true)
         );
         expect(emptyAssistantInHistoryAfterSecond.length).toBeGreaterThan(0);
-        expect(emptyAssistantInHistoryAfterSecond.every((m: { excludedFromContext?: boolean; excludedReason?: string }) => m.excludedFromContext === true)).toBe(true);
-        expect(emptyAssistantInHistoryAfterSecond.every((m: { excludedFromContext?: boolean; excludedReason?: string }) => m.excludedReason === 'empty_response')).toBe(true);
+        expect(
+            emptyAssistantInHistoryAfterSecond.every(
+                (m: { excludedFromContext?: boolean; excludedReason?: string }) => m.excludedFromContext === true
+            )
+        ).toBe(true);
+        expect(
+            emptyAssistantInHistoryAfterSecond.every(
+                (m: { excludedFromContext?: boolean; excludedReason?: string }) => m.excludedReason === 'empty_response'
+            )
+        ).toBe(true);
     }, 15000);
 
     it('验证：补偿重试超过限制时，空响应消息应该被移除', async () => {
@@ -281,8 +297,16 @@ describe('CLI 场景：补偿重试超过限制后重新发送消息', () => {
             (m) => m.role === 'assistant' && (typeof m.content === 'string' ? m.content === '' : true)
         );
         expect(emptyAssistantInHistory.length).toBeGreaterThan(0);
-        expect(emptyAssistantInHistory.every((m: { excludedFromContext?: boolean; excludedReason?: string }) => m.excludedFromContext === true)).toBe(true);
-        expect(emptyAssistantInHistory.every((m: { excludedFromContext?: boolean; excludedReason?: string }) => m.excludedReason === 'empty_response')).toBe(true);
+        expect(
+            emptyAssistantInHistory.every(
+                (m: { excludedFromContext?: boolean; excludedReason?: string }) => m.excludedFromContext === true
+            )
+        ).toBe(true);
+        expect(
+            emptyAssistantInHistory.every(
+                (m: { excludedFromContext?: boolean; excludedReason?: string }) => m.excludedReason === 'empty_response'
+            )
+        ).toBe(true);
     }, 10000);
 
     it('深度测试：持久化场景 - 从持久化存储恢复后不应有空响应消息', async () => {
@@ -375,8 +399,16 @@ describe('CLI 场景：补偿重试超过限制后重新发送消息', () => {
             (m) => m.role === 'assistant' && (typeof m.content === 'string' ? m.content === '' : true)
         );
         expect(emptyAssistantInRestoredHistory.length).toBeGreaterThan(0);
-        expect(emptyAssistantInRestoredHistory.every((m: { excludedFromContext?: boolean; excludedReason?: string }) => m.excludedFromContext === true)).toBe(true);
-        expect(emptyAssistantInRestoredHistory.every((m: { excludedFromContext?: boolean; excludedReason?: string }) => m.excludedReason === 'empty_response')).toBe(true);
+        expect(
+            emptyAssistantInRestoredHistory.every(
+                (m: { excludedFromContext?: boolean; excludedReason?: string }) => m.excludedFromContext === true
+            )
+        ).toBe(true);
+        expect(
+            emptyAssistantInRestoredHistory.every(
+                (m: { excludedFromContext?: boolean; excludedReason?: string }) => m.excludedReason === 'empty_response'
+            )
+        ).toBe(true);
 
         // 执行第二次请求
         const result2 = await agent2.executeWithResult('Second message');
@@ -399,8 +431,16 @@ describe('CLI 场景：补偿重试超过限制后重新发送消息', () => {
             (m) => m.role === 'assistant' && (typeof m.content === 'string' ? m.content === '' : true)
         );
         expect(finalEmptyInHistory.length).toBeGreaterThan(0);
-        expect(finalEmptyInHistory.every((m: { excludedFromContext?: boolean; excludedReason?: string }) => m.excludedFromContext === true)).toBe(true);
-        expect(finalEmptyInHistory.every((m: { excludedFromContext?: boolean; excludedReason?: string }) => m.excludedReason === 'empty_response')).toBe(true);
+        expect(
+            finalEmptyInHistory.every(
+                (m: { excludedFromContext?: boolean; excludedReason?: string }) => m.excludedFromContext === true
+            )
+        ).toBe(true);
+        expect(
+            finalEmptyInHistory.every(
+                (m: { excludedFromContext?: boolean; excludedReason?: string }) => m.excludedReason === 'empty_response'
+            )
+        ).toBe(true);
     }, 15000);
 
     it('边界情况：如果 LLM 持续返回空响应，每次请求都会失败（这是预期行为）', async () => {
@@ -470,8 +510,16 @@ describe('CLI 场景：补偿重试超过限制后重新发送消息', () => {
             (m) => m.role === 'assistant' && (typeof m.content === 'string' ? m.content === '' : true)
         );
         expect(finalEmptyInHistory.length).toBeGreaterThan(0);
-        expect(finalEmptyInHistory.every((m: { excludedFromContext?: boolean; excludedReason?: string }) => m.excludedFromContext === true)).toBe(true);
-        expect(finalEmptyInHistory.every((m: { excludedFromContext?: boolean; excludedReason?: string }) => m.excludedReason === 'empty_response')).toBe(true);
+        expect(
+            finalEmptyInHistory.every(
+                (m: { excludedFromContext?: boolean; excludedReason?: string }) => m.excludedFromContext === true
+            )
+        ).toBe(true);
+        expect(
+            finalEmptyInHistory.every(
+                (m: { excludedFromContext?: boolean; excludedReason?: string }) => m.excludedReason === 'empty_response'
+            )
+        ).toBe(true);
 
         console.log('最终消息统计:', {
             total: finalMessages.length,

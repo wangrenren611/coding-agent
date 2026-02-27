@@ -5,12 +5,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import {
-    FilePlanStorage,
-    createPlanStorage,
-    getPlanFilePath,
-    PlanStorageError,
-} from '../storage';
+import { FilePlanStorage, createPlanStorage, getPlanFilePath, PlanStorageError } from '../storage';
 
 describe('Plan Storage', () => {
     const testDir = path.join(process.cwd(), 'test-plans-storage');

@@ -360,15 +360,25 @@ describe('Strategy Edge Cases', () => {
     });
 
     it('should handle empty content', () => {
-        expect(strategy.needsTruncation('', { maxLines: 10, maxBytes: 1000 } as unknown as TruncationOptions)).toBe(false);
+        expect(strategy.needsTruncation('', { maxLines: 10, maxBytes: 1000 } as unknown as TruncationOptions)).toBe(
+            false
+        );
 
-        const result = strategy.truncate('', { maxLines: 10, maxBytes: 1000, direction: 'head' } as unknown as TruncationOptions);
+        const result = strategy.truncate('', {
+            maxLines: 10,
+            maxBytes: 1000,
+            direction: 'head',
+        } as unknown as TruncationOptions);
         expect(result.content).toBe('');
     });
 
     it('should handle single very long line that exceeds byte limit', () => {
         const content = 'x'.repeat(10000);
-        const result = strategy.truncate(content, { maxLines: 100, maxBytes: 100, direction: 'head' } as unknown as TruncationOptions);
+        const result = strategy.truncate(content, {
+            maxLines: 100,
+            maxBytes: 100,
+            direction: 'head',
+        } as unknown as TruncationOptions);
 
         expect(result.removedBytes).toBeGreaterThan(0);
         expect(result.content.length).toBeLessThanOrEqual(100);
@@ -376,13 +386,19 @@ describe('Strategy Edge Cases', () => {
 
     it('should handle content with only newlines', () => {
         const content = '\n\n\n\n\n'.repeat(10);
-        expect(strategy.needsTruncation(content, { maxLines: 5, maxBytes: 100000 } as unknown as TruncationOptions)).toBe(true);
+        expect(
+            strategy.needsTruncation(content, { maxLines: 5, maxBytes: 100000 } as unknown as TruncationOptions)
+        ).toBe(true);
     });
 
     it('should handle lines exactly at byte boundary', () => {
         // Create content where each line is exactly 10 bytes
         const content = '1234567890\n'.repeat(100);
-        const result = strategy.truncate(content, { maxLines: 100, maxBytes: 55, direction: 'head' } as unknown as TruncationOptions);
+        const result = strategy.truncate(content, {
+            maxLines: 100,
+            maxBytes: 55,
+            direction: 'head',
+        } as unknown as TruncationOptions);
 
         // Should truncate due to byte limit
         expect(result.removedBytes).toBeDefined();
@@ -390,7 +406,11 @@ describe('Strategy Edge Cases', () => {
 
     it('should handle tail direction with single line', () => {
         const content = 'single line';
-        const result = strategy.truncate(content, { maxLines: 10, maxBytes: 100, direction: 'tail' } as unknown as TruncationOptions);
+        const result = strategy.truncate(content, {
+            maxLines: 10,
+            maxBytes: 100,
+            direction: 'tail',
+        } as unknown as TruncationOptions);
         expect(result.content).toBe('single line');
     });
 });

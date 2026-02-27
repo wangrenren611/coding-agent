@@ -101,11 +101,7 @@ export class FilePlanStorage implements PlanStorage {
         } catch (error) {
             // EEXIST 是预期错误（目录已存在），忽略
             if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
-                throw new PlanStorageError(
-                    `Failed to create directory: ${dir}`,
-                    'CREATE_DIR_FAILED',
-                    error as Error
-                );
+                throw new PlanStorageError(`Failed to create directory: ${dir}`, 'CREATE_DIR_FAILED', error as Error);
             }
         }
     }
@@ -142,11 +138,7 @@ export class FilePlanStorage implements PlanStorage {
             await fs.writeFile(filePath, params.content, 'utf-8');
 
             // 写入元数据
-            await fs.writeFile(
-                this.getMetaPath(params.sessionId),
-                JSON.stringify(meta, null, 2),
-                'utf-8'
-            );
+            await fs.writeFile(this.getMetaPath(params.sessionId), JSON.stringify(meta, null, 2), 'utf-8');
 
             return meta;
         } catch (error) {
@@ -192,11 +184,7 @@ export class FilePlanStorage implements PlanStorage {
             if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
                 return null;
             }
-            throw new PlanStorageError(
-                `Failed to read plans directory`,
-                'READ_DIR_FAILED',
-                error as Error
-            );
+            throw new PlanStorageError(`Failed to read plans directory`, 'READ_DIR_FAILED', error as Error);
         }
 
         return null;
@@ -223,11 +211,7 @@ export class FilePlanStorage implements PlanStorage {
             if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
                 return null;
             }
-            throw new PlanStorageError(
-                `Failed to read plan for session: ${sessionId}`,
-                'READ_FAILED',
-                error as Error
-            );
+            throw new PlanStorageError(`Failed to read plan for session: ${sessionId}`, 'READ_FAILED', error as Error);
         }
     }
 
@@ -256,18 +240,12 @@ export class FilePlanStorage implements PlanStorage {
         } catch (error) {
             // Plans directory doesn't exist
             if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-                throw new PlanStorageError(
-                    `Failed to list plans`,
-                    'LIST_FAILED',
-                    error as Error
-                );
+                throw new PlanStorageError(`Failed to list plans`, 'LIST_FAILED', error as Error);
             }
         }
 
         // 按更新时间降序排序
-        return metas.sort((a, b) =>
-            new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-        );
+        return metas.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
     }
 
     async delete(planId: string): Promise<boolean> {
@@ -280,11 +258,7 @@ export class FilePlanStorage implements PlanStorage {
             await fs.rm(sessionDir, { recursive: true });
             return true;
         } catch (error) {
-            throw new PlanStorageError(
-                `Failed to delete plan: ${planId}`,
-                'DELETE_FAILED',
-                error as Error
-            );
+            throw new PlanStorageError(`Failed to delete plan: ${planId}`, 'DELETE_FAILED', error as Error);
         }
     }
 
