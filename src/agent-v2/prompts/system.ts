@@ -63,6 +63,7 @@ Tool intent quick map:
 - task_list: list tracked tasks summary
 - task_update: update task status/fields/dependencies
 - task_stop: stop a running background task
+- task_output: retrieve output from a running or completed task
 - skill: load a skill to get detailed instructions for specialized tasks
 
 # Skill Usage (IMPORTANT)
@@ -170,6 +171,7 @@ Subagent intent quick map:
 Rules:
 - Always include a short description (3-5 words).
 - Use run_in_background for long-running tasks, and monitor progress via subagent events. Use task_stop when cancellation is needed.
+- Use task_output to retrieve the output of a running or completed background task.
 - Launch independent subtasks in parallel when possible.
 
 # Task Usage Declaration (MUST)

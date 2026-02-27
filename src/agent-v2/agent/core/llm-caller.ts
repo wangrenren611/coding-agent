@@ -127,7 +127,7 @@ export class LLMCaller {
 
         if (isStream) {
             // 流式请求：使用空闲超时（每次收到数据就重置）
-            const idleTimeoutMs = this.config.idleTimeoutMs ?? 3 * 60 * 1000; // 默认 3 分钟
+            const idleTimeoutMs = this.config.idleTimeoutMs ?? 5 * 60 * 1000; // 默认 5 分钟
             idleTimeoutController = new IdleTimeoutController(idleTimeoutMs);
             signals.push(idleTimeoutController.signal);
         } else {

@@ -7,7 +7,7 @@ import { WebSearchTool } from './web-search';
 import { WebFetchTool } from './web-fetch';
 import { BatchReplaceTool } from './batch-replace';
 import { LspTool } from './lsp';
-import { TaskCreateTool, TaskGetTool, TaskListTool, TaskStopTool, TaskTool, TaskUpdateTool } from './task';
+import { TaskCreateTool, TaskGetTool, TaskListTool, TaskOutputTool, TaskStopTool, TaskTool, TaskUpdateTool } from './task';
 import { ToolRegistry } from './registry';
 import { SkillTool } from '../skill';
 import { PlanCreateTool } from '../plan/tools';
@@ -42,6 +42,7 @@ export function getDefaultTools(
         new TaskListTool(),
         new TaskUpdateTool(),
         new TaskStopTool(),
+        new TaskOutputTool(),
         new BatchReplaceTool(),
         new LspTool(),
         new SkillTool(),
@@ -93,6 +94,7 @@ export function getPlanModeTools(
         new TaskListTool(),
         new TaskUpdateTool(),
         new TaskStopTool(),
+        new TaskOutputTool(),
         // Skill
         new SkillTool(),
     ];
@@ -195,6 +197,7 @@ export {
     TaskCreateTool,
     TaskGetTool,
     TaskListTool,
+    TaskOutputTool,
     TaskUpdateTool,
     TaskStopTool,
     SubagentType,

@@ -309,6 +309,23 @@ export const TASK_STOP_DESCRIPTION = `- Stops a running background task by its I
 - Returns a success or failure status
 - Use this tool when you need to terminate a long-running task`;
 
+export const TASK_OUTPUT_DESCRIPTION = `Retrieves output from a running or completed task (background shell, agent, or remote session).
+
+## Usage
+
+- Takes a task_id parameter identifying the task
+- Returns the task output along with status information
+- Use block=true (default) to wait for task completion
+- Use block=false for non-blocking check of current status
+- Task IDs can be found using the task_list tool
+- Works with all task types: background shells, async agents, and remote sessions
+
+## Parameters
+
+- task_id: (required) The task identifier to retrieve output for
+- block: (optional, default true) Wait for task completion before returning
+- timeout: (optional, default 30000) Timeout in milliseconds when blocking`;
+
 export const MANAGED_TASK_PARENT_ID = '__task_tool_managed__';
 export const MANAGED_TASK_SCHEMA_VERSION = 1;
 export const BACKGROUND_HEARTBEAT_INTERVAL_MS = 1000;

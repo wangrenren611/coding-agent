@@ -1,9 +1,10 @@
 # Coding Agent
 
-> 一个强大、可扩展的 AI 编码助手框架，基于 TypeScript 构建的多模态 LLM Agent 系统
+> 一个生产级的 AI 编码助手框架，采用 **ReAct 范式** 和 **协调器模式** 设计，基于 TypeScript 构建的多模态 LLM Agent 系统
 
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.3+-blue.svg)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-20+-green.svg)](https://nodejs.org/)
+[![Vitest](https://img.shields.io/badge/Vitest-4.0+-purple.svg)](https://vitest.dev/)
 [![License](https://img.shields.io/badge/License-ISC-yellow.svg)](https://opensource.org/licenses/ISC)
 
 ---
@@ -36,13 +37,15 @@
 
 Coding Agent 是一个生产级的 AI 编码助手框架，采用**协调器模式（Coordinator Pattern）**设计，将复杂的 Agent 逻辑分解为独立的可插拔组件。它支持多轮对话、工具调用、上下文压缩、持久化存储等核心功能，可作为构建智能编程助手、代码审查工具、自动化开发流程的基础框架。
 
-### 设计理念
+### 核心设计理念
 
+- **ReAct 范式**：Reasoning（思考）+ Acting（行动）交替执行，实现智能决策
 - **协调器模式**：Agent 作为协调器，委托具体工作给专业组件
 - **可插拔架构**：工具、Provider、存储均可独立扩展
+- **端口与适配器**：Memory 和 Provider 层采用六边形架构，支持多种后端
+- **事件驱动**：通过 EventBus 解耦组件间通信
 - **类型安全**：TypeScript 严格模式，完整的类型定义
-- **事件驱动**：通过事件总线解耦组件间通信
-- **生产就绪**：完善的错误处理、重试机制、资源管理
+- **生产就绪**：完善的错误处理、自动重试、资源管理
 
 ---
 
@@ -52,12 +55,14 @@ Coding Agent 是一个生产级的 AI 编码助手框架，采用**协调器模�
 
 | 特性 | 描述 |
 |------|------|
-| **多轮对话** | 支持完整的对话上下文管理 |
-| **工具调用** | 16+ 内置工具，支持自定义扩展 |
-| **流式输出** | 实时流式响应，支持回调处理 |
-| **自动重试** | 智能错误分类，自动重试可恢复错误 |
-| **上下文压缩** | 智能压缩长对话，节省 token 消耗 |
-| **任务中止** | 支持 abort 中断正在执行的任务 |
+| **ReAct 引擎** | Reasoning + Acting 循环，智能决策与执行 |
+| **多轮对话** | 完整的对话上下文管理，支持工具调用协议修复 |
+| **工具调用** | 16+ 内置工具，支持自定义扩展，带超时和截断控制 |
+| **流式输出** | 实时流式响应，支持 reasoning/content 分离处理 |
+| **自动重试** | 智能错误分类，指数退避，自动重试可恢复错误 |
+| **上下文压缩** | 智能压缩长对话，8 章节结构化摘要，节省 token |
+| **任务中止** | 支持 abort 中断，支持空闲超时控制 |
+| **响应验证** | 实时检测模型幻觉、重复模式等异常 |
 
 ### 🛠️ 工具系统
 
@@ -195,21 +200,42 @@ TAVILY_API_KEY=your_tavily_api_key
 
 ## 架构设计
 
+### 分层架构
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    表现层 (Presentation)                         │
+│                    - CLI (React TUI) / Web UI / API              │
+├─────────────────────────────────────────────────────────────────┤
+│                    应用层 (Application)                          │
+│                    - Agent 协调器 / Session 会话管理              │
+├─────────────────────────────────────────────────────────────────┤
+│                    领域层 (Domain)                               │
+│                    - Tool 工具系统 / Skill 技能系统               │
+│                    - Truncation 截断 / Compaction 压缩           │
+├─────────────────────────────────────────────────────────────────┤
+│                    基础设施层 (Infrastructure)                    │
+│                    - Memory 存储 / Provider LLM 适配             │
+│                    - EventBus 事件 / HTTP Client                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
 ### 整体架构图
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        应用层 (Application)                      │
+│                        表现层 (Presentation)                     │
 │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐ │
-│  │   CLI (Ink)     │  │  React Hooks    │  │   自定义应用     │ │
+│  │   CLI (React)   │  │  React Hooks    │  │   自定义应用     │ │
 │  └─────────────────┘  └─────────────────┘  └─────────────────┘ │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                     Agent 协调器 (Coordinator)                   │
+│                  Agent 协调器 (Coordinator Pattern)              │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
-│  │  AgentState  │  │   Emitter    │  │  EventBus    │          │
+│  │  AgentState  │  │ AgentEmitter │  │  EventBus    │          │
+│  │  (状态机)     │  │  (事件发射)   │  │  (发布订阅)   │          │
 │  └──────────────┘  └──────────────┘  └──────────────┘          │
 └─────────────────────────────────────────────────────────────────┘
                               │
@@ -219,21 +245,28 @@ TAVILY_API_KEY=your_tavily_api_key
 │   LLMCaller     │  │  ToolExecutor   │  │     Session     │
 │  ┌───────────┐  │  │  ┌───────────┐  │  │  ┌───────────┐  │
 │  │  Stream   │  │  │  │  Registry │  │  │  │ Compaction│  │
-│  │ Processor │  │  │  │           │  │  │  │           │  │
+│  │ Processor │  │  │  │  + 截断    │  │  │  │  压缩器   │  │
 │  └───────────┘  │  │  └───────────┘  │  │  └───────────┘  │
+│  ┌───────────┐  │  │                 │  │                 │
+│  │ Response  │  │  │                 │  │                 │
+│  │ Validator │  │  │                 │  │                 │
+│  └───────────┘  │  │                 │  │                 │
 └─────────────────┘  └─────────────────┘  └─────────────────┘
           │                   │                   │
           ▼                   ▼                   ▼
 ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
 │    Provider     │  │     Tools       │  │ MemoryManager   │
-│  ┌───────────┐  │  │  ┌───────────┐  │  │  ┌───────────┐  │
-│  │  HTTP     │  │  │  │  Bash     │  │  │  │  File     │  │
-│  │  Client   │  │  │  │  File     │  │  │  │  Storage  │  │
-│  │           │  │  │  │  Grep     │  │  │  │           │  │
-│  │  GLM      │  │  │  │  Web      │  │  │  │           │  │
-│  │  Kimi     │  │  │  │  LSP      │  │  │  │           │  │
-│  │  MiniMax  │  │  │  │  Task     │  │  │  │           │  │
-│  └───────────┘  │  │  └───────────┘  │  │  └───────────┘  │
+│  ┌───────────┐  │  │  ┌───────────┐  │  │  (六边形架构)    │
+│  │ Adapters  │  │  │  │  Bash     │  │  │  ┌───────────┐  │
+│  │ Standard  │  │  │  │  File     │  │  │  │  File     │  │
+│  │   Kimi    │  │  │  │  Grep     │  │  │  │  MongoDB  │  │
+│  └───────────┘  │  │  │  Web      │  │  │  │  Hybrid   │  │
+│  ┌───────────┐  │  │  │  LSP      │  │  │  └───────────┘  │
+│  │ HTTP      │  │  │  │  Task     │  │  │                 │
+│  │ Client    │  │  │  └───────────┘  │  │                 │
+│  │ + Stream  │  │  │                 │  │                 │
+│  │ Parser    │  │  │                 │  │                 │
+│  └───────────┘  │  │                 │  │                 │
 └─────────────────┘  └─────────────────┘  └─────────────────┘
 ```
 
@@ -247,31 +280,72 @@ TAVILY_API_KEY=your_tavily_api_key
 | **Session** | 消息管理，上下文压缩，持久化触发 |
 | **AgentState** | Agent 状态机，循环/重试计数，abort 控制 |
 | **EventBus** | 事件发布订阅，组件间解耦通信 |
-| **MemoryManager** | 持久化存储抽象，会话数据管理 |
+| **MemoryManager** | 持久化存储抽象，会话数据管理，多后端支持 |
+
+### ReAct 引擎
+
+项目实现了 **ReAct (Reasoning + Acting)** 范式：
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    ReAct 主循环                          │
+│                                                         │
+│  ┌─────────┐    ┌──────────┐    ┌─────────────┐       │
+│  │  User   │───▶│  Agent   │───▶│   Think     │       │
+│  │ Query   │    │  Start   │    │ (LLM Call)  │       │
+│  └─────────┘    └──────────┘    └──────┬──────┘       │
+│                                        │               │
+│                      ┌─────────────────┼─────────────┐ │
+│                      ▼                 ▼             │ │
+│               ┌────────────┐    ┌─────────────┐     │ │
+│               │ Tool Calls │    │ Text Output │     │ │
+│               └─────┬──────┘    └──────┬──────┘     │ │
+│                     │                  │            │ │
+│                     ▼                  ▼            │ │
+│               ┌────────────┐    ┌─────────────┐     │ │
+│               │  Execute   │    │  Complete   │◀────┘ │
+│               │   Tools    │    │   (Done)    │       │
+│               └─────┬──────┘    └─────────────┘       │
+│                     │                                  │
+│                     ▼                                  │
+│               ┌────────────┐                          │
+│               │  Observe   │──────────────────────────┤
+│               │  Results   │                          │
+│               └────────────┘                          │
+│                     │                                  │
+│                     └──────────▶ (循环继续)            │
+└─────────────────────────────────────────────────────────┘
+```
+
+### 设计模式
+
+| 设计模式 | 应用位置 | 目的 |
+|----------|----------|------|
+| **协调器模式** | Agent | 组件组合与协调 |
+| **状态机模式** | AgentState, StreamProcessor | 状态转换管理 |
+| **策略模式** | Truncation Strategies | 可替换截断策略 |
+| **工厂模式** | ProviderFactory, createMemoryManager | 对象创建封装 |
+| **适配器模式** | Provider Adapters, Memory Adapters | 接口转换 |
+| **模板方法** | BaseTool | 工具骨架定义 |
+| **发布订阅** | EventBus | 事件解耦 |
 
 ### 执行流程
 
 ```
-用户输入
-    │
-    ▼
-┌─────────────┐
-│ Agent.run() │
-└─────────────┘
+用户输入 (execute)
     │
     ▼
 ┌─────────────────────────────────────────────────────────┐
-│                      主循环                              │
+│                    runLoop() 主循环                      │
 │  ┌─────────────────────────────────────────────────┐   │
-│  │ 1. 检查 abort 状态                               │   │
-│  │ 2. 检查重试状态                                  │   │
-│  │ 3. 检查是否完成                                  │   │
-│  │ 4. 触发上下文压缩（如需要）                       │   │
-│  │ 5. 调用 LLM (LLMCaller)                         │   │
-│  │ 6. 处理响应                                      │   │
-│  │    ├─ 文本响应 → 检查完成                        │   │
-│  │    └─ 工具调用 → 执行工具 (ToolExecutor)         │   │
-│  │ 7. 错误处理与重试                                │   │
+│  │ while (true) {                                   │   │
+│  │   1. 检查中止/完成/重试/循环状态                  │   │
+│  │   2. [THINKING] executeLLMCall()                │   │
+│  │   3. 处理响应：                                   │   │
+│  │      ├─ 文本响应 → 检查完成                      │   │
+│  │      └─ 工具调用 → 执行工具 → 继续循环           │   │
+│  │   4. 错误处理与重试                              │   │
+│  │ }                                                │   │
 │  └─────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────┘
     │
@@ -976,9 +1050,27 @@ const agent = new Agent({
 
 | Provider | 模型示例 | 特性 |
 |----------|----------|------|
-| GLM (智谱) | glm-4-plus, glm-4 | 支持工具调用 |
-| Kimi (月之暗面) | moonshot-v1-128k | 长上下文, thinking 模式 |
-| MiniMax | abab6.5s-chat | 支持工具调用 |
+| GLM (智谱) | glm-4.7, glm-5 | 支持工具调用，长上下文 |
+| Kimi (月之暗面) | kimi-k2.5 | 长上下文，thinking 模式 |
+| MiniMax | minimax-2.5 | 支持工具调用 |
+| DeepSeek | deepseek-chat | 高性价比 |
+| Qwen (通义千问) | qwen3.5-plus | 支持工具调用 |
+
+### 使用 ProviderRegistry（推荐）
+
+```typescript
+import { ProviderRegistry, Models } from './src/providers';
+
+// 从环境变量创建（推荐）
+const provider = ProviderRegistry.createFromEnv('glm-4.7');
+
+// 获取模型配置
+const modelConfig = Models.glm47;
+console.log(modelConfig.name, modelConfig.max_tokens);
+
+// 列出所有可用模型
+const allModels = ProviderRegistry.listModels();
+```
 
 ### 创建 Provider
 
@@ -997,7 +1089,7 @@ const glmProvider = createGLMProvider({
   baseURL: 'https://open.bigmodel.cn/api/paas/v4',
 });
 
-// Kimi Provider
+// Kimi Provider（支持 thinking 模式）
 const kimiProvider = createKimiProvider({
   apiKey: process.env.KIMI_API_KEY!,
   model: 'moonshot-v1-128k',
@@ -1440,19 +1532,35 @@ const agent = new Agent({
 
 ### v1.0.0 (当前版本)
 
-**新增功能**
-- ✅ Agent v2 核心引擎
-- ✅ 16+ 内置工具
-- ✅ 流式输出支持
-- ✅ 上下文压缩
-- ✅ 文件持久化存储
-- ✅ 事件总线
-- ✅ 多 Provider 支持
+**核心架构**
+- ✅ ReAct 引擎：Reasoning + Acting 循环，智能决策与执行
+- ✅ 协调器模式：Agent 作为协调器，委托给专业组件
+- ✅ 分层架构：表现层 → 应用层 → 领域层 → 基础设施层
+- ✅ 端口与适配器：Memory 和 Provider 层六边形架构
 
-**架构优化**
-- ✅ 协调器模式重构
-- ✅ 组件解耦
-- ✅ 类型安全增强
+**Agent 核心**
+- ✅ 状态机管理：IDLE → RUNNING → COMPLETED 状态流转
+- ✅ 流式处理：reasoning/content 分离处理
+- ✅ 响应验证：实时检测模型幻觉、重复模式
+- ✅ 自动重试：智能错误分类，指数退避
+- ✅ 上下文压缩：8 章节结构化摘要
+
+**工具系统**
+- ✅ 16+ 内置工具：文件、搜索、执行、Web、LSP、任务管理
+- ✅ 模板方法模式：BaseTool 工具骨架
+- ✅ 超时控制 + 截断中间件
+- ✅ Plan 模式只读工具白名单
+
+**Provider 层**
+- ✅ 多 LLM 支持：GLM、Kimi、MiniMax、DeepSeek、Qwen
+- ✅ 适配器模式：StandardAdapter、KimiAdapter
+- ✅ 流式 SSE 解析
+- ✅ 多层超时控制
+
+**存储系统**
+- ✅ 多后端支持：File、MongoDB、Hybrid
+- ✅ 会话恢复：通过 sessionId 恢复历史会话
+- ✅ 压缩记录：保存压缩历史，支持回溯
 
 ---
 

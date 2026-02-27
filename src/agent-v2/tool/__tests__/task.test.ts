@@ -13,6 +13,7 @@ import {
     TaskCreateTool,
     TaskGetTool,
     TaskListTool,
+    TaskOutputTool,
     TaskStopTool,
     TaskTool,
     TaskUpdateTool,
@@ -512,5 +513,122 @@ describe('Task tools', () => {
         expect(result.metadata?.status).toBe('failed');
         expect(result.metadata?.error).toBe('LLM_REQUEST_FAILED');
         expect(result.output).toContain('Agent execution failed');
+    });
+});
+
+describe('TaskOutputTool', () => {
+    let env: TestEnvironment;
+    let sessionId: string;
+    let memoryManager: IMemoryManager;
+    let toolContext: ToolContext;
+
+    beforeEach(async () => {
+        env = new TestEnvironment('task-output-tool');
+        await env.setup();
+        sessionId = `test-session-output-${Date.now()}`;
+        memoryManager = createMemoryManager({
+            type: 'file',
+            connectionString: `${env.getTestDir()}/agent-memory`,
+        });
+        await memoryManager.initialize();
+        toolContext = {
+            environment: 'test',
+            platform: 'test',
+            time: new Date().toISOString(),
+            workingDirectory: env.workingDir,
+            sessionId,
+            memoryManager,
+        };
+    });
+
+    afterEach(async () => {
+        await memoryManager.close();
+        await env.teardown();
+    });
+
+    it('should return error for non-existent task', async () => {
+        const tool = new TaskOutputTool();
+        const result = await tool.execute({ task_id: 'non-existent-task' }, toolContext);
+
+        expect(result.success).toBe(false);
+        expect(result.metadata?.error).toBe('TASK_NOT_FOUND');
+        expect(result.output).toContain('Task not found');
+    });
+
+    it('should get output from completed background task', async () => {
+        // 首先创建一个后台任务
+        const taskTool = new TaskTool(new MockProvider('task output result'), env.workingDir);
+        const createResult = await taskTool.execute(
+            {
+                description: 'Background test task',
+                prompt: 'Run test',
+                subagent_type: 'explore',
+                run_in_background: true,
+            },
+            toolContext
+        );
+
+        expect(createResult.success).toBe(true);
+        const taskId = createResult.metadata?.task_id as string;
+        expect(taskId).toBeDefined();
+
+        // 等待任务完成
+        await waitForSubTaskRunStatus(memoryManager, taskId, ['completed', 'failed'], 5000);
+
+        // 使用 TaskOutputTool 获取输出
+        const outputTool = new TaskOutputTool();
+        const outputResult = await outputTool.execute({ task_id: taskId, block: false }, toolContext);
+
+        expect(outputResult.metadata?.task_id).toBe(taskId);
+        expect(outputResult.metadata?.status).toBe('completed');
+    });
+
+    it('should support block=false for non-blocking status check', async () => {
+        // 创建一个长时间运行的后台任务
+        const taskTool = new TaskTool(new MockProvider('slow result', 10000), env.workingDir);
+        const createResult = await taskTool.execute(
+            {
+                description: 'Long running task',
+                prompt: 'Run slow test',
+                subagent_type: 'explore',
+                run_in_background: true,
+            },
+            toolContext
+        );
+
+        const taskId = createResult.metadata?.task_id as string;
+
+        // 立即检查状态（非阻塞）
+        const outputTool = new TaskOutputTool();
+        const outputResult = await outputTool.execute({ task_id: taskId, block: false, timeout: 1000 }, toolContext);
+
+        // 任务应该在运行中或已完成（取决于执行速度）
+        expect(outputResult.metadata?.task_id).toBe(taskId);
+        expect(['queued', 'running', 'completed']).toContain(outputResult.metadata?.status);
+    });
+
+    it('should return timed_out when timeout exceeded with block=true', async () => {
+        // 创建一个长时间运行的后台任务
+        const taskTool = new TaskTool(new MockProvider('very slow result', 30000), env.workingDir);
+        const createResult = await taskTool.execute(
+            {
+                description: 'Very long running task',
+                prompt: 'Run very slow test',
+                subagent_type: 'explore',
+                run_in_background: true,
+            },
+            toolContext
+        );
+
+        const taskId = createResult.metadata?.task_id as string;
+
+        // 使用短超时进行阻塞获取
+        const outputTool = new TaskOutputTool();
+        const outputResult = await outputTool.execute({ task_id: taskId, block: true, timeout: 1000 }, toolContext);
+
+        // 应该返回超时状态
+        expect(outputResult.metadata?.task_id).toBe(taskId);
+        expect(outputResult.metadata?.timed_out).toBe(true);
+        expect(['queued', 'running']).toContain(outputResult.metadata?.status);
     });
 });
