@@ -5,7 +5,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { BatchReplaceTool } from '../batch-replace';
 import { TestEnvironment } from './test-utils';
-import path from 'path';
 
 describe('BatchReplaceTool - Deep Tests', () => {
     let env: TestEnvironment;

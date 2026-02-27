@@ -231,7 +231,7 @@ describe('AgentEmitter', () => {
         ];
 
         it('emitToolCallCreated 应该发送正确的消息', () => {
-            emitter.emitToolCallCreated(mockToolCalls as any, 'msg-1', '思考中...');
+            emitter.emitToolCallCreated(mockToolCalls as unknown as ToolCall[], 'msg-1', '思考中...');
 
             expect(mockCallback).toHaveBeenCalledWith({
                 type: AgentMessageType.TOOL_CALL_CREATED,

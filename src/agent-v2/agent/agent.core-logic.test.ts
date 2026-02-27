@@ -10,13 +10,11 @@
  * 6. 工具调用配对
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { Agent } from './agent';
 import { AgentStatus } from './types';
 import { AgentMessageType } from './stream-types';
 import { AgentState } from './core/agent-state';
-import { LLMCaller } from './core/llm-caller';
-import { ToolExecutor } from './core/tool-executor';
 import { Compaction } from '../session/compaction';
 import { createMemoryManager } from '../memory';
 import { EventType } from '../eventbus';
@@ -45,7 +43,7 @@ class MockProvider {
         if (this.shouldFail && this.failCount < 3) {
             this.failCount++;
             const error = new Error('Simulated API error');
-            (error as any).status = 500;
+            (error as unknown as { status: number }).status = 500;
             throw error;
         }
 
@@ -276,7 +274,7 @@ describe('Agent 完成条件判断测试', () => {
     describe('finish_reason 处理', () => {
         it('finish_reason=stop 应该完成任务', async () => {
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -320,13 +318,13 @@ describe('Agent 完成条件判断测试', () => {
             };
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
             });
 
-            const result = await agent.execute('Find files');
+            await agent.execute('Find files');
             expect(agent.getLoopCount()).toBeGreaterThanOrEqual(1);
         }, 15000);
 
@@ -345,7 +343,7 @@ describe('Agent 完成条件判断测试', () => {
             });
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -380,7 +378,7 @@ describe('Agent 完成条件判断测试', () => {
             };
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -408,7 +406,7 @@ describe('Agent 完成条件判断测试', () => {
             };
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: true,
                 memoryManager,
@@ -427,7 +425,7 @@ describe('Agent 完成条件判断测试', () => {
     describe('消息过滤逻辑', () => {
         it('空内容的 user 消息不应该被发送给 LLM', async () => {
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -466,8 +464,8 @@ describe('Agent 完成条件判断测试', () => {
                 ],
             } as Message);
 
-            let capturedMessages: any[] = [];
-            mockProvider.generate = async (messages: any[]) => {
+            let capturedMessages: unknown[] = [];
+            mockProvider.generate = async (messages: unknown[]) => {
                 capturedMessages = messages;
                 return {
                     id: 'filtered-test',
@@ -485,7 +483,7 @@ describe('Agent 完成条件判断测试', () => {
             };
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -499,7 +497,7 @@ describe('Agent 完成条件判断测试', () => {
                 (m) =>
                     m?.role === 'assistant' &&
                     Array.isArray(m?.tool_calls) &&
-                    m.tool_calls.some((call: any) => typeof call?.id !== 'string' || call.id.trim().length === 0)
+                    m.tool_calls.some((call: { id?: string }) => typeof call?.id !== 'string' || call.id.trim().length === 0)
             );
             expect(malformedAssistant).toBeUndefined();
         });
@@ -544,8 +542,8 @@ describe('Agent 完成条件判断测试', () => {
                 type: 'tool-result',
             } as Message);
 
-            let capturedMessages: any[] = [];
-            mockProvider.generate = async (messages: any[]) => {
+            let capturedMessages: unknown[] = [];
+            mockProvider.generate = async (messages: unknown[]) => {
                 capturedMessages = messages;
                 return {
                     id: 'tool-protocol-fixed',
@@ -563,7 +561,7 @@ describe('Agent 完成条件判断测试', () => {
             };
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -577,7 +575,7 @@ describe('Agent 完成条件判断测试', () => {
                 (m) =>
                     m?.role === 'assistant' &&
                     Array.isArray(m?.tool_calls) &&
-                    m.tool_calls.some((c: any) => c.id === 'call_1')
+                    m.tool_calls.some((c: { id?: string }) => c.id === 'call_1')
             );
             expect(assistantIndex).toBeGreaterThanOrEqual(0);
 
@@ -650,7 +648,7 @@ describe('Agent 重试机制测试', () => {
             };
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -678,7 +676,7 @@ describe('Agent 重试机制测试', () => {
             };
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -705,7 +703,7 @@ describe('Agent 重试机制测试', () => {
             };
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -736,7 +734,7 @@ describe('Agent 重试机制测试', () => {
             const successes: unknown[] = [];
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -797,7 +795,7 @@ describe('Agent 重试机制测试', () => {
                                 finish_reason: 'tool_calls',
                             },
                         ],
-                    } as any;
+                    } as unknown as LLMResponse;
                 }
 
                 return {
@@ -812,7 +810,7 @@ describe('Agent 重试机制测试', () => {
                             finish_reason: 'stop',
                         },
                     ],
-                } as any;
+                } as unknown as LLMResponse;
             };
 
             const toolStarts: unknown[] = [];
@@ -820,7 +818,7 @@ describe('Agent 重试机制测试', () => {
             const toolFailures: unknown[] = [];
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -877,7 +875,7 @@ describe('Agent 重试机制测试', () => {
                                 finish_reason: 'tool_calls',
                             },
                         ],
-                    } as any;
+                    } as unknown as LLMResponse;
                 }
 
                 return {
@@ -892,7 +890,7 @@ describe('Agent 重试机制测试', () => {
                             finish_reason: 'stop',
                         },
                     ],
-                } as any;
+                } as unknown as LLMResponse;
             };
 
             const toolStarts: unknown[] = [];
@@ -900,7 +898,7 @@ describe('Agent 重试机制测试', () => {
             const toolFailures: unknown[] = [];
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -930,7 +928,7 @@ describe('Agent 重试机制测试', () => {
             };
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -967,7 +965,7 @@ describe('Agent 中止机制测试', () => {
         mockProvider.responseDelay = 5000; // 5 seconds delay
 
         const agent = new Agent({
-            provider: mockProvider as any,
+            provider: mockProvider as unknown as LLMProvider,
             systemPrompt: 'Test',
             stream: false,
             memoryManager,
@@ -986,7 +984,7 @@ describe('Agent 中止机制测试', () => {
         };
 
         const agent = new Agent({
-            provider: mockProvider as any,
+            provider: mockProvider as unknown as LLMProvider,
             systemPrompt: 'Test',
             stream: false,
             memoryManager,
@@ -1006,7 +1004,7 @@ describe('Agent 中止机制测试', () => {
 
     it('中止后再次执行应该从 IDLE 开始', async () => {
         const agent = new Agent({
-            provider: mockProvider as any,
+            provider: mockProvider as unknown as LLMProvider,
             systemPrompt: 'Test',
             stream: false,
             memoryManager,
@@ -1033,7 +1031,7 @@ describe('Compaction 压缩逻辑测试', () => {
         compaction = new Compaction({
             maxTokens: 1000,
             maxOutputTokens: 200,
-            llmProvider: mockProvider as any,
+            llmProvider: mockProvider as unknown as LLMProvider,
             keepMessagesNum: 5,
             triggerRatio: 0.8,
         });
@@ -1183,8 +1181,8 @@ describe('Compaction 压缩逻辑测试', () => {
                 const hasAssistantWithToolCall = result.messages.some(
                     (m) =>
                         m.role === 'assistant' &&
-                        Array.isArray((m as any).tool_calls) &&
-                        (m as any).tool_calls.length > 0
+                        Array.isArray((m as unknown as { tool_calls?: unknown[] }).tool_calls) &&
+                        (m as unknown as { tool_calls?: unknown[] }).tool_calls!.length > 0
                 );
 
                 if (hasToolMessage) {
@@ -1218,7 +1216,7 @@ describe('Agent 边界条件测试', () => {
     describe('输入验证', () => {
         it('空字符串输入应该被拒绝', async () => {
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -1229,7 +1227,7 @@ describe('Agent 边界条件测试', () => {
 
         it('纯空白字符输入应该被拒绝', async () => {
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -1240,24 +1238,24 @@ describe('Agent 边界条件测试', () => {
 
         it('null 输入应该被拒绝', async () => {
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
             });
 
-            await expect(agent.execute(null as any)).rejects.toThrow();
+            await expect(agent.execute(null as unknown as MessageContent)).rejects.toThrow();
         });
 
         it('undefined 输入应该被拒绝', async () => {
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
             });
 
-            await expect(agent.execute(undefined as any)).rejects.toThrow();
+            await expect(agent.execute(undefined as unknown as MessageContent)).rejects.toThrow();
         });
     });
 
@@ -1265,7 +1263,7 @@ describe('Agent 边界条件测试', () => {
         it('缺少 provider 应该抛出错误', () => {
             expect(() => {
                 new Agent({
-                    provider: null as any,
+                    provider: null as unknown as LLMProvider,
                     systemPrompt: 'Test',
                 });
             }).toThrow();
@@ -1277,7 +1275,7 @@ describe('Agent 边界条件测试', () => {
             mockProvider.responseDelay = 1000;
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -1300,7 +1298,7 @@ describe('Agent 边界条件测试', () => {
             mockProvider.responseDelay = 10000; // 10 seconds
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -1337,7 +1335,7 @@ describe('消息处理测试', () => {
     describe('多模态内容', () => {
         it('应该正确处理文本内容', async () => {
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -1349,7 +1347,7 @@ describe('消息处理测试', () => {
 
         it('应该正确处理数组格式内容', async () => {
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -1368,7 +1366,7 @@ describe('消息处理测试', () => {
     describe('消息历史', () => {
         it('执行后应该保留消息历史', async () => {
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test system prompt',
                 stream: false,
                 memoryManager,
@@ -1387,7 +1385,7 @@ describe('消息处理测试', () => {
             const sessionId = 'test-session-accumulate';
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -1422,7 +1420,7 @@ describe('Task 子 Agent 事件透传', () => {
 
     it('Agent 执行 task 工具时应触发 SUBAGENT_EVENT', async () => {
         let callCount = 0;
-        const events: any[] = [];
+        const events: unknown[] = [];
 
         const provider = new MockProvider();
         provider.generate = async () => {
@@ -1496,7 +1494,7 @@ describe('Task 子 Agent 事件透传', () => {
         };
 
         const agent = new Agent({
-            provider: provider as any,
+            provider: provider as unknown as LLMProvider,
             systemPrompt: 'Test',
             stream: true,
             memoryManager,
@@ -1566,7 +1564,7 @@ describe('工具执行测试', () => {
             };
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,

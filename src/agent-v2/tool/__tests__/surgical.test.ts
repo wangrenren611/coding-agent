@@ -4,8 +4,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { SurgicalEditTool } from '../surgical';
-import { TestEnvironment, SAMPLE_CODE, MULTILINE_CONTENT } from './test-utils';
-import path from 'path';
+import { TestEnvironment } from './test-utils';
 
 describe('SurgicalEditTool - Deep Tests', () => {
     let env: TestEnvironment;
@@ -442,7 +441,7 @@ export const Button = ({ title }: Props) => {
 
             expect(result.success).toBe(true);
             const modified = await env.readFile('whitespace.txt');
-            expect(modified).toMatch(/^Modified 1   \n/);
+            expect(modified).toMatch(/^Modified 1 {3}\n/);
         });
 
         it('should handle Windows line endings (CRLF)', async () => {

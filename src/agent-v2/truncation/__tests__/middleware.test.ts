@@ -2,7 +2,7 @@
  * 截断中间件测试
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { createTruncationMiddleware } from '../middleware';
 import { TruncationService } from '../service';
 import type { ToolResult } from '../../tool/base';
@@ -75,7 +75,7 @@ describe('TruncationMiddleware', () => {
         const service = new TruncationService({ global: { maxLines: 5 } });
         const middleware = createTruncationMiddleware({
             service,
-            shouldTruncate: (toolName, result) => {
+            shouldTruncate: (toolName, _result) => {
                 // only truncate for specific tool
                 if (toolName === 'special') {
                     return { maxLines: 2 };

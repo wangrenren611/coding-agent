@@ -4,7 +4,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SkillTool, createSkillTool, defaultSkillTool, simpleSkillTool } from '../skill-tool';
-import { SkillTestEnvironment, SAMPLE_SKILL_CONTENT } from './test-utils';
+import { SkillTestEnvironment } from './test-utils';
 import { getSkillLoader, initializeSkillLoader } from '../loader';
 
 // Mock the global loader to avoid side effects
@@ -19,7 +19,11 @@ vi.mock('../loader', async () => {
 
 describe('SkillTool', () => {
     let env: SkillTestEnvironment;
-    let mockLoader: any;
+    let mockLoader: {
+        initialize: () => Promise<void>;
+        listSkills: () => unknown[];
+        getSkill: () => unknown;
+    };
 
     beforeEach(async () => {
         env = new SkillTestEnvironment('skill-tool');
