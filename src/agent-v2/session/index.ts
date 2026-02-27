@@ -316,6 +316,11 @@ export class Session {
         if (!this.memoryManager) return;
         await this.persistQueue;
 
+        // 确保 MemoryManager 已初始化
+        if (this.memoryManager.waitForInitialization) {
+            await this.memoryManager.waitForInitialization();
+        }
+
         const context = await this.memoryManager.getCurrentContext(this.sessionId);
         if (context) {
             await this.memoryManager.saveCurrentContext({
@@ -336,6 +341,11 @@ export class Session {
     private async doPersist(message: Message, operation: 'add' | 'update'): Promise<void> {
         if (!this.memoryManager) return;
 
+        // 确保 MemoryManager 已初始化
+        if (this.memoryManager.waitForInitialization) {
+            await this.memoryManager.waitForInitialization();
+        }
+
         if (operation === 'update') {
             const updates: Partial<Message> = { ...message };
             delete updates.messageId;
@@ -347,6 +357,12 @@ export class Session {
 
     private async doRemovePersist(messageId: string, reason: ContextExclusionReason): Promise<void> {
         if (!this.memoryManager) return;
+
+        // 确保 MemoryManager 已初始化
+        if (this.memoryManager.waitForInitialization) {
+            await this.memoryManager.waitForInitialization();
+        }
+
         await this.memoryManager.removeMessageFromContext(this.sessionId, messageId, reason);
     }
 
@@ -386,6 +402,11 @@ export class Session {
     private async persistContextSnapshot(messages: Message[]): Promise<void> {
         if (!this.memoryManager) return;
 
+        // 确保 MemoryManager 已初始化
+        if (this.memoryManager.waitForInitialization) {
+            await this.memoryManager.waitForInitialization();
+        }
+
         const context = await this.memoryManager.getCurrentContext(this.sessionId);
         if (!context) return;
 
@@ -398,6 +419,11 @@ export class Session {
 
     private async syncRepairIntoHistory(originalMessages: Message[], normalizedMessages: Message[]): Promise<void> {
         if (!this.memoryManager) return;
+
+        // 确保 MemoryManager 已初始化
+        if (this.memoryManager.waitForInitialization) {
+            await this.memoryManager.waitForInitialization();
+        }
 
         const originalById = new Map(originalMessages.map((message) => [message.messageId, message]));
         const normalizedById = new Map(normalizedMessages.map((message) => [message.messageId, message]));

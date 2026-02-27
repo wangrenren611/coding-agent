@@ -234,9 +234,65 @@ function handleStreamMessage(message: AgentMessage) {
     }
 }
 
+/**
+ * 解析命令行参数
+ * 支持的参数：
+ *   --session-id, -s <id>  指定会话 ID（用于恢复会话）
+ *   --help, -h             显示帮助信息
+ *
+ * 示例：
+ *   pnpm demo1 "你的问题"
+ *   pnpm demo1 --session-id agent-44 "继续之前的问题"
+ *   pnpm demo1 -s agent-44 "继续之前的问题"
+ */
+function parseCliArgs(): { sessionId?: string; query: string } {
+    const args = process.argv.slice(2);
+    let sessionId: string | undefined;
+    const queryParts: string[] = [];
+
+    for (let i = 0; i < args.length; i++) {
+        const arg = args[i];
+
+        if (arg === '--session-id' || arg === '-s') {
+            sessionId = args[++i];
+            if (!sessionId) {
+                console.error('错误: --session-id 需要提供一个会话 ID');
+                process.exit(1);
+            }
+        } else if (arg === '--help' || arg === '-h') {
+            console.log(`
+用法: pnpm demo1 [选项] [问题]
+
+选项:
+  -s, --session-id <id>  指定会话 ID，用于恢复之前的会话
+  -h, --help             显示此帮助信息
+
+示例:
+  pnpm demo1 "分析当前项目结构"
+  pnpm demo1 --session-id agent-44 "继续之前的问题"
+  pnpm demo1 -s agent-44 "继续之前的问题"
+`);
+            process.exit(0);
+        } else {
+            // 其他参数作为问题的一部分
+            queryParts.push(arg);
+        }
+    }
+
+    const query = queryParts.join(' ');
+
+    return { sessionId, query };
+}
+
 async function demo1() {
+    // 解析命令行参数
+    const { sessionId: cliSessionId, query: cliQuery } = parseCliArgs();
+
     console.log('='.repeat(60));
     console.log('🤖 Agent Demo - 支持 Thinking 模式');
+    if (cliSessionId) {
+        console.log(`📋 恢复会话: ${cliSessionId}`);
+    }
     console.log('='.repeat(60));
     console.log();
 
@@ -265,18 +321,12 @@ async function demo1() {
             }),
             // 单次 LLM 请求超时（默认 5 分钟，可用 AGENT_REQUEST_TIMEOUT_MS 覆盖）
             requestTimeout: parseRequestTimeoutMs(process.env.AGENT_REQUEST_TIMEOUT_MS),
-            // 如需恢复会话，请取消注释并填入有效 sessionId
-            //    sessionId: 'agent-7',
-            // sessionId: 'agent-8',
-            // sessionId: 'agent-32',
-            sessionId: 'agent-38.1',
-            // sessionId: 'agent-39',
-            //   sessionId:'18a09614-bb1e-4f06-b685-d040ff08c3aa',
+            // 通过命令行参数 --session-id 或 -s 指定会话 ID
+            ...(cliSessionId ? { sessionId: cliSessionId } : {}),
 
             stream: true,
             thinking: true, // 启用 thinking 模式，支持推理内容
             enableCompaction: true, // 启用上下文压缩
-            // sessionId: '063347b3-d379-4d0b-8674-d65a1936a469',//72dba8df-ac93-44f1-b385-0f5b47af373c
             compactionConfig: {
                 keepMessagesNum: 40, // 保留最近 40 条消息
                 triggerRatio: 0.9, // Token 使用达 90% 时触发压缩
@@ -291,7 +341,8 @@ async function demo1() {
         // });
 
         // 执行查询
-        const query = process.argv[2] || '这个是我执行demo-plan的过程，分析问题，找出解决方案："./query.text"';
+        const query =
+            cliQuery || '处理问题,先复现问题再修改代码，可以先写测试用例复现问题，相关执行信息："./query.text"';
         console.log(`${CYAN}❯${RESET} ${query}\n`);
 
         const response = await agent.execute(query);
