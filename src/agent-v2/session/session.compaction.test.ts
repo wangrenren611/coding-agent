@@ -78,12 +78,17 @@ class MockSummaryProvider extends LLMProvider {
     }
 }
 
-function createUsage(total = 120): Usage {
+/**
+ * 创建合理的 usage 值
+ * prompt_tokens 表示当前请求的完整上下文大小（包含 system prompt 和所有历史消息）
+ * 最后一条消息的 prompt_tokens 应该是最大的
+ */
+function createRealisticUsage(promptTokens: number, completionTokens: number): Usage {
     return {
-        prompt_tokens: Math.floor(total / 2),
-        completion_tokens: total - Math.floor(total / 2),
-        total_tokens: total,
-        prompt_cache_miss_tokens: Math.floor(total / 2),
+        prompt_tokens: promptTokens,
+        completion_tokens: completionTokens,
+        total_tokens: promptTokens + completionTokens,
+        prompt_cache_miss_tokens: promptTokens,
         prompt_cache_hit_tokens: 0,
     };
 }
@@ -110,7 +115,8 @@ function seedSession(session: Session, toolCallId = 'call-search-1'): void {
             },
         ],
         finish_reason: 'tool_calls',
-        usage: createUsage(140),
+        // prompt_tokens ≈ 220（system prompt + user-old-1 ≈ 10 + 210）
+        usage: createRealisticUsage(220, 10),
     });
 
     session.addMessage({
@@ -137,7 +143,9 @@ function seedSession(session: Session, toolCallId = 'call-search-1'): void {
         content: `这是基于上下文的分析结论：${'B'.repeat(900)}`,
         type: 'text',
         finish_reason: 'stop',
-        usage: createUsage(180),
+        // prompt_tokens ≈ 500（所有之前消息的总 token 数）
+        // 这个值反映了当前请求的完整上下文大小
+        usage: createRealisticUsage(500, 50),
     });
 }
 

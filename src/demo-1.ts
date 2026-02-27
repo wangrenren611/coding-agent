@@ -281,7 +281,7 @@ function handleSingleMessage(message: BaseAgentEvent, indent: string = '') {
             break;
 
         case AgentMessageType.TEXT_DELTA:
-            process.stdout.write(message.payload.content);
+             process.stdout.write(message.payload.content);
             break;
 
         case AgentMessageType.TEXT_COMPLETE:

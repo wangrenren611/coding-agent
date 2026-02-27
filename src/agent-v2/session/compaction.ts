@@ -42,8 +42,6 @@ export interface TokenInfo {
     totalUsed: number;
     /** 基于内容估算的总 token 数 */
     estimatedTotal: number;
-    /** 从 usage 累计的总 token 数 */
-    accumulatedTotal: number;
     /** usage 数据是否可靠（压缩后不可靠） */
     hasReliableUsage: boolean;
     /** 可用上限（maxTokens - maxOutputTokens） */
@@ -391,33 +389,29 @@ export class Compaction {
     private calculateTokenCount(messages: Message[]): {
         totalUsed: number;
         estimatedTotal: number;
-        accumulatedTotal: number;
         hasReliableUsage: boolean;
     } {
-        // 方法1：累加 usage
-        let accumulatedTotal = 0;
-        let hasUsageCount = 0;
+        // 方法1（优先）：使用最后一条 assistant 消息的 usage.prompt_tokens
+        // usage.prompt_tokens 是当前请求的完整上下文大小，已经包含 system prompt 和所有历史消息
+        // 注意：不能累加，因为每条消息的 prompt_tokens 都是当时完整的上下文大小
+        const lastAssistant = [...messages].reverse().find(
+            (m) => m.role === 'assistant' && m.usage?.prompt_tokens
+        );
+        const latestUsage = lastAssistant?.usage?.prompt_tokens ?? 0;
 
-        for (const msg of messages) {
-            if (msg.usage?.total_tokens) {
-                accumulatedTotal += msg.usage.total_tokens;
-                hasUsageCount++;
-            }
-        }
-
-        // 方法2：基于内容估算
+        // 方法2（备用）：基于内容估算
         const estimatedTotal = messages.reduce((acc, m) => {
             return acc + this.estimateTokens(JSON.stringify(m)) + 4;
         }, 0);
 
-        // 判断 usage 是否可靠（压缩后不可靠）
+        // 判断 usage 是否可靠
+        // 压缩后产生的 summary 消息没有 usage，此时应该使用估算
         const hasSummary = messages.some((m) => m.type === 'summary');
-        const hasReliableUsage = hasUsageCount > messages.length * 0.5 && !hasSummary;
+        const hasReliableUsage = latestUsage > 0 && !hasSummary;
 
         return {
-            totalUsed: hasReliableUsage && accumulatedTotal > 0 ? accumulatedTotal : estimatedTotal,
+            totalUsed: hasReliableUsage ? latestUsage : estimatedTotal,
             estimatedTotal,
-            accumulatedTotal,
             hasReliableUsage,
         };
     }
