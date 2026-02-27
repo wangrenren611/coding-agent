@@ -127,6 +127,44 @@ describe('workingDirectory 传递', () => {
         expect(plan).not.toBeNull();
         expect(plan?.content).toContain('# 路径一致性测试内容');
     });
+
+    it('planBaseDir 应该优先于 workingDirectory', async () => {
+        const planDir = path.join(process.cwd(), 'test-plan-basedir');
+        const workDir = path.join(process.cwd(), 'test-plan-workdir');
+
+        try {
+            await tool.execute(
+                {
+                    title: 'planBaseDir 优先级测试',
+                    content: '# planBaseDir 测试',
+                },
+                {
+                    ...testContext,
+                    workingDirectory: workDir,
+                    planBaseDir: planDir,
+                    sessionId: 'planbasedir-priority-test',
+                }
+            );
+
+            // 验证文件创建在 planBaseDir 目录
+            const planPath = path.join(planDir, 'plans', 'planbasedir-priority-test', 'plan.md');
+            const content = await fs.readFile(planPath, 'utf-8');
+            expect(content).toContain('# planBaseDir 测试');
+
+            // 验证 storage 可以正确读取
+            const storage = createPlanStorage(planDir);
+            const planResult = await storage.getBySession('planbasedir-priority-test');
+            expect(planResult).not.toBeNull();
+            expect(planResult?.meta.title).toBe('planBaseDir 优先级测试');
+        } finally {
+            try {
+                await fs.rm(planDir, { recursive: true, force: true });
+                await fs.rm(workDir, { recursive: true, force: true });
+            } catch {
+                // ignore
+            }
+        }
+    });
 });
 
 // ==================== Plan 模式工具注册表测试 ====================
@@ -178,6 +216,38 @@ describe('ToolRegistry buildToolContext', () => {
     it('应该正确设置 workingDirectory', () => {
         const registry = new ToolRegistry({ workingDirectory: TEST_DIR });
         expect(registry.workingDirectory).toBe(TEST_DIR);
+    });
+
+    it('应该正确设置 planBaseDir', () => {
+        const planDir = path.join(process.cwd(), 'test-plan-dir');
+        const registry = new ToolRegistry({
+            workingDirectory: TEST_DIR,
+            planBaseDir: planDir,
+        });
+        expect(registry.planBaseDir).toBe(planDir);
+    });
+
+    it('planBaseDir 应该是可选的', () => {
+        const registry = new ToolRegistry({ workingDirectory: TEST_DIR });
+        expect(registry.planBaseDir).toBeUndefined();
+    });
+
+    it('createPlanModeToolRegistry 应该支持 planBaseDir', () => {
+        const planDir = path.join(process.cwd(), 'test-plan-registry-dir');
+        const registry = createPlanModeToolRegistry({
+            workingDirectory: TEST_DIR,
+            planBaseDir: planDir,
+        });
+        expect(registry.planBaseDir).toBe(planDir);
+    });
+
+    it('createDefaultToolRegistry 应该支持 planBaseDir', () => {
+        const planDir = path.join(process.cwd(), 'test-plan-registry-dir');
+        const registry = createDefaultToolRegistry({
+            workingDirectory: TEST_DIR,
+            planBaseDir: planDir,
+        });
+        expect(registry.planBaseDir).toBe(planDir);
     });
 });
 
@@ -358,6 +428,28 @@ describe('Agent Plan Mode 集成', () => {
             // 不应该包含 Plan Mode 相关指令
             expect(systemMessage?.content).not.toContain('Plan Mode');
             expect(systemMessage?.content).not.toContain('plan_create');
+        });
+    });
+
+    describe('planBaseDir 配置', () => {
+        it('Agent 应该支持 planBaseDir 配置', () => {
+            const planDir = path.join(process.cwd(), 'test-agent-plan-dir');
+            const systemPrompt = operatorPrompt({
+                directory: process.cwd(),
+                language: 'Chinese',
+                planMode: true,
+            });
+
+            const agent = new Agent({
+                provider: provider as unknown as LLMProvider,
+                systemPrompt,
+                planMode: true,
+                planBaseDir: planDir,
+            });
+
+            // Agent 创建成功即表示配置有效
+            expect(agent).toBeDefined();
+            expect(agent.getSessionId()).toBeDefined();
         });
     });
 });

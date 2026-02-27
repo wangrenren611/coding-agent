@@ -54,7 +54,8 @@ export class PlanCreateTool extends BaseTool<typeof planCreateSchema> {
             });
         }
 
-        const baseDir = context?.workingDirectory || process.cwd();
+        // 优先使用 planBaseDir，否则使用 workingDirectory
+        const baseDir = context?.planBaseDir || context?.workingDirectory || process.cwd();
         const storage = createPlanStorage(baseDir);
 
         try {

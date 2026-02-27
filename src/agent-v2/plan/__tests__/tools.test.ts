@@ -130,5 +130,85 @@ describe('Plan Tools', () => {
                 }
             }
         });
+
+        it('应该优先使用 planBaseDir 而非 workingDirectory', async () => {
+            const planDir = path.join(process.cwd(), 'test-plans-planbasedir');
+            const workDir = path.join(process.cwd(), 'test-plans-workdir');
+            try {
+                await tool.execute(
+                    {
+                        title: 'planBaseDir 优先级测试',
+                        content: '# planBaseDir 测试内容',
+                    },
+                    {
+                        ...context,
+                        workingDirectory: workDir,
+                        planBaseDir: planDir, // 应该优先使用这个
+                        sessionId: 'planbasedir-session',
+                    }
+                );
+
+                // 验证文件创建在 planBaseDir 目录，而非 workingDirectory
+                const planPath = path.join(planDir, 'plans', 'planbasedir-session', 'plan.md');
+                const content = await fs.readFile(planPath, 'utf-8');
+                expect(content).toContain('# planBaseDir 测试内容');
+
+                // 验证没有创建在 workDir
+                const wrongPath = path.join(workDir, 'plans', 'planbasedir-session', 'plan.md');
+                const wrongExists = await fs
+                    .access(wrongPath)
+                    .then(() => true)
+                    .catch(() => false);
+                expect(wrongExists).toBe(false);
+            } finally {
+                try {
+                    await fs.rm(planDir, { recursive: true, force: true });
+                    await fs.rm(workDir, { recursive: true, force: true });
+                } catch {
+                    // ignore
+                }
+            }
+        });
+
+        it('应该处理 planBaseDir 不存在的情况（自动创建）', async () => {
+            const nonExistentDir = path.join(
+                process.cwd(),
+                'test-plans-auto-create',
+                'nested',
+                'dir'
+            );
+            try {
+                const result = await tool.execute(
+                    {
+                        title: '自动创建目录测试',
+                        content: '# 自动创建测试',
+                    },
+                    {
+                        ...context,
+                        planBaseDir: nonExistentDir,
+                        sessionId: 'auto-create-session',
+                    }
+                );
+
+                expect(result.success).toBe(true);
+
+                // 验证目录被自动创建
+                const planPath = path.join(nonExistentDir, 'plans', 'auto-create-session', 'plan.md');
+                const exists = await fs
+                    .access(planPath)
+                    .then(() => true)
+                    .catch(() => false);
+                expect(exists).toBe(true);
+            } finally {
+                try {
+                    await fs.rm(path.join(process.cwd(), 'test-plans-auto-create'), {
+                        recursive: true,
+                        force: true,
+                    });
+                } catch {
+                    // ignore
+                }
+            }
+        });
     });
 });

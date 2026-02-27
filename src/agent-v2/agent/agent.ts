@@ -134,10 +134,16 @@ export class Agent {
             this.toolRegistry = config.toolRegistry;
         } else if (config.planMode) {
             // Plan 模式使用独立的只读工具注册表
-            this.toolRegistry = createPlanModeToolRegistry({ workingDirectory: process.cwd() }, this.provider);
+            this.toolRegistry = createPlanModeToolRegistry(
+                { workingDirectory: process.cwd(), planBaseDir: config.planBaseDir },
+                this.provider
+            );
         } else {
             // 普通模式使用完整工具注册表
-            this.toolRegistry = createDefaultToolRegistry({ workingDirectory: process.cwd() }, this.provider);
+            this.toolRegistry = createDefaultToolRegistry(
+                { workingDirectory: process.cwd(), planBaseDir: config.planBaseDir },
+                this.provider
+            );
         }
         this.configureToolEventBridge();
 

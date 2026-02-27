@@ -25,6 +25,8 @@ export type ToolContext = {
     time: string;
     /** 工作目录路径 */
     workingDirectory: string;
+    /** Plan 存储目录路径（默认使用 workingDirectory） */
+    planBaseDir?: string;
     /** 会话 ID */
     sessionId?: string;
     /** 记忆管理器 */

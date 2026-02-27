@@ -121,6 +121,7 @@ export const createDefaultToolRegistry = (
     // 兼容旧参数格式
     const registryConfig: ToolRegistryConfig = {
         workingDirectory: config.workingDirectory,
+        planBaseDir: config.planBaseDir,
         toolTimeout: config.toolTimeout,
     };
     const actualProvider = 'provider' in config ? config.provider : provider;
@@ -155,6 +156,7 @@ export const createPlanModeToolRegistry = (
 ) => {
     const registryConfig: ToolRegistryConfig = {
         workingDirectory: config.workingDirectory,
+        planBaseDir: config.planBaseDir,
         toolTimeout: config.toolTimeout,
     };
 
