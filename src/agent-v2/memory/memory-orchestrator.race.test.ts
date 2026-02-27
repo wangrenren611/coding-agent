@@ -209,11 +209,7 @@ describe('MemoryOrchestrator 并发初始化竞态条件测试', () => {
             });
 
             // 同时初始化所有 Session（模拟并发场景）
-            await Promise.all([
-                parentSession.initialize(),
-                childSession1.initialize(),
-                childSession2.initialize(),
-            ]);
+            await Promise.all([parentSession.initialize(), childSession1.initialize(), childSession2.initialize()]);
 
             // 所有 Session 都应该正确初始化
             expect(parentSession.getSessionId()).toBe('race-parent');
