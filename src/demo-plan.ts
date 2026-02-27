@@ -49,6 +49,10 @@ const RESET = '\x1b[0m';
 
 const MEMORY_PATH = '/Users/wrr/work/coding-agent-data/agent-memory';
 
+// Plan 存储目录应该使用项目目录，而不是 memory 目录
+// 因为 PlanCreateTool 使用 context.workingDirectory || process.cwd() 作为 baseDir
+const PLAN_BASE_DIR = process.cwd();
+
 // ==================== 辅助函数 ====================
 
 function parseRequestTimeoutMs(envValue: string | undefined): number {
@@ -238,7 +242,8 @@ async function runPlanDemo() {
 
     // 初始化 Plan 存储
     // createPlanStorage(baseDir) - 在指定目录下创建 plans/ 子目录
-    const planStorage = createPlanStorage(MEMORY_PATH);
+    // 注意：必须与 PlanCreateTool 使用相同的 baseDir (process.cwd())
+    const planStorage = createPlanStorage(PLAN_BASE_DIR);
 
     const query = process.argv[2] || '分析 src/agent-v2/plan 目录的代码结构，并创建一个实现计划';
 
