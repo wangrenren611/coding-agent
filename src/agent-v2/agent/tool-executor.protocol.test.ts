@@ -63,7 +63,7 @@ describe('ToolExecutor protocol events', () => {
                     ];
                 }
             ),
-        } as any;
+        } as unknown as LLMProvider;
 
         const executor = new ToolExecutor({
             toolRegistry: registry,
@@ -100,7 +100,7 @@ describe('ToolExecutor protocol events', () => {
                     result: { success: true, output: 'noop' },
                 },
             ]),
-        } as any;
+        } as unknown as LLMProvider;
 
         const executor = new ToolExecutor({
             toolRegistry: registry,
@@ -121,7 +121,7 @@ describe('ToolExecutor protocol events', () => {
                 throw new ToolCallValidationError('LLM response tool_calls[0].id is missing');
             }),
             execute: vi.fn(),
-        } as any;
+        } as unknown as LLMProvider;
 
         const createdSpy = vi.fn();
         const executor = new ToolExecutor({

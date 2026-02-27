@@ -5,7 +5,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import path from 'node:path';
 import { ReadFileTool, WriteFileTool } from '../file';
-import { TestEnvironment, SAMPLE_CODE, LARGE_FILE_CONTENT } from './test-utils';
+import { TestEnvironment, LARGE_FILE_CONTENT } from './test-utils';
 
 describe('File Tools', () => {
     let env: TestEnvironment;

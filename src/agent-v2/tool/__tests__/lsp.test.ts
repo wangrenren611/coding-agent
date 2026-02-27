@@ -67,8 +67,8 @@ console.log(result);`;
 
             // Should find interface, class, functions
             const symbols = result.metadata?.symbols || [];
-            const interfaceSymbol = symbols.find((s: any) => s.kind === 'InterfaceDeclaration');
-            const classSymbol = symbols.find((s: any) => s.kind === 'ClassDeclaration');
+            const interfaceSymbol = symbols.find((s: { kind: string }) => s.kind === 'InterfaceDeclaration');
+            const classSymbol = symbols.find((s: { kind: string }) => s.kind === 'ClassDeclaration');
             expect(interfaceSymbol).toBeDefined();
             expect(classSymbol).toBeDefined();
         });
@@ -108,7 +108,7 @@ class MyClass {
 
             expect(result.success).toBe(true);
             const symbols = result.metadata?.symbols || [];
-            const functionSymbol = symbols.find((s: any) => s.name === 'myFunction');
+            const functionSymbol = symbols.find((s: { kind: string }) => s.name === 'myFunction');
             expect(functionSymbol).toBeDefined();
         });
 
@@ -283,8 +283,6 @@ test();`;
             const references = result.metadata?.references || [];
 
             // Check if any reference has isDefinition property
-            const hasDefinition = references.some((r: any) => r.isDefinition === true);
-
             // Note: isDefinition might not be available in all TypeScript versions
             // For now, just verify we have references
             expect(references.length).toBeGreaterThan(0);
@@ -530,7 +528,7 @@ fetchData().then(console.log);`;
 
             expect(result.success).toBe(true);
             const symbols = result.metadata?.symbols || [];
-            const funcSymbol = symbols.find((s: any) => s.name === 'fetchData');
+            const funcSymbol = symbols.find((s: { kind: string }) => s.name === 'fetchData');
             expect(funcSymbol).toBeDefined();
         });
     });

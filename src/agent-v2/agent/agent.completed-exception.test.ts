@@ -209,7 +209,7 @@ describe('Agent completed and exception scenarios', () => {
         const events: AgentMessage[] = [];
 
         const agent = new Agent({
-            provider: provider as any,
+            provider: provider as unknown as LLMProvider,
             systemPrompt: 'test',
             stream: true,
             memoryManager,
@@ -235,7 +235,7 @@ describe('Agent completed and exception scenarios', () => {
         const memoryManager = await createReadyMemoryManager('length-complete');
 
         const agent = new Agent({
-            provider: provider as any,
+            provider: provider as unknown as LLMProvider,
             systemPrompt: 'test',
             stream: false,
             memoryManager,
@@ -252,7 +252,7 @@ describe('Agent completed and exception scenarios', () => {
         const memoryManager = await createReadyMemoryManager('content-filter-complete');
 
         const agent = new Agent({
-            provider: provider as any,
+            provider: provider as unknown as LLMProvider,
             systemPrompt: 'test',
             stream: false,
             memoryManager,
@@ -271,7 +271,7 @@ describe('Agent completed and exception scenarios', () => {
         const events: AgentMessage[] = [];
 
         const agent = new Agent({
-            provider: provider as any,
+            provider: provider as unknown as LLMProvider,
             systemPrompt: 'test',
             stream: false,
             memoryManager,
@@ -301,7 +301,7 @@ describe('Agent completed and exception scenarios', () => {
         const events: AgentMessage[] = [];
 
         const agent = new Agent({
-            provider: provider as any,
+            provider: provider as unknown as LLMProvider,
             systemPrompt: 'test',
             stream: false,
             memoryManager,
@@ -333,7 +333,7 @@ describe('Agent completed and exception scenarios', () => {
         const events: AgentMessage[] = [];
 
         const agent = new Agent({
-            provider: provider as any,
+            provider: provider as unknown as LLMProvider,
             systemPrompt: 'test',
             stream: false,
             memoryManager,
@@ -372,7 +372,7 @@ describe('Agent completed and exception scenarios', () => {
         const events: AgentMessage[] = [];
 
         const agent = new Agent({
-            provider: provider as any,
+            provider: provider as unknown as LLMProvider,
             systemPrompt: 'test',
             stream: false,
             memoryManager,
@@ -427,7 +427,7 @@ describe('Agent completed and exception scenarios', () => {
         const events: AgentMessage[] = [];
 
         const agent = new Agent({
-            provider: provider as any,
+            provider: provider as unknown as LLMProvider,
             systemPrompt: 'test',
             stream: true,
             memoryManager,
@@ -469,7 +469,7 @@ describe('Agent completed and exception scenarios', () => {
         const events: AgentMessage[] = [];
 
         const agent = new Agent({
-            provider: provider as any,
+            provider: provider as unknown as LLMProvider,
             systemPrompt: 'test',
             stream: true,
             memoryManager,
@@ -504,7 +504,7 @@ describe('Agent completed and exception scenarios', () => {
         const events: AgentMessage[] = [];
 
         const agent = new Agent({
-            provider: provider as any,
+            provider: provider as unknown as LLMProvider,
             systemPrompt: 'test',
             stream: true,
             memoryManager,
@@ -531,7 +531,7 @@ describe('Agent completed and exception scenarios', () => {
         const events: AgentMessage[] = [];
 
         const agent = new Agent({
-            provider: provider as any,
+            provider: provider as unknown as LLMProvider,
             systemPrompt: 'test',
             stream: true,
             thinking: true,
@@ -559,7 +559,7 @@ describe('Agent completed and exception scenarios', () => {
         const events: AgentMessage[] = [];
 
         const agent = new Agent({
-            provider: provider as any,
+            provider: provider as unknown as LLMProvider,
             systemPrompt: 'test',
             stream: true,
             thinking: true,
@@ -585,7 +585,7 @@ describe('Agent completed and exception scenarios', () => {
         const events: AgentMessage[] = [];
 
         const agent = new Agent({
-            provider: provider as any,
+            provider: provider as unknown as LLMProvider,
             systemPrompt: 'test',
             stream: false,
             memoryManager,
@@ -619,7 +619,7 @@ describe('Agent completed and exception scenarios', () => {
         const events: AgentMessage[] = [];
 
         const agent = new Agent({
-            provider: provider as any,
+            provider: provider as unknown as LLMProvider,
             systemPrompt: 'test',
             stream: false,
             memoryManager,
@@ -650,7 +650,7 @@ describe('Agent completed and exception scenarios', () => {
         const memoryManager = await createReadyMemoryManager('invalid-tool-calls');
 
         const agent = new Agent({
-            provider: provider as any,
+            provider: provider as unknown as LLMProvider,
             systemPrompt: 'test',
             stream: false,
             memoryManager,

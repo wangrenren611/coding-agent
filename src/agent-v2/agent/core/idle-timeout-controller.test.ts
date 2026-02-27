@@ -9,7 +9,7 @@
  * 5. 状态查询方法正确
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { IdleTimeoutController, createIdleTimeout } from './idle-timeout-controller';
 
 describe('IdleTimeoutController', () => {

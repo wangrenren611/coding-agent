@@ -138,9 +138,9 @@ describe('Task tools', () => {
     let sessionId: string;
     let memoryManager: IMemoryManager;
     let toolContext: ToolContext;
-    const withContext = <T extends { execute: (...args: any[]) => any }>(tool: T): T => {
+    const withContext = <T extends { execute: (...args: unknown[]) => unknown }>(tool: T): T => {
         const rawExecute = tool.execute.bind(tool);
-        (tool as any).execute = (args?: unknown) => rawExecute(args as never, toolContext);
+        (tool as unknown as { execute: (args?: unknown) => unknown }).execute = (args?: unknown) => rawExecute(args as never, toolContext);
         return tool;
     };
 
@@ -220,7 +220,7 @@ describe('Task tools', () => {
         const listed = await list.execute();
         expect(listed.success).toBe(true);
         expect(listed.metadata?.count).toBe(2);
-        const listedTask2 = listed.metadata?.tasks.find((t: any) => t.id === '2');
+        const listedTask2 = listed.metadata?.tasks.find((t: { id: string }) => t.id === '2');
         expect(listedTask2?.blockedBy).toEqual([]);
 
         const deleted = await update.execute({ taskId: '2', status: 'deleted' });
@@ -486,7 +486,7 @@ describe('Task tools', () => {
                             subagent_type: 'explore',
                         }),
                     },
-                } as any,
+                } as unknown as ToolCall,
             ],
             {
                 sessionId,

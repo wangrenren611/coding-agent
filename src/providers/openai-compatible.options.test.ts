@@ -12,6 +12,7 @@ function createDoneStream(): ReadableStream<Uint8Array> {
 }
 
 async function drainStream(stream: AsyncGenerator<Chunk>): Promise<void> {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     for await (const _ of stream) {
         // no-op
     }

@@ -73,7 +73,7 @@ describe('BashTool', () => {
         const tool = new BashTool();
         const result = await tool.execute({
             command: 'echo background-log-check',
-            run_in_background: 'true' as any,
+            run_in_background: 'true' as unknown as boolean,
         });
 
         expect(result.success).toBe(true);

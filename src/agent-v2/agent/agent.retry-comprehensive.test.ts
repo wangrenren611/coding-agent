@@ -12,14 +12,12 @@
  * 8. 边界条件和异常场景
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { Agent } from './agent';
-import { AgentStatus } from './types';
 import { AgentState } from './core/agent-state';
 import { EventType } from '../eventbus';
 import { createMemoryManager } from '../memory';
 import type { LLMGenerateOptions, LLMResponse } from '../../providers/types';
-import type { Message } from '../session/types';
 
 // ==================== Mock Provider ====================
 
@@ -33,7 +31,7 @@ class MockProvider {
     public customResponses: Partial<LLMResponse>[] = [];
     public responseIndex = 0;
 
-    async generate(messages: unknown[], options?: LLMGenerateOptions) {
+    async generate(_messages: unknown[], _options?: LLMGenerateOptions) {
         this.callCount++;
 
         if (this.responseDelay > 0) {
@@ -50,7 +48,7 @@ class MockProvider {
         if (this.shouldFail && this.failCount < this.maxFails) {
             this.failCount++;
             const error = new Error('Simulated API error');
-            (error as any).status = 500;
+            (error as unknown as { status: number }).status = 500;
             throw error;
         }
 
@@ -251,7 +249,7 @@ describe('Agent 各类错误重试测试', () => {
             };
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -279,7 +277,7 @@ describe('Agent 各类错误重试测试', () => {
             };
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -306,7 +304,7 @@ describe('Agent 各类错误重试测试', () => {
             };
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -333,7 +331,7 @@ describe('Agent 各类错误重试测试', () => {
             };
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -356,7 +354,7 @@ describe('Agent 各类错误重试测试', () => {
             };
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -376,7 +374,7 @@ describe('Agent 各类错误重试测试', () => {
             };
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -396,7 +394,7 @@ describe('Agent 各类错误重试测试', () => {
             };
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -418,7 +416,7 @@ describe('Agent 各类错误重试测试', () => {
             };
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -438,7 +436,7 @@ describe('Agent 各类错误重试测试', () => {
             };
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -458,7 +456,7 @@ describe('Agent 各类错误重试测试', () => {
             };
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -506,7 +504,7 @@ describe('Agent 各类错误重试测试', () => {
             };
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -535,7 +533,7 @@ describe('Agent 各类错误重试测试', () => {
             };
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -565,7 +563,7 @@ describe('Agent 各类错误重试测试', () => {
             };
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -620,7 +618,7 @@ describe('Agent 各类错误重试测试', () => {
             };
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -657,7 +655,7 @@ describe('Agent 各类错误重试测试', () => {
             };
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -700,7 +698,7 @@ describe('Agent 各类错误重试测试', () => {
             };
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -767,7 +765,7 @@ describe('Agent 重试延迟测试', () => {
 
         const startTime = Date.now();
         const agent = new Agent({
-            provider: mockProvider as any,
+            provider: mockProvider as unknown as LLMProvider,
             systemPrompt: 'Test',
             stream: false,
             memoryManager,
@@ -806,7 +804,7 @@ describe('Agent 重试延迟测试', () => {
 
         const startTime = Date.now();
         const agent = new Agent({
-            provider: mockProvider as any,
+            provider: mockProvider as unknown as LLMProvider,
             systemPrompt: 'Test',
             stream: false,
             memoryManager,
@@ -843,7 +841,7 @@ describe('Agent 重试延迟测试', () => {
         };
 
         const agent = new Agent({
-            provider: mockProvider as any,
+            provider: mockProvider as unknown as LLMProvider,
             systemPrompt: 'Test',
             stream: false,
             memoryManager,
@@ -885,7 +883,7 @@ describe('Agent 中止与重试交互测试', () => {
         };
 
         const agent = new Agent({
-            provider: mockProvider as any,
+            provider: mockProvider as unknown as LLMProvider,
             systemPrompt: 'Test',
             stream: false,
             memoryManager,
@@ -910,7 +908,7 @@ describe('Agent 中止与重试交互测试', () => {
         mockProvider.responseDelay = 5000; // 5 秒延迟
 
         const agent = new Agent({
-            provider: mockProvider as any,
+            provider: mockProvider as unknown as LLMProvider,
             systemPrompt: 'Test',
             stream: false,
             memoryManager,
@@ -932,7 +930,7 @@ describe('Agent 中止与重试交互测试', () => {
         };
 
         const agent = new Agent({
-            provider: mockProvider as any,
+            provider: mockProvider as unknown as LLMProvider,
             systemPrompt: 'Test',
             stream: false,
             memoryManager,
@@ -999,7 +997,7 @@ describe('Agent 重试边界条件测试', () => {
             };
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -1014,7 +1012,7 @@ describe('Agent 重试边界条件测试', () => {
 
         it('第一次就成功不应该有重试', async () => {
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -1028,7 +1026,7 @@ describe('Agent 重试边界条件测试', () => {
 
         it('连续成功后重试计数应该为 0', async () => {
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -1083,7 +1081,7 @@ describe('Agent 重试边界条件测试', () => {
             };
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -1137,7 +1135,7 @@ describe('Agent 重试边界条件测试', () => {
             };
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -1153,16 +1151,14 @@ describe('Agent 重试边界条件测试', () => {
 
     describe('错误分类', () => {
         it('网络错误应该被分类为可重试', async () => {
-            const { LLMRetryableError } = await import('../../providers');
-
             mockProvider.generate = async () => {
                 const error = new Error('Network error');
-                (error as any).code = 'ENOTFOUND';
+                (error as unknown as { code: string }).code = 'ENOTFOUND';
                 throw error;
             };
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -1188,7 +1184,7 @@ describe('Agent 重试边界条件测试', () => {
             };
 
             const agent = new Agent({
-                provider: mockProvider as any,
+                provider: mockProvider as unknown as LLMProvider,
                 systemPrompt: 'Test',
                 stream: false,
                 memoryManager,
@@ -1238,7 +1234,7 @@ describe('Agent 流式模式重试测试', () => {
         };
 
         const agent = new Agent({
-            provider: mockProvider as any,
+            provider: mockProvider as unknown as LLMProvider,
             systemPrompt: 'Test',
             stream: true,
             memoryManager,
@@ -1281,7 +1277,7 @@ describe('Agent 流式模式重试测试', () => {
         };
 
         const agent = new Agent({
-            provider: mockProvider as any,
+            provider: mockProvider as unknown as LLMProvider,
             systemPrompt: 'Test',
             stream: true,
             memoryManager,
@@ -1329,7 +1325,7 @@ describe('Agent executeWithResult 重试测试', () => {
         };
 
         const agent = new Agent({
-            provider: mockProvider as any,
+            provider: mockProvider as unknown as LLMProvider,
             systemPrompt: 'Test',
             stream: false,
             memoryManager,
@@ -1351,7 +1347,7 @@ describe('Agent executeWithResult 重试测试', () => {
         };
 
         const agent = new Agent({
-            provider: mockProvider as any,
+            provider: mockProvider as unknown as LLMProvider,
             systemPrompt: 'Test',
             stream: false,
             memoryManager,
@@ -1374,7 +1370,7 @@ describe('Agent executeWithResult 重试测试', () => {
         };
 
         const agent = new Agent({
-            provider: mockProvider as any,
+            provider: mockProvider as unknown as LLMProvider,
             systemPrompt: 'Test',
             stream: false,
             memoryManager,

@@ -502,7 +502,7 @@ describe('Session persistence queue', () => {
 
         const repairedIds = toolMessages
             .filter((msg) => String(msg.content).includes('TOOL_CALL_INTERRUPTED'))
-            .map((msg) => (msg as any).tool_call_id)
+            .map((msg) => (msg as unknown as { tool_call_id?: string }).tool_call_id)
             .sort();
 
         // 修复的是合法的 tool calls（call_valid 和 call_empty）
