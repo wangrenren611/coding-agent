@@ -66,9 +66,10 @@ export class ToolRegistry {
 
     private buildToolContext(ctx?: ExecutionContext): ToolContext {
         return {
-            environment: this.workingDirectory,
+            environment: process.env.NODE_ENV || 'development',
             platform: process.platform,
             time: new Date().toISOString(),
+            workingDirectory: this.workingDirectory,
             sessionId: ctx?.sessionId,
             memoryManager: ctx?.memoryManager,
             streamCallback: ctx?.streamCallback,

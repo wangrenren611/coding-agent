@@ -240,7 +240,7 @@ async function demo1() {
     console.log('='.repeat(60));
     console.log();
 
-    const preferredMemoryPath = 'D:/work/coding-agent-data/agent-memory';
+    const preferredMemoryPath = '/Users/wrr/work/coding-agent-data/agent-memory';
 
     fs.mkdirSync(preferredMemoryPath, { recursive: true });
     fs.accessSync(preferredMemoryPath, fs.constants.W_OK);
@@ -269,7 +269,7 @@ async function demo1() {
             //    sessionId: 'agent-7',
             // sessionId: 'agent-8',
             // sessionId: 'agent-32',
-            sessionId: 'agent-38',
+            sessionId: 'agent-38.1',
             // sessionId: 'agent-39',
             //   sessionId:'18a09614-bb1e-4f06-b685-d040ff08c3aa',
 
@@ -291,7 +291,7 @@ async function demo1() {
         // });
 
         // 执行查询
-        const query = process.argv[2] || '处理Plan执行创建代码了，没有生成PLan：D:\\work\\coding-agent\\src\\query.text';
+        const query = process.argv[2] || '处理："./query.text"';
         console.log(`${CYAN}❯${RESET} ${query}\n`);
 
         const response = await agent.execute(query);

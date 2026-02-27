@@ -1,7 +1,5 @@
 /**
- * ============================================================================
- * Plan Module - Index (简化版)
- * ============================================================================
+ * Plan Module - Index
  *
  * Plan 计划功能模块入口
  *
@@ -10,42 +8,48 @@
  * - Agent 自己阅读文档并执行
  * - 不需要复杂的状态管理
  *
- * 使用方式：
+ * 使用示例：
  * ```typescript
- * // Plan 模式下，Agent 使用 plan_create 创建文档
- * // 执行模式下，Agent 读取文档并执行
+ * import { createPlanStorage } from './plan';
  *
- * import { createPlanStorage, getPlanFilePath } from './plan';
- *
- * const storage = createPlanStorage(undefined, undefined, process.cwd());
+ * const storage = createPlanStorage(process.cwd());
  *
  * // 创建 Plan
  * const meta = await storage.create({
  *   title: '实现用户认证功能',
  *   content: '# 计划内容...',
- *   sessionId: 'xxx',
+ *   sessionId: 'session-xxx',
  * });
  *
  * // 读取 Plan
- * const plan = await storage.getBySession('xxx');
- * console.log(plan.content); // Markdown 内容
+ * const plan = await storage.getBySession('session-xxx');
+ * console.log(plan?.content); // Markdown 内容
  * ```
  */
 
 // Types
-export * from './types';
+export type { PlanMeta, PlanData, CreatePlanParams } from './types';
+export {
+    PLANS_DIR_NAME,
+    PLAN_ID_PREFIX,
+    planCreateSchema,
+    generatePlanId,
+    nowIso,
+    isValidSessionId,
+    sanitizeSessionId,
+} from './types';
 
 // Storage
 export type { PlanStorage } from './storage';
 export {
     FilePlanStorage,
-    MemoryManagerPlanStorage,
+    PlanStorageError,
     createPlanStorage,
     getPlanFilePath,
 } from './storage';
 
 // Tools
-export { planTools, PlanCreateTool } from './tools';
+export { PlanCreateTool } from './tools';
 
 // Plan Mode
 export {

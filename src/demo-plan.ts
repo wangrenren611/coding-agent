@@ -46,7 +46,7 @@ const RESET = '\x1b[0m';
 
 // ==================== 配置 ====================
 
-const MEMORY_PATH = 'D:/work/coding-agent-data/agent-memory';
+const MEMORY_PATH = '/Users/wrr/work/coding-agent-data/agent-memory';
 
 // ==================== 辅助函数 ====================
 
@@ -236,7 +236,7 @@ async function runPlanDemo() {
     await memoryManager.initialize();
 
     // 初始化 Plan 存储
-    const planStorage = createPlanStorage(memoryManager, undefined, MEMORY_PATH);
+    const planStorage = createPlanStorage(MEMORY_PATH);
 
     const query = process.argv[2] || '分析 src/agent-v2/plan 目录的代码结构，并创建一个实现计划';
 

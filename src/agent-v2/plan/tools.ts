@@ -1,16 +1,13 @@
 /**
- * ============================================================================
- * Plan Module - Tools (简化版)
- * ============================================================================
+ * Plan Module - Tools
  *
- * Plan 工具 - 只保留 plan_create，用于创建 Markdown 文档
+ * Plan 工具实现
  */
 
 import { z } from 'zod';
 import { BaseTool, ToolContext, ToolResult } from '../tool/base';
-import type { IMemoryManager } from '../memory/types';
-import { planCreateSchema } from './types';
-import { createPlanStorage } from './storage';
+import { planCreateSchema, isValidSessionId } from './types';
+import { createPlanStorage, PlanStorageError } from './storage';
 
 // ==================== 常量 ====================
 
@@ -25,6 +22,11 @@ The plan will be saved as a Markdown document that can be read during execution.
 
 // ==================== Plan Create Tool ====================
 
+/**
+ * plan_create 工具
+ *
+ * 在 Plan 模式下创建实现计划文档
+ */
 export class PlanCreateTool extends BaseTool<typeof planCreateSchema> {
     name = 'plan_create';
     description = PLAN_CREATE_DESCRIPTION;
@@ -43,11 +45,17 @@ export class PlanCreateTool extends BaseTool<typeof planCreateSchema> {
             });
         }
 
-        const storage = createPlanStorage(
-            context?.memoryManager as IMemoryManager | undefined,
-            sessionId,
-            context?.environment || process.cwd()
-        );
+        // 验证 sessionId 格式
+        if (!isValidSessionId(sessionId)) {
+            return this.result({
+                success: false,
+                metadata: { error: 'INVALID_SESSION_ID' },
+                output: `Invalid session ID format: ${sessionId}`,
+            });
+        }
+
+        const baseDir = context?.workingDirectory || process.cwd();
+        const storage = createPlanStorage(baseDir);
 
         try {
             const meta = await storage.create({
@@ -60,12 +68,20 @@ export class PlanCreateTool extends BaseTool<typeof planCreateSchema> {
                 success: true,
                 metadata: {
                     id: meta.id,
+                    sessionId: meta.sessionId,
                     title: meta.title,
                     filePath: meta.filePath,
                 },
-                output: `Plan created: "${meta.title}"\nFile: ${meta.filePath}`,
+                output: `Plan created: "${meta.title}"\nSession: ${meta.sessionId}\nFile: ${meta.filePath}`,
             });
         } catch (error) {
+            if (error instanceof PlanStorageError) {
+                return this.result({
+                    success: false,
+                    metadata: { error: error.code },
+                    output: `Failed to create plan: ${error.message}`,
+                });
+            }
             const err = error as Error;
             return this.result({
                 success: false,
@@ -75,8 +91,3 @@ export class PlanCreateTool extends BaseTool<typeof planCreateSchema> {
         }
     }
 }
-
-// ==================== Exports ====================
-
-/** 所有 Plan 工具 */
-export const planTools = [PlanCreateTool];

@@ -17,10 +17,17 @@ export interface ToolResult<T = unknown> {
  * 工具上下文信息
  */
 export type ToolContext = {
+    /** 运行环境（如 'development', 'production'） */
     environment: string;
+    /** 平台（如 'darwin', 'win32'） */
     platform: string;
+    /** 当前时间 ISO 字符串 */
     time: string;
+    /** 工作目录路径 */
+    workingDirectory: string;
+    /** 会话 ID */
     sessionId?: string;
+    /** 记忆管理器 */
     memoryManager?: IMemoryManager;
     /** 流式输出回调（用于子 Agent 事件冒泡） */
     streamCallback?: (message: AgentMessage) => void;

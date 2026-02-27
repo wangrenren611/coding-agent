@@ -117,8 +117,8 @@ export class Agent {
         this.inputValidator = new InputValidator();
         this.errorClassifier = new ErrorClassifier();
 
-        // 处理 Plan 模式的系统提示词
-        const systemPrompt = this.buildSystemPrompt(config.systemPrompt ?? '', config.planMode);
+        // 系统提示词由调用者构建（如 operatorPrompt），Agent 不再内部处理 planMode
+        const systemPrompt = config.systemPrompt ?? '';
 
         this.session = new Session({
             systemPrompt,
@@ -324,82 +324,6 @@ export class Agent {
         } catch {
             return String(value);
         }
-    }
-
-    /**
-     * 构建系统提示词，根据 planMode 添加额外指令
-     */
-    private buildSystemPrompt(basePrompt: string, planMode?: boolean): string {
-        if (!planMode) {
-            return basePrompt;
-        }
-
-        const planModeInstruction = `
-
-# ⚠️ CRITICAL: You are in Plan Mode
-
-In this mode, you **MUST** create a plan first using the **plan_create** tool. You **CANNOT** write code or create files directly.
-
-## What You MUST Do
-1. **Analyze** the requirements and explore the codebase
-2. **Create a plan** using plan_create tool - this is MANDATORY
-3. **Stop** after creating the plan - do NOT implement it
-
-## What You CAN Do
-- Read files (read_file, glob, grep, lsp)
-- Search the web (web_search, web_fetch)
-- Use tasks to delegate exploration (task, task_create, task_get, task_list, task_update, task_stop)
-
-## What You CANNOT Do
-- ❌ write_file - FORBIDDEN
-- ❌ precise_replace, batch_replace - FORBIDDEN
-- ❌ bash - FORBIDDEN
-
-## How to Create a Plan
-
-Use the **plan_create** tool to create a detailed implementation plan:
-
-\`\`\`
-plan_create({
-  title: "Implementation Plan Title",
-  content: \`
-# Plan Title
-
-## Overview
-Brief description of what will be implemented.
-
-## Technical Approach
-Key technical decisions and approach.
-
-## Implementation Steps
-
-### Step 1: Step Title
-- Description of the step
-- Files to create/modify
-- Expected output
-
-### Step 2: Step Title
-- Description of the step
-- Files to create/modify
-- Expected output
-
-## Acceptance Criteria
-- [ ] Criteria 1
-- [ ] Criteria 2
-\`
-})
-\`\`\`
-
-## ⚠️ IMPORTANT
-- You MUST call plan_create before finishing
-- You MUST NOT attempt to write files or execute code
-- The plan will be executed by another agent in execution mode
-- Your job is ONLY to analyze and plan, not to implement
-
-When you have created the plan, say "I have created the implementation plan. The plan is ready for execution."
-`;
-
-        return basePrompt + planModeInstruction;
     }
 
     // ==================== 状态查询 ====================

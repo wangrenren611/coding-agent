@@ -1,5 +1,5 @@
 /**
- * Plan Mode 测试 (简化版)
+ * Plan Mode 测试
  */
 
 import { describe, it, expect } from 'vitest';
@@ -14,46 +14,52 @@ import {
 describe('Plan Mode', () => {
     describe('READ_ONLY_TOOLS', () => {
         it('应该包含文件读取工具', () => {
-            expect(READ_ONLY_TOOLS).toContain('read_file');
-            expect(READ_ONLY_TOOLS).toContain('glob');
-            expect(READ_ONLY_TOOLS).toContain('grep');
+            expect(READ_ONLY_TOOLS.has('read_file')).toBe(true);
+            expect(READ_ONLY_TOOLS.has('glob')).toBe(true);
+            expect(READ_ONLY_TOOLS.has('grep')).toBe(true);
+            expect(READ_ONLY_TOOLS.has('lsp')).toBe(true);
         });
 
         it('应该包含网络工具', () => {
-            expect(READ_ONLY_TOOLS).toContain('web_search');
-            expect(READ_ONLY_TOOLS).toContain('web_fetch');
+            expect(READ_ONLY_TOOLS.has('web_search')).toBe(true);
+            expect(READ_ONLY_TOOLS.has('web_fetch')).toBe(true);
         });
 
         it('应该包含 Plan 工具', () => {
-            expect(READ_ONLY_TOOLS).toContain('plan_create');
+            expect(READ_ONLY_TOOLS.has('plan_create')).toBe(true);
         });
 
         it('应该包含 Task 工具', () => {
-            expect(READ_ONLY_TOOLS).toContain('task');
-            expect(READ_ONLY_TOOLS).toContain('task_create');
-            expect(READ_ONLY_TOOLS).toContain('task_get');
-            expect(READ_ONLY_TOOLS).toContain('task_list');
-            expect(READ_ONLY_TOOLS).toContain('task_update');
-            expect(READ_ONLY_TOOLS).toContain('task_stop');
+            expect(READ_ONLY_TOOLS.has('task')).toBe(true);
+            expect(READ_ONLY_TOOLS.has('task_create')).toBe(true);
+            expect(READ_ONLY_TOOLS.has('task_get')).toBe(true);
+            expect(READ_ONLY_TOOLS.has('task_list')).toBe(true);
+            expect(READ_ONLY_TOOLS.has('task_update')).toBe(true);
+            expect(READ_ONLY_TOOLS.has('task_stop')).toBe(true);
         });
 
         it('应该包含 Skill 工具', () => {
-            expect(READ_ONLY_TOOLS).toContain('skill');
+            expect(READ_ONLY_TOOLS.has('skill')).toBe(true);
+        });
+
+        it('不应该包含写工具', () => {
+            expect(READ_ONLY_TOOLS.has('write_file')).toBe(false);
+            expect(READ_ONLY_TOOLS.has('bash')).toBe(false);
         });
     });
 
     describe('BLOCKED_TOOL_PATTERNS', () => {
         it('应该阻止写文件工具', () => {
-            expect(BLOCKED_TOOL_PATTERNS.some(p => p.test('write_file'))).toBe(true);
+            expect(BLOCKED_TOOL_PATTERNS.some((p) => p.test('write_file'))).toBe(true);
         });
 
         it('应该阻止 Bash 工具', () => {
-            expect(BLOCKED_TOOL_PATTERNS.some(p => p.test('bash'))).toBe(true);
+            expect(BLOCKED_TOOL_PATTERNS.some((p) => p.test('bash'))).toBe(true);
         });
 
         it('不应该阻止 Task 工具', () => {
-            expect(BLOCKED_TOOL_PATTERNS.some(p => p.test('task_create'))).toBe(false);
-            expect(BLOCKED_TOOL_PATTERNS.some(p => p.test('task_update'))).toBe(false);
+            expect(BLOCKED_TOOL_PATTERNS.some((p) => p.test('task_create'))).toBe(false);
+            expect(BLOCKED_TOOL_PATTERNS.some((p) => p.test('task_update'))).toBe(false);
         });
     });
 
@@ -98,6 +104,12 @@ describe('Plan Mode', () => {
 
         it('不应该允许未知工具', () => {
             expect(isToolAllowedInPlanMode('unknown_tool')).toBe(false);
+        });
+
+        it('黑名单优先级高于白名单', () => {
+            // 如果一个工具同时在黑名单和白名单，黑名单优先
+            // 当前设计中 write_file 不在白名单，但即使添加也应该被阻止
+            expect(isToolAllowedInPlanMode('write_file')).toBe(false);
         });
     });
 

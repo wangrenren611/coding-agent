@@ -147,6 +147,7 @@ export class ToolExecutor {
             environment: process.env.NODE_ENV || 'development',
             platform: process.platform,
             time: new Date().toISOString(),
+            workingDirectory: process.cwd(),
         };
 
         if (this.config.memoryManager) {
