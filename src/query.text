@@ -1,0 +1,8 @@
+我觉得是这个问题，grep，没有返回具体的内容，是不是这个问题，你分析分析：
+{
+      "messageId": "9eb35f45-e85d-4489-a9fc-6e63372ec8aa",
+      "role": "tool",
+      "content": "Found 28 matches in 10 files",
+      "tool_call_id": "call_c4cc98db2e3c4541b611561c",
+      "type": "tool-result"
+    },

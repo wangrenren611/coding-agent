@@ -812,7 +812,7 @@ async function demo1() {
             idleTimeout: 1000 * 60 * 5,
             enableCompaction: true,
             compactionConfig: {
-                keepMessagesNum: 40,
+                keepMessagesNum: 20,
                 triggerRatio: 0.9,
             },
             memoryManager,

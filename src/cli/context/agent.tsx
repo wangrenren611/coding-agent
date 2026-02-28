@@ -17,6 +17,7 @@ import {
 import { ProviderRegistry } from '../../providers';
 import { operatorPrompt } from '../../agent-v2/prompts/operator';
 import type { ModelId } from '../../providers';
+import { platform } from 'os';
 
 const CLI_REQUEST_TIMEOUT_MS = 90 * 1000;
 const CLI_MAX_RETRIES = 2;
@@ -305,7 +306,11 @@ export const { Provider: AgentProvider, use: useAgent } = createSimpleContext<Ag
             // toolRegistryRef.current.register([new BashTool()]);
 
             // 2. 创建内存管理器
-            const memoryPath = './data/cli/agent-memory';
+            const memoryPath =
+                platform() === 'win32'
+                    ? 'D:/work/coding-agent-data/agent-memory'
+                    : '/Users/wrr/work/coding-agent-data/agent-memory';
+
             const fs = await import('fs');
             try {
                 fs.mkdirSync(memoryPath, { recursive: true });

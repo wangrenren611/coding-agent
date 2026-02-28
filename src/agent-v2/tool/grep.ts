@@ -413,10 +413,52 @@ Usage:
             const totalMatches = Array.from(fileMap.values()).reduce((sum, v) => sum + v.matches.length, 0);
 
             const data = { countFiles: results.length, countMatches: totalMatches, results, truncated, timedOut };
+
+            // 构建包含具体匹配内容的 output，确保 LLM 能看到关键信息
+            const outputLines: string[] = [];
+            outputLines.push(
+                `Found ${totalMatches} matches in ${results.length} files${truncated ? ' (truncated)' : ''}${timedOut ? ' (timed out)' : ''}`
+            );
+
+            // 添加具体的匹配内容（最多显示前 20 个文件的内容）
+            const maxFilesToShow = 20;
+            const maxMatchesPerFile = 10;
+            let filesShown = 0;
+
+            for (const fileResult of results) {
+                if (filesShown >= maxFilesToShow) break;
+
+                outputLines.push('');
+                outputLines.push(`${fileResult.file}:`);
+
+                let matchesShown = 0;
+                for (const match of fileResult.matches) {
+                    if (matchesShown >= maxMatchesPerFile) {
+                        const remaining = fileResult.matches.length - matchesShown;
+                        if (remaining > 0) {
+                            outputLines.push(`  ... and ${remaining} more matches in this file`);
+                        }
+                        break;
+                    }
+                    const lineInfo = match.line !== null ? `Line ${match.line}` : 'Line ?';
+                    const content = match.content || '';
+                    // 限制每行内容的长度
+                    const truncatedContent = content.length > 200 ? content.slice(0, 200) + '...' : content;
+                    outputLines.push(`  ${lineInfo}: ${truncatedContent}`);
+                    matchesShown++;
+                }
+                filesShown++;
+            }
+
+            if (results.length > maxFilesToShow) {
+                outputLines.push('');
+                outputLines.push(`... and ${results.length - maxFilesToShow} more files with matches`);
+            }
+
             return this.result({
                 success: true,
                 metadata: data,
-                output: `Found ${totalMatches} matches in ${results.length} files${truncated ? ' (truncated)' : ''}${timedOut ? ' (timed out)' : ''}`,
+                output: outputLines.join('\n'),
             });
         } catch (error) {
             // === 所有 spawn/执行错误都返回 ToolResult，不抛出 ===
