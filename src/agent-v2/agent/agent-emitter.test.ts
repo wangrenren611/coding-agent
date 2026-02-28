@@ -6,16 +6,16 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { AgentEmitter } from './agent-emitter';
 import { AgentMessageType } from './stream-types';
 import { AgentStatus } from './types';
-import type { Usage } from '../../providers';
+import type { Usage, ToolCall } from '../../providers/types';
 
 describe('AgentEmitter', () => {
     let emitter: AgentEmitter;
-    let mockCallback: ReturnType<typeof vi.fn>;
+    let mockCallback: (msg: unknown) => void;
     const sessionId = 'test-session-id';
     const timestamp = 1234567890;
 
     beforeEach(() => {
-        mockCallback = vi.fn();
+        mockCallback = vi.fn() as unknown as (msg: unknown) => void;
         emitter = new AgentEmitter({
             streamCallback: mockCallback,
             sessionId,
@@ -47,7 +47,7 @@ describe('AgentEmitter', () => {
 
     describe('updateConfig', () => {
         it('应该更新配置', () => {
-            const newCallback = vi.fn();
+            const newCallback = vi.fn() as unknown as (msg: unknown) => void;
             emitter.updateConfig({ streamCallback: newCallback });
 
             emitter.emitStatus(AgentStatus.RUNNING, 'running');

@@ -47,10 +47,10 @@ class MockProvider {
                 {
                     index: 0,
                     message: {
-                        role: 'assistant',
+                        role: 'assistant' as const,
                         content: 'Hello! How can I help you?',
                     },
-                    finish_reason: 'stop',
+                    finish_reason: 'stop' as const,
                 },
             ],
             usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
@@ -94,8 +94,8 @@ describe('CLI 场景：补偿重试超过限制后重新发送消息', () => {
                 choices: [
                     {
                         index: 0,
-                        message: { role: 'assistant', content: '' },
-                        finish_reason: 'stop',
+                        message: { role: 'assistant' as const, content: '' },
+                        finish_reason: 'stop' as const,
                     },
                 ],
             },
@@ -103,8 +103,8 @@ describe('CLI 场景：补偿重试超过限制后重新发送消息', () => {
                 choices: [
                     {
                         index: 0,
-                        message: { role: 'assistant', content: '' },
-                        finish_reason: 'stop',
+                        message: { role: 'assistant' as const, content: '' },
+                        finish_reason: 'stop' as const,
                     },
                 ],
             },
@@ -171,8 +171,8 @@ describe('CLI 场景：补偿重试超过限制后重新发送消息', () => {
                 choices: [
                     {
                         index: 0,
-                        message: { role: 'assistant', content: 'Normal response' },
-                        finish_reason: 'stop',
+                        message: { role: 'assistant' as const, content: 'Normal response' },
+                        finish_reason: 'stop' as const,
                     },
                 ],
             },
@@ -239,8 +239,8 @@ describe('CLI 场景：补偿重试超过限制后重新发送消息', () => {
                 choices: [
                     {
                         index: 0,
-                        message: { role: 'assistant', content: '' },
-                        finish_reason: 'stop',
+                        message: { role: 'assistant' as const, content: '' },
+                        finish_reason: 'stop' as const,
                     },
                 ],
             },
@@ -248,8 +248,8 @@ describe('CLI 场景：补偿重试超过限制后重新发送消息', () => {
                 choices: [
                     {
                         index: 0,
-                        message: { role: 'assistant', content: '' },
-                        finish_reason: 'stop',
+                        message: { role: 'assistant' as const, content: '' },
+                        finish_reason: 'stop' as const,
                     },
                 ],
             },
@@ -319,8 +319,8 @@ describe('CLI 场景：补偿重试超过限制后重新发送消息', () => {
                 choices: [
                     {
                         index: 0,
-                        message: { role: 'assistant', content: '' },
-                        finish_reason: 'stop',
+                        message: { role: 'assistant' as const, content: '' },
+                        finish_reason: 'stop' as const,
                     },
                 ],
             },
@@ -328,8 +328,8 @@ describe('CLI 场景：补偿重试超过限制后重新发送消息', () => {
                 choices: [
                     {
                         index: 0,
-                        message: { role: 'assistant', content: '' },
-                        finish_reason: 'stop',
+                        message: { role: 'assistant' as const, content: '' },
+                        finish_reason: 'stop' as const,
                     },
                 ],
             },
@@ -359,8 +359,8 @@ describe('CLI 场景：补偿重试超过限制后重新发送消息', () => {
                 choices: [
                     {
                         index: 0,
-                        message: { role: 'assistant', content: 'Success response' },
-                        finish_reason: 'stop',
+                        message: { role: 'assistant' as const, content: 'Success response' },
+                        finish_reason: 'stop' as const,
                     },
                 ],
             },
@@ -452,8 +452,8 @@ describe('CLI 场景：补偿重试超过限制后重新发送消息', () => {
             choices: [
                 {
                     index: 0,
-                    message: { role: 'assistant', content: '' },
-                    finish_reason: 'stop',
+                    message: { role: 'assistant' as const, content: '' },
+                    finish_reason: 'stop' as const,
                 },
             ],
         };

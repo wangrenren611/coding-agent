@@ -464,11 +464,13 @@ describe('Session Compaction', () => {
                 },
             });
 
-            const tokenInfo = session.getTokenInfo();
+            const compaction = session.getCompaction();
+            const tokenInfo = compaction!.getTokenInfo(session.getMessages());
 
             expect(tokenInfo.usableLimit).toBe(800);
             expect(tokenInfo.threshold).toBe(640);
-            expect(tokenInfo.messageCount).toBe(1); // 只有 system 消息
+            expect(typeof tokenInfo.estimatedTotal).toBe('number');
+            expect(session.getMessageCount()).toBe(1); // 只有 system 消息
             expect(typeof tokenInfo.estimatedTotal).toBe('number');
         });
 

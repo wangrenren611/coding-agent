@@ -6,7 +6,7 @@ import { ToolExecutor } from './core/tool-executor';
 import { LLMResponseInvalidError } from './errors';
 import { ToolCallValidationError } from '../tool/registry';
 import type { ToolCall } from './core-types';
-import type { LLMProvider } from '../../providers';
+import type { ToolRegistry } from '../tool/registry';
 
 function createToolCall(callId: string, toolName: string, args: Record<string, unknown>): ToolCall {
     return {
@@ -64,7 +64,7 @@ describe('ToolExecutor protocol events', () => {
                     ];
                 }
             ),
-        } as unknown as LLMProvider;
+        } as unknown as ToolRegistry;
 
         const executor = new ToolExecutor({
             toolRegistry: registry,
@@ -101,7 +101,7 @@ describe('ToolExecutor protocol events', () => {
                     result: { success: true, output: 'noop' },
                 },
             ]),
-        } as unknown as LLMProvider;
+        } as unknown as ToolRegistry;
 
         const executor = new ToolExecutor({
             toolRegistry: registry,
@@ -122,7 +122,7 @@ describe('ToolExecutor protocol events', () => {
                 throw new ToolCallValidationError('LLM response tool_calls[0].id is missing');
             }),
             execute: vi.fn(),
-        } as unknown as LLMProvider;
+        } as unknown as ToolRegistry;
 
         const createdSpy = vi.fn();
         const executor = new ToolExecutor({

@@ -3,13 +3,14 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { LLMProvider } from '../../../providers';
 import { LLMBadRequestError } from '../../../providers/types/errors';
-import type { LLMGenerateOptions, LLMRequestMessage, LLMResponse } from '../../../providers';
+import type { LLMGenerateOptions, LLMRequestMessage, LLMResponse, ToolCall } from '../../../providers';
 import type { ToolContext } from '../base';
 import { TestEnvironment } from './test-utils';
 import { createMemoryManager } from '../../memory';
 import type { IMemoryManager } from '../../memory';
 import { ToolRegistry } from '../registry';
 import {
+    SubagentType,
     TaskCreateTool,
     TaskGetTool,
     TaskListTool,
@@ -133,13 +134,81 @@ class FailingProvider extends LLMProvider {
     }
 }
 
+// Type helpers for metadata access
+interface TaskCreateMetadata {
+    id: string;
+    subject: string;
+    description: string;
+    activeForm: string;
+    status: string;
+    owner: string;
+    metadata?: Record<string, unknown>;
+    blocks: string[];
+    blockedBy: string[];
+    createdAt: string;
+    updatedAt: string;
+}
+
+interface TaskGetMetadata {
+    id: string;
+    subject: string;
+    description: string;
+    activeForm: string;
+    status: string;
+    owner: string;
+    metadata?: Record<string, unknown>;
+    blocks: string[];
+    blockedBy: string[];
+    createdAt: string;
+    updatedAt: string;
+}
+
+interface TaskListMetadata {
+    count: number;
+    tasks: Array<{
+        id: string;
+        subject: string;
+        description: string;
+        activeForm: string;
+        status: string;
+        owner: string;
+        blocks: string[];
+        blockedBy: string[];
+    }>;
+}
+
+interface TaskToolMetadata {
+    task_id: string;
+    status: string;
+    parent_session_id?: string;
+    child_session_id?: string;
+    subagent_type?: string;
+    model?: string;
+    resume?: string;
+    storage?: string;
+    error?: string;
+    timed_out?: boolean;
+}
+
+interface TaskStopMetadata {
+    status: string;
+}
+
+interface TaskOutputMetadata {
+    task_id: string;
+    status: string;
+    timed_out?: boolean;
+    error?: string;
+}
+
 describe('Task tools', () => {
     const MANAGED_TASK_PARENT_ID = '__task_tool_managed__';
     let env: TestEnvironment;
     let sessionId: string;
     let memoryManager: IMemoryManager;
     let toolContext: ToolContext;
-    const withContext = <T extends { execute: (...args: unknown[]) => unknown }>(tool: T): T => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const withContext = <T extends { execute: (...args: any[]) => any }>(tool: T): T => {
         const rawExecute = tool.execute.bind(tool);
         (tool as unknown as { execute: (args?: unknown) => unknown }).execute = (args?: unknown) =>
             rawExecute(args as never, toolContext);
@@ -159,6 +228,7 @@ describe('Task tools', () => {
             environment: process.cwd(),
             platform: process.platform,
             time: new Date().toISOString(),
+            workingDirectory: process.cwd(),
             sessionId,
             memoryManager,
         };
@@ -188,10 +258,13 @@ describe('Task tools', () => {
             activeForm: 'Running test suite',
         });
 
+        const createAMeta = createA.metadata as TaskCreateMetadata | undefined;
+        const createBMeta = createB.metadata as TaskCreateMetadata | undefined;
+
         expect(createA.success).toBe(true);
         expect(createB.success).toBe(true);
-        expect(createA.metadata?.id).toBe('1');
-        expect(createB.metadata?.id).toBe('2');
+        expect(createAMeta?.id).toBe('1');
+        expect(createBMeta?.id).toBe('2');
 
         const storedTasks = await memoryManager.queryTasks({
             sessionId,
@@ -209,10 +282,13 @@ describe('Task tools', () => {
 
         const task1 = await get.execute({ taskId: '1' });
         const task2 = await get.execute({ taskId: '2' });
+        const task1Meta = task1.metadata as TaskGetMetadata | undefined;
+        const task2Meta = task2.metadata as TaskGetMetadata | undefined;
+
         expect(task1.success).toBe(true);
         expect(task2.success).toBe(true);
-        expect(task1.metadata?.blocks).toContain('2');
-        expect(task2.metadata?.blockedBy).toContain('1');
+        expect(task1Meta?.blocks).toContain('2');
+        expect(task2Meta?.blockedBy).toContain('1');
 
         const step1 = await update.execute({ taskId: '1', status: 'in_progress' });
         const step2 = await update.execute({ taskId: '1', status: 'completed' });
@@ -220,9 +296,11 @@ describe('Task tools', () => {
         expect(step2.success).toBe(true);
 
         const listed = await list.execute();
+        const listedMeta = listed.metadata as TaskListMetadata | undefined;
+
         expect(listed.success).toBe(true);
-        expect(listed.metadata?.count).toBe(2);
-        const listedTask2 = listed.metadata?.tasks.find((t: { id: string }) => t.id === '2');
+        expect(listedMeta?.count).toBe(2);
+        const listedTask2 = listedMeta?.tasks.find((t) => t.id === '2');
         expect(listedTask2?.blockedBy).toEqual([]);
 
         const deleted = await update.execute({ taskId: '2', status: 'deleted' });
@@ -252,7 +330,7 @@ describe('Task tools', () => {
             }),
         ]);
 
-        const ids = results.map((result) => result.metadata?.id as string);
+        const ids = results.map((result) => (result.metadata as TaskCreateMetadata | undefined)?.id as string);
         expect(ids).toHaveLength(3);
         expect(new Set(ids).size).toBe(3);
         const sortedIds = ids.map((id) => Number.parseInt(id, 10)).sort((a, b) => a - b);
@@ -355,8 +433,10 @@ describe('Task tools', () => {
 
         const list = withContext(new TaskListTool());
         const listed = await list.execute();
+        const listedMeta = listed.metadata as TaskListMetadata | undefined;
+
         expect(listed.success).toBe(true);
-        expect(listed.metadata?.count).toBe(0);
+        expect(listedMeta?.count).toBe(0);
 
         const storedTasks = await memoryManager.queryTasks({
             sessionId,
@@ -370,13 +450,16 @@ describe('Task tools', () => {
         const result = await taskTool.execute({
             description: 'Analyze modules',
             prompt: 'Summarize modules',
-            subagent_type: 'explore',
+            subagent_type: SubagentType.Explore as SubagentType,
+            run_in_background: false,
         });
 
+        const resultMeta = result.metadata as TaskToolMetadata | undefined;
+
         expect(result.success).toBe(true);
-        expect(result.metadata?.storage).toBe('memory_manager');
-        const runId = result.metadata?.task_id as string;
-        const childSessionId = result.metadata?.child_session_id as string;
+        expect(resultMeta?.storage).toBe('memory_manager');
+        const runId = resultMeta?.task_id as string;
+        const childSessionId = resultMeta?.child_session_id as string;
         const run = await memoryManager.getSubTaskRun(runId);
         expect(run).toBeTruthy();
         expect(run?.status).toBe('completed');
@@ -409,14 +492,17 @@ describe('Task tools', () => {
         const started = await taskTool.execute({
             description: 'Explore codebase',
             prompt: 'Summarize repo structure',
-            subagent_type: 'explore',
+            subagent_type: SubagentType.Explore as SubagentType,
             run_in_background: true,
         });
+
+        const startedMeta = started.metadata as TaskToolMetadata | undefined;
+
         expect(started.success).toBe(true);
-        const taskId = started.metadata?.task_id as string;
+        const taskId = startedMeta?.task_id as string;
         expect(taskId).toBeTruthy();
-        expect(started.metadata?.status).toBe('queued');
-        expect(started.metadata?.storage).toBe('memory_manager');
+        expect(startedMeta?.status).toBe('queued');
+        expect(startedMeta?.storage).toBe('memory_manager');
 
         const run = await waitForSubTaskRunStatus(memoryManager, taskId, ['completed']);
         expect(run?.status).toBe('completed');
@@ -435,14 +521,18 @@ describe('Task tools', () => {
         const started = await taskTool.execute({
             description: 'Long task',
             prompt: 'Do something long',
-            subagent_type: 'explore',
+            subagent_type: SubagentType.Explore as SubagentType,
             run_in_background: true,
         });
-        const taskId = started.metadata?.task_id as string;
+
+        const startedMeta = started.metadata as TaskToolMetadata | undefined;
+        const taskId = startedMeta?.task_id as string;
 
         const stopped = await stopTool.execute({ task_id: taskId });
+        const stoppedMeta = stopped.metadata as TaskStopMetadata | undefined;
+
         expect(stopped.success).toBe(true);
-        expect(['cancelling', 'cancelled', 'completed']).toContain(stopped.metadata?.status);
+        expect(['cancelling', 'cancelled', 'completed']).toContain(stoppedMeta?.status);
 
         const run = await waitForSubTaskRunStatus(memoryManager, taskId, ['cancelled', 'completed']);
         expect(['cancelled', 'completed']).toContain(run?.status);
@@ -456,11 +546,12 @@ describe('Task tools', () => {
         const started = await taskTool.execute({
             description: 'Slow background task',
             prompt: 'Wait and then respond',
-            subagent_type: 'explore',
+            subagent_type: SubagentType.Explore as SubagentType,
             run_in_background: true,
         });
 
-        const taskId = started.metadata?.task_id as string;
+        const startedMeta = started.metadata as TaskToolMetadata | undefined;
+        const taskId = startedMeta?.task_id as string;
 
         const run = await waitForSubTaskRunStatus(memoryManager, taskId, ['completed']);
         expect(run?.status).toBe('completed');
@@ -485,10 +576,11 @@ describe('Task tools', () => {
                         arguments: JSON.stringify({
                             description: 'Slow run',
                             prompt: 'Wait and return',
-                            subagent_type: 'explore',
+                            subagent_type: SubagentType.Explore,
+                            run_in_background: false,
                         }),
                     },
-                } as unknown as ToolCall,
+                } as ToolCall,
             ],
             {
                 sessionId,
@@ -506,12 +598,15 @@ describe('Task tools', () => {
         const result = await taskTool.execute({
             description: 'Failure case',
             prompt: 'Trigger provider failure',
-            subagent_type: 'explore',
+            subagent_type: SubagentType.Explore as SubagentType,
+            run_in_background: false,
         });
 
+        const resultMeta = result.metadata as TaskToolMetadata | undefined;
+
         expect(result.success).toBe(false);
-        expect(result.metadata?.status).toBe('failed');
-        expect(result.metadata?.error).toBe('LLM_REQUEST_FAILED');
+        expect(resultMeta?.status).toBe('failed');
+        expect(resultMeta?.error).toBe('LLM_REQUEST_FAILED');
         expect(result.output).toContain('Agent execution failed');
     });
 });
@@ -548,10 +643,12 @@ describe('TaskOutputTool', () => {
 
     it('should return error for non-existent task', async () => {
         const tool = new TaskOutputTool();
-        const result = await tool.execute({ task_id: 'non-existent-task' }, toolContext);
+        const result = await tool.execute({ task_id: 'non-existent-task', block: true, timeout: 30000 }, toolContext);
+
+        const resultMeta = result.metadata as TaskOutputMetadata | undefined;
 
         expect(result.success).toBe(false);
-        expect(result.metadata?.error).toBe('TASK_NOT_FOUND');
+        expect(resultMeta?.error).toBe('TASK_NOT_FOUND');
         expect(result.output).toContain('Task not found');
     });
 
@@ -562,14 +659,16 @@ describe('TaskOutputTool', () => {
             {
                 description: 'Background test task',
                 prompt: 'Run test',
-                subagent_type: 'explore',
+                subagent_type: SubagentType.Explore as SubagentType,
                 run_in_background: true,
             },
             toolContext
         );
 
+        const createResultMeta = createResult.metadata as TaskToolMetadata | undefined;
+
         expect(createResult.success).toBe(true);
-        const taskId = createResult.metadata?.task_id as string;
+        const taskId = createResultMeta?.task_id as string;
         expect(taskId).toBeDefined();
 
         // 等待任务完成
@@ -577,10 +676,12 @@ describe('TaskOutputTool', () => {
 
         // 使用 TaskOutputTool 获取输出
         const outputTool = new TaskOutputTool();
-        const outputResult = await outputTool.execute({ task_id: taskId, block: false }, toolContext);
+        const outputResult = await outputTool.execute({ task_id: taskId, block: false, timeout: 30000 }, toolContext);
 
-        expect(outputResult.metadata?.task_id).toBe(taskId);
-        expect(outputResult.metadata?.status).toBe('completed');
+        const outputResultMeta = outputResult.metadata as TaskOutputMetadata | undefined;
+
+        expect(outputResultMeta?.task_id).toBe(taskId);
+        expect(outputResultMeta?.status).toBe('completed');
     });
 
     it('should support block=false for non-blocking status check', async () => {
@@ -590,21 +691,24 @@ describe('TaskOutputTool', () => {
             {
                 description: 'Long running task',
                 prompt: 'Run slow test',
-                subagent_type: 'explore',
+                subagent_type: SubagentType.Explore as SubagentType,
                 run_in_background: true,
             },
             toolContext
         );
 
-        const taskId = createResult.metadata?.task_id as string;
+        const createResultMeta = createResult.metadata as TaskToolMetadata | undefined;
+        const taskId = createResultMeta?.task_id as string;
 
         // 立即检查状态（非阻塞）
         const outputTool = new TaskOutputTool();
         const outputResult = await outputTool.execute({ task_id: taskId, block: false, timeout: 1000 }, toolContext);
 
+        const outputResultMeta = outputResult.metadata as TaskOutputMetadata | undefined;
+
         // 任务应该在运行中或已完成（取决于执行速度）
-        expect(outputResult.metadata?.task_id).toBe(taskId);
-        expect(['queued', 'running', 'completed']).toContain(outputResult.metadata?.status);
+        expect(outputResultMeta?.task_id).toBe(taskId);
+        expect(['queued', 'running', 'completed']).toContain(outputResultMeta?.status);
     });
 
     it('should return timed_out when timeout exceeded with block=true', async () => {
@@ -614,21 +718,24 @@ describe('TaskOutputTool', () => {
             {
                 description: 'Very long running task',
                 prompt: 'Run very slow test',
-                subagent_type: 'explore',
+                subagent_type: SubagentType.Explore as SubagentType,
                 run_in_background: true,
             },
             toolContext
         );
 
-        const taskId = createResult.metadata?.task_id as string;
+        const createResultMeta = createResult.metadata as TaskToolMetadata | undefined;
+        const taskId = createResultMeta?.task_id as string;
 
         // 使用短超时进行阻塞获取
         const outputTool = new TaskOutputTool();
         const outputResult = await outputTool.execute({ task_id: taskId, block: true, timeout: 1000 }, toolContext);
 
+        const outputResultMeta = outputResult.metadata as TaskOutputMetadata | undefined;
+
         // 应该返回超时状态
-        expect(outputResult.metadata?.task_id).toBe(taskId);
-        expect(outputResult.metadata?.timed_out).toBe(true);
-        expect(['queued', 'running']).toContain(outputResult.metadata?.status);
+        expect(outputResultMeta?.task_id).toBe(taskId);
+        expect(outputResultMeta?.timed_out).toBe(true);
+        expect(['queued', 'running']).toContain(outputResultMeta?.status);
     });
 });

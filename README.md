@@ -179,7 +179,7 @@ npm install
 
 ### 环境变量配置
 
-创建 `.env` 文件：
+创建 `.env.development` 文件：
 
 ```env
 # GLM (智谱)

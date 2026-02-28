@@ -486,7 +486,9 @@ describe('OpenAICompatibleProvider', () => {
                     throw new Error('should not reach successful fetch path');
                 });
 
-            const error = await shortTimeoutProvider.generate([{ role: 'user', content: 'Hello' }]).then(
+            const result = shortTimeoutProvider.generate([{ role: 'user', content: 'Hello' }]);
+            // generate() returns Promise when not streaming
+            const error = await (result as Promise<unknown>).then(
                 () => null,
                 (err) => err
             );

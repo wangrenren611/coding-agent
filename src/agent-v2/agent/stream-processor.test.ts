@@ -1,25 +1,29 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { StreamProcessor } from './stream-processor';
-import { Chunk } from '../../providers';
+import { Chunk, Usage } from '../../providers';
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+type MockFn = any;
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 describe('StreamProcessor', () => {
     let processor: StreamProcessor;
-    let onMessageUpdate: ReturnType<typeof vi.fn>;
-    let onReasoningDelta: ((content: string, messageId: string) => void) | undefined;
-    let onReasoningStart: ((messageId: string) => void) | undefined;
-    let onReasoningComplete: ((messageId: string) => void) | undefined;
-    let onTextDelta: ReturnType<typeof vi.fn>;
-    let onTextStart: ReturnType<typeof vi.fn>;
-    let onTextComplete: ReturnType<typeof vi.fn>;
-    let onMessageCreate: ReturnType<typeof vi.fn>;
-    let onUsageUpdate: ReturnType<typeof vi.fn>;
-    let onValidationViolation: ReturnType<typeof vi.fn>;
+    let onMessageUpdate: MockFn;
+    let onReasoningDelta: MockFn;
+    let onReasoningStart: MockFn;
+    let onReasoningComplete: MockFn;
+    let onTextDelta: MockFn;
+    let onTextStart: MockFn;
+    let onTextComplete: MockFn;
+    let onMessageCreate: MockFn;
+    let onUsageUpdate: MockFn;
+    let onValidationViolation: MockFn;
 
     beforeEach(() => {
         onMessageUpdate = vi.fn();
-        onReasoningDelta = vi.fn<(content: string, messageId: string) => void>();
-        onReasoningStart = vi.fn<(messageId: string) => void>();
-        onReasoningComplete = vi.fn<(messageId: string) => void>();
+        onReasoningDelta = vi.fn();
+        onReasoningStart = vi.fn();
+        onReasoningComplete = vi.fn();
         onTextDelta = vi.fn();
         onTextStart = vi.fn();
         onTextComplete = vi.fn();
@@ -50,10 +54,13 @@ describe('StreamProcessor', () => {
         it('should store reasoning_content via onMessageUpdate', () => {
             const chunk: Chunk = {
                 id: 'chunk-1',
+                index: 0,
                 choices: [
                     {
                         index: 0,
                         delta: {
+                            role: 'assistant',
+                            content: '',
                             reasoning_content: '思考中...',
                         },
                     },
@@ -73,9 +80,21 @@ describe('StreamProcessor', () => {
 
         it('should accumulate reasoning content across multiple chunks', () => {
             const chunks: Chunk[] = [
-                { id: 'c1', choices: [{ index: 0, delta: { reasoning_content: '第一步...' } }] },
-                { id: 'c2', choices: [{ index: 0, delta: { reasoning_content: '第二步...' } }] },
-                { id: 'c3', choices: [{ index: 0, delta: { reasoning_content: '第三步。' } }] },
+                {
+                    index: 0,
+                    id: 'c1',
+                    choices: [{ index: 0, delta: { role: 'assistant', content: '', reasoning_content: '第一步...' } }],
+                },
+                {
+                    index: 0,
+                    id: 'c2',
+                    choices: [{ index: 0, delta: { role: 'assistant', content: '', reasoning_content: '第二步...' } }],
+                },
+                {
+                    index: 0,
+                    id: 'c3',
+                    choices: [{ index: 0, delta: { role: 'assistant', content: '', reasoning_content: '第三步。' } }],
+                },
             ];
 
             chunks.forEach((c) => processor.processChunk(c));
@@ -89,9 +108,21 @@ describe('StreamProcessor', () => {
 
         it('should trigger onReasoningStart only on first chunk', () => {
             const chunks: Chunk[] = [
-                { id: 'c1', choices: [{ index: 0, delta: { reasoning_content: 'a' } }] },
-                { id: 'c2', choices: [{ index: 0, delta: { reasoning_content: 'b' } }] },
-                { id: 'c3', choices: [{ index: 0, delta: { reasoning_content: 'c' } }] },
+                {
+                    index: 0,
+                    id: 'c1',
+                    choices: [{ index: 0, delta: { role: 'assistant', content: '', reasoning_content: 'a' } }],
+                },
+                {
+                    index: 0,
+                    id: 'c2',
+                    choices: [{ index: 0, delta: { role: 'assistant', content: '', reasoning_content: 'b' } }],
+                },
+                {
+                    index: 0,
+                    id: 'c3',
+                    choices: [{ index: 0, delta: { role: 'assistant', content: '', reasoning_content: 'c' } }],
+                },
             ];
 
             chunks.forEach((c) => processor.processChunk(c));
@@ -102,8 +133,16 @@ describe('StreamProcessor', () => {
 
         it('should trigger onReasoningDelta for each chunk', () => {
             const chunks: Chunk[] = [
-                { id: 'c1', choices: [{ index: 0, delta: { reasoning_content: 'a' } }] },
-                { id: 'c2', choices: [{ index: 0, delta: { reasoning_content: 'b' } }] },
+                {
+                    index: 0,
+                    id: 'c1',
+                    choices: [{ index: 0, delta: { role: 'assistant', content: '', reasoning_content: 'a' } }],
+                },
+                {
+                    index: 0,
+                    id: 'c2',
+                    choices: [{ index: 0, delta: { role: 'assistant', content: '', reasoning_content: 'b' } }],
+                },
             ];
 
             chunks.forEach((c) => processor.processChunk(c));
@@ -114,10 +153,11 @@ describe('StreamProcessor', () => {
         it('should trigger onReasoningComplete when finish_reason present', () => {
             const chunk: Chunk = {
                 id: 'c1',
+                index: 0,
                 choices: [
                     {
                         index: 0,
-                        delta: { reasoning_content: 'done' },
+                        delta: { role: 'assistant', content: '', reasoning_content: 'done' },
                         finish_reason: 'stop',
                     },
                 ],
@@ -130,8 +170,22 @@ describe('StreamProcessor', () => {
 
         it('should only trigger onReasoningComplete once', () => {
             const chunks: Chunk[] = [
-                { id: 'c1', choices: [{ index: 0, delta: { reasoning_content: 'a' }, finish_reason: 'stop' }] },
-                { id: 'c2', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] },
+                {
+                    index: 0,
+                    id: 'c1',
+                    choices: [
+                        {
+                            index: 0,
+                            delta: { role: 'assistant', content: '', reasoning_content: 'a' },
+                            finish_reason: 'stop',
+                        },
+                    ],
+                },
+                {
+                    index: 0,
+                    id: 'c2',
+                    choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: 'stop' }],
+                },
             ];
 
             chunks.forEach((c) => processor.processChunk(c));
@@ -146,7 +200,8 @@ describe('StreamProcessor', () => {
         it('should store content via onMessageUpdate', () => {
             const chunk: Chunk = {
                 id: 'c1',
-                choices: [{ index: 0, delta: { content: 'Hello' } }],
+                index: 0,
+                choices: [{ index: 0, delta: { role: 'assistant', content: 'Hello' } }],
             };
 
             processor.processChunk(chunk);
@@ -162,9 +217,9 @@ describe('StreamProcessor', () => {
 
         it('should accumulate content across chunks', () => {
             const chunks: Chunk[] = [
-                { id: 'c1', choices: [{ index: 0, delta: { content: 'Hello ' } }] },
-                { id: 'c2', choices: [{ index: 0, delta: { content: 'World' } }] },
-                { id: 'c3', choices: [{ index: 0, delta: { content: '!' } }] },
+                { index: 0, id: 'c1', choices: [{ index: 0, delta: { role: 'assistant', content: 'Hello ' } }] },
+                { index: 0, id: 'c2', choices: [{ index: 0, delta: { role: 'assistant', content: 'World' } }] },
+                { index: 0, id: 'c3', choices: [{ index: 0, delta: { role: 'assistant', content: '!' } }] },
             ];
 
             chunks.forEach((c) => processor.processChunk(c));
@@ -178,8 +233,8 @@ describe('StreamProcessor', () => {
 
         it('should trigger onTextStart only once', () => {
             const chunks: Chunk[] = [
-                { id: 'c1', choices: [{ index: 0, delta: { content: 'a' } }] },
-                { id: 'c2', choices: [{ index: 0, delta: { content: 'b' } }] },
+                { index: 0, id: 'c1', choices: [{ index: 0, delta: { role: 'assistant', content: 'a' } }] },
+                { index: 0, id: 'c2', choices: [{ index: 0, delta: { role: 'assistant', content: 'b' } }] },
             ];
 
             chunks.forEach((c) => processor.processChunk(c));
@@ -190,7 +245,8 @@ describe('StreamProcessor', () => {
         it('should trigger onTextComplete when finish_reason present', () => {
             const chunk: Chunk = {
                 id: 'c1',
-                choices: [{ index: 0, delta: { content: 'done' }, finish_reason: 'stop' }],
+                index: 0,
+                choices: [{ index: 0, delta: { role: 'assistant', content: 'done' }, finish_reason: 'stop' }],
             };
 
             processor.processChunk(chunk);
@@ -206,10 +262,13 @@ describe('StreamProcessor', () => {
             const chunks: Chunk[] = [
                 {
                     id: 'c1',
+                    index: 0,
                     choices: [
                         {
                             index: 0,
                             delta: {
+                                role: 'assistant',
+                                content: '',
                                 tool_calls: [
                                     {
                                         index: 0,
@@ -224,14 +283,19 @@ describe('StreamProcessor', () => {
                 },
                 {
                     id: 'c2',
+                    index: 0,
                     choices: [
                         {
                             index: 0,
                             delta: {
+                                role: 'assistant',
+                                content: '',
                                 tool_calls: [
                                     {
                                         index: 0,
-                                        function: { arguments: '{"path"' },
+                                        id: '',
+                                        type: 'function',
+                                        function: { name: '', arguments: '{"path"' },
                                     },
                                 ],
                             },
@@ -240,14 +304,19 @@ describe('StreamProcessor', () => {
                 },
                 {
                     id: 'c3',
+                    index: 0,
                     choices: [
                         {
                             index: 0,
                             delta: {
+                                role: 'assistant',
+                                content: '',
                                 tool_calls: [
                                     {
                                         index: 0,
-                                        function: { arguments: ': "test.txt"}' },
+                                        id: '',
+                                        type: 'function',
+                                        function: { name: '', arguments: ': "test.txt"}' },
                                     },
                                 ],
                             },
@@ -268,10 +337,13 @@ describe('StreamProcessor', () => {
             const chunks: Chunk[] = [
                 {
                     id: 'c1',
+                    index: 0,
                     choices: [
                         {
                             index: 0,
                             delta: {
+                                role: 'assistant',
+                                content: '',
                                 tool_calls: [
                                     {
                                         index: 0,
@@ -300,13 +372,16 @@ describe('StreamProcessor', () => {
 
         it('should trigger onTextComplete before tool_calls if text started', () => {
             const chunks: Chunk[] = [
-                { id: 'c1', choices: [{ index: 0, delta: { content: 'Let me help' } }] },
+                { index: 0, id: 'c1', choices: [{ index: 0, delta: { role: 'assistant', content: 'Let me help' } }] },
                 {
                     id: 'c2',
+                    index: 0,
                     choices: [
                         {
                             index: 0,
                             delta: {
+                                role: 'assistant',
+                                content: '',
                                 tool_calls: [
                                     {
                                         index: 0,
@@ -329,10 +404,13 @@ describe('StreamProcessor', () => {
         it('should call onMessageCreate for tool calls', () => {
             const chunk: Chunk = {
                 id: 'c1',
+                index: 0,
                 choices: [
                     {
                         index: 0,
                         delta: {
+                            role: 'assistant',
+                            content: '',
                             tool_calls: [
                                 {
                                     index: 0,
@@ -362,9 +440,19 @@ describe('StreamProcessor', () => {
     describe('mixed content scenarios', () => {
         it('should handle reasoning -> content -> finish', () => {
             const chunks: Chunk[] = [
-                { id: 'c1', choices: [{ index: 0, delta: { reasoning_content: 'Thinking...' } }] },
-                { id: 'c2', choices: [{ index: 0, delta: { content: 'Answer' } }] },
-                { id: 'c3', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] },
+                {
+                    index: 0,
+                    id: 'c1',
+                    choices: [
+                        { index: 0, delta: { role: 'assistant', content: '', reasoning_content: 'Thinking...' } },
+                    ],
+                },
+                { index: 0, id: 'c2', choices: [{ index: 0, delta: { role: 'assistant', content: 'Answer' } }] },
+                {
+                    index: 0,
+                    id: 'c3',
+                    choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: 'stop' }],
+                },
             ];
 
             chunks.forEach((c) => processor.processChunk(c));
@@ -380,14 +468,27 @@ describe('StreamProcessor', () => {
 
         it('should handle reasoning -> content -> tool_calls', () => {
             const chunks: Chunk[] = [
-                { id: 'c1', choices: [{ index: 0, delta: { reasoning_content: 'Need to read file' } }] },
-                { id: 'c2', choices: [{ index: 0, delta: { content: 'I will read it' } }] },
+                {
+                    index: 0,
+                    id: 'c1',
+                    choices: [
+                        { index: 0, delta: { role: 'assistant', content: '', reasoning_content: 'Need to read file' } },
+                    ],
+                },
+                {
+                    index: 0,
+                    id: 'c2',
+                    choices: [{ index: 0, delta: { role: 'assistant', content: 'I will read it' } }],
+                },
                 {
                     id: 'c3',
+                    index: 0,
                     choices: [
                         {
                             index: 0,
                             delta: {
+                                role: 'assistant',
+                                content: '',
                                 tool_calls: [
                                     {
                                         index: 0,
@@ -415,13 +516,20 @@ describe('StreamProcessor', () => {
 
         it('should handle content -> tool_calls (no reasoning)', () => {
             const chunks: Chunk[] = [
-                { id: 'c1', choices: [{ index: 0, delta: { content: 'Here is the result' } }] },
+                {
+                    index: 0,
+                    id: 'c1',
+                    choices: [{ index: 0, delta: { role: 'assistant', content: 'Here is the result' } }],
+                },
                 {
                     id: 'c2',
+                    index: 0,
                     choices: [
                         {
                             index: 0,
                             delta: {
+                                role: 'assistant',
+                                content: '',
                                 tool_calls: [
                                     {
                                         index: 0,
@@ -448,9 +556,23 @@ describe('StreamProcessor', () => {
 
         it('should handle only reasoning (no content, no tools)', () => {
             const chunks: Chunk[] = [
-                { id: 'c1', choices: [{ index: 0, delta: { reasoning_content: 'Just thinking' } }] },
-                { id: 'c2', choices: [{ index: 0, delta: { reasoning_content: ' deeply' } }] },
-                { id: 'c3', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] },
+                {
+                    index: 0,
+                    id: 'c1',
+                    choices: [
+                        { index: 0, delta: { role: 'assistant', content: '', reasoning_content: 'Just thinking' } },
+                    ],
+                },
+                {
+                    index: 0,
+                    id: 'c2',
+                    choices: [{ index: 0, delta: { role: 'assistant', content: '', reasoning_content: ' deeply' } }],
+                },
+                {
+                    index: 0,
+                    id: 'c3',
+                    choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: 'stop' }],
+                },
             ];
 
             chunks.forEach((c) => processor.processChunk(c));
@@ -470,7 +592,8 @@ describe('StreamProcessor', () => {
         it('should capture chunk id', () => {
             const chunk: Chunk = {
                 id: 'chatcmpl-123',
-                choices: [{ index: 0, delta: { content: 'test' } }],
+                index: 0,
+                choices: [{ index: 0, delta: { role: 'assistant', content: 'test' } }],
             };
 
             processor.processChunk(chunk);
@@ -482,8 +605,9 @@ describe('StreamProcessor', () => {
         it('should capture model name', () => {
             const chunk: Chunk = {
                 id: 'c1',
+                index: 0,
                 model: 'glm-4',
-                choices: [{ index: 0, delta: { content: 'test' } }],
+                choices: [{ index: 0, delta: { role: 'assistant', content: 'test' } }],
             };
 
             processor.processChunk(chunk);
@@ -495,7 +619,8 @@ describe('StreamProcessor', () => {
         it('should capture finish_reason', () => {
             const chunk: Chunk = {
                 id: 'c1',
-                choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+                index: 0,
+                choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: 'stop' }],
             };
 
             processor.processChunk(chunk);
@@ -505,11 +630,12 @@ describe('StreamProcessor', () => {
         });
 
         it('should capture usage and trigger callback', () => {
-            const usage = { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 };
+            const usage: Usage = { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 };
             const chunk: Chunk = {
                 id: 'c1',
+                index: 0,
                 usage,
-                choices: [{ index: 0, delta: { content: 'test' } }],
+                choices: [{ index: 0, delta: { role: 'assistant', content: 'test' } }],
             };
 
             processor.setMessageId('test-msg-id');
@@ -525,8 +651,17 @@ describe('StreamProcessor', () => {
     describe('buildResponse', () => {
         it('should build response with content only', () => {
             const chunks: Chunk[] = [
-                { id: 'chatcmpl-1', model: 'glm-4', choices: [{ index: 0, delta: { content: 'Hello' } }] },
-                { id: 'chatcmpl-1', choices: [{ index: 0, delta: { content: ' World' }, finish_reason: 'stop' }] },
+                {
+                    index: 0,
+                    id: 'chatcmpl-1',
+                    model: 'glm-4',
+                    choices: [{ index: 0, delta: { role: 'assistant', content: 'Hello' } }],
+                },
+                {
+                    index: 0,
+                    id: 'chatcmpl-1',
+                    choices: [{ index: 0, delta: { role: 'assistant', content: ' World' }, finish_reason: 'stop' }],
+                },
             ];
 
             chunks.forEach((c) => processor.processChunk(c));
@@ -541,8 +676,12 @@ describe('StreamProcessor', () => {
 
         it('should build response with reasoning and content', () => {
             const chunks: Chunk[] = [
-                { id: 'c1', choices: [{ index: 0, delta: { reasoning_content: 'Think' } }] },
-                { id: 'c2', choices: [{ index: 0, delta: { content: 'Answer' } }] },
+                {
+                    index: 0,
+                    id: 'c1',
+                    choices: [{ index: 0, delta: { role: 'assistant', content: '', reasoning_content: 'Think' } }],
+                },
+                { index: 0, id: 'c2', choices: [{ index: 0, delta: { role: 'assistant', content: 'Answer' } }] },
             ];
 
             chunks.forEach((c) => processor.processChunk(c));
@@ -556,10 +695,13 @@ describe('StreamProcessor', () => {
             const chunks: Chunk[] = [
                 {
                     id: 'c1',
+                    index: 0,
                     choices: [
                         {
                             index: 0,
                             delta: {
+                                role: 'assistant',
+                                content: '',
                                 tool_calls: [
                                     {
                                         index: 0,
@@ -582,11 +724,12 @@ describe('StreamProcessor', () => {
         });
 
         it('should include usage in response', () => {
-            const usage = { prompt_tokens: 100, completion_tokens: 50, total_tokens: 150 };
+            const usage: Usage = { prompt_tokens: 100, completion_tokens: 50, total_tokens: 150 };
             const chunk: Chunk = {
                 id: 'c1',
+                index: 0,
                 usage,
-                choices: [{ index: 0, delta: { content: 'test' } }],
+                choices: [{ index: 0, delta: { role: 'assistant', content: 'test' } }],
             };
 
             processor.processChunk(chunk);
@@ -601,8 +744,12 @@ describe('StreamProcessor', () => {
     describe('state management', () => {
         it('should reset all state', () => {
             const chunks: Chunk[] = [
-                { id: 'c1', choices: [{ index: 0, delta: { reasoning_content: 'think' } }] },
-                { id: 'c2', choices: [{ index: 0, delta: { content: 'answer' } }] },
+                {
+                    index: 0,
+                    id: 'c1',
+                    choices: [{ index: 0, delta: { role: 'assistant', content: '', reasoning_content: 'think' } }],
+                },
+                { index: 0, id: 'c2', choices: [{ index: 0, delta: { role: 'assistant', content: 'answer' } }] },
             ];
 
             chunks.forEach((c) => processor.processChunk(c));
@@ -623,7 +770,8 @@ describe('StreamProcessor', () => {
 
             const chunk: Chunk = {
                 id: 'c1',
-                choices: [{ index: 0, delta: { content: 'test' } }],
+                index: 0,
+                choices: [{ index: 0, delta: { role: 'assistant', content: 'test' } }],
             };
 
             processor.processChunk(chunk);
@@ -638,7 +786,7 @@ describe('StreamProcessor', () => {
         it('should abort when content buffer exceeds limit', () => {
             const smallProcessor = new StreamProcessor({
                 maxBufferSize: 10,
-                onMessageUpdate,
+                onMessageUpdate: vi.fn(),
                 onTextDelta: vi.fn(),
                 onTextStart: vi.fn(),
                 onTextComplete: vi.fn(),
@@ -648,15 +796,18 @@ describe('StreamProcessor', () => {
 
             const chunk1: Chunk = {
                 id: 'c1',
-                choices: [{ index: 0, delta: { content: '12345' } }],
+                index: 0,
+                choices: [{ index: 0, delta: { role: 'assistant', content: '12345' } }],
             };
             const chunk2: Chunk = {
                 id: 'c2',
-                choices: [{ index: 0, delta: { content: '67890' } }],
+                index: 0,
+                choices: [{ index: 0, delta: { role: 'assistant', content: '67890' } }],
             };
             const chunk3: Chunk = {
                 id: 'c3',
-                choices: [{ index: 0, delta: { content: 'overflow' } }],
+                index: 0,
+                choices: [{ index: 0, delta: { role: 'assistant', content: 'overflow' } }],
             };
 
             smallProcessor.processChunk(chunk1);
@@ -670,7 +821,7 @@ describe('StreamProcessor', () => {
         it('should abort when reasoning buffer exceeds limit', () => {
             const smallProcessor = new StreamProcessor({
                 maxBufferSize: 5,
-                onMessageUpdate,
+                onMessageUpdate: vi.fn(),
                 onTextDelta: vi.fn(),
                 onTextStart: vi.fn(),
                 onTextComplete: vi.fn(),
@@ -683,7 +834,8 @@ describe('StreamProcessor', () => {
 
             const chunk: Chunk = {
                 id: 'c1',
-                choices: [{ index: 0, delta: { reasoning_content: '1234567890' } }],
+                index: 0,
+                choices: [{ index: 0, delta: { role: 'assistant', content: '', reasoning_content: '1234567890' } }],
             };
 
             smallProcessor.processChunk(chunk);
@@ -694,7 +846,7 @@ describe('StreamProcessor', () => {
         it('should abort when total content+reasoning exceeds limit', () => {
             const smallProcessor = new StreamProcessor({
                 maxBufferSize: 10,
-                onMessageUpdate,
+                onMessageUpdate: vi.fn(),
                 onTextDelta: vi.fn(),
                 onTextStart: vi.fn(),
                 onTextComplete: vi.fn(),
@@ -707,15 +859,18 @@ describe('StreamProcessor', () => {
 
             smallProcessor.processChunk({
                 id: 'c1',
-                choices: [{ index: 0, delta: { reasoning_content: '12345' } }],
+                index: 0,
+                choices: [{ index: 0, delta: { role: 'assistant', content: '', reasoning_content: '12345' } }],
             });
             smallProcessor.processChunk({
                 id: 'c2',
-                choices: [{ index: 0, delta: { content: '12345' } }],
+                index: 0,
+                choices: [{ index: 0, delta: { role: 'assistant', content: '12345' } }],
             });
             smallProcessor.processChunk({
                 id: 'c3',
-                choices: [{ index: 0, delta: { content: '1' } }],
+                index: 0,
+                choices: [{ index: 0, delta: { role: 'assistant', content: '1' } }],
             });
 
             expect(smallProcessor.isAborted()).toBe(true);
@@ -725,14 +880,15 @@ describe('StreamProcessor', () => {
 
     describe('validation', () => {
         it('should trigger validation callback and abort when violation is fatal', () => {
+            const localOnValidationViolation = vi.fn();
             const validatingProcessor = new StreamProcessor({
                 maxBufferSize: 100000,
-                onMessageUpdate,
+                onMessageUpdate: vi.fn(),
                 onTextDelta: vi.fn(),
                 onTextStart: vi.fn(),
                 onTextComplete: vi.fn(),
                 onMessageCreate: vi.fn(),
-                onValidationViolation,
+                onValidationViolation: localOnValidationViolation,
                 validatorOptions: {
                     repetitionThreshold: 2,
                     nonsenseThreshold: 1,
@@ -744,10 +900,11 @@ describe('StreamProcessor', () => {
 
             validatingProcessor.processChunk({
                 id: 'v1',
-                choices: [{ index: 0, delta: { content: 'alpha alpha alpha alpha alpha alpha' } }],
+                index: 0,
+                choices: [{ index: 0, delta: { role: 'assistant', content: 'alpha alpha alpha alpha alpha alpha' } }],
             });
 
-            expect(onValidationViolation).toHaveBeenCalledTimes(1);
+            expect(localOnValidationViolation).toHaveBeenCalledTimes(1);
             expect(validatingProcessor.isAborted()).toBe(true);
             expect(validatingProcessor.getAbortReason()).toBe('validation_violation');
         });
@@ -759,7 +916,8 @@ describe('StreamProcessor', () => {
         it('should handle empty content gracefully', () => {
             const chunk: Chunk = {
                 id: 'c1',
-                choices: [{ index: 0, delta: { content: '' } }],
+                index: 0,
+                choices: [{ index: 0, delta: { role: 'assistant', content: '' } }],
             };
 
             processor.processChunk(chunk);
@@ -771,7 +929,8 @@ describe('StreamProcessor', () => {
         it('should handle empty reasoning_content gracefully', () => {
             const chunk: Chunk = {
                 id: 'c1',
-                choices: [{ index: 0, delta: { reasoning_content: '' } }],
+                index: 0,
+                choices: [{ index: 0, delta: { role: 'assistant', content: '', reasoning_content: '' } }],
             };
 
             processor.processChunk(chunk);
@@ -783,13 +942,15 @@ describe('StreamProcessor', () => {
             // 先处理一些内容
             processor.processChunk({
                 id: 'c1',
-                choices: [{ index: 0, delta: { content: 'Hello' } }],
+                index: 0,
+                choices: [{ index: 0, delta: { role: 'assistant', content: 'Hello' } }],
             });
 
             // 然后只有 finish_reason
             processor.processChunk({
                 id: 'c2',
-                choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+                index: 0,
+                choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: 'stop' }],
             });
 
             expect(onTextComplete).toHaveBeenCalled();
@@ -800,7 +961,8 @@ describe('StreamProcessor', () => {
 
             const chunk: Chunk = {
                 id: 'c1',
-                choices: [{ index: 0, delta: { content: 'test' } }],
+                index: 0,
+                choices: [{ index: 0, delta: { role: 'assistant', content: 'test' } }],
             };
 
             processor.processChunk(chunk);
@@ -811,10 +973,13 @@ describe('StreamProcessor', () => {
         it('should handle tool_calls with finish_reason in same chunk', () => {
             const chunk: Chunk = {
                 id: 'c1',
+                index: 0,
                 choices: [
                     {
                         index: 0,
                         delta: {
+                            role: 'assistant',
+                            content: '',
                             tool_calls: [
                                 { index: 0, id: 'call_1', type: 'function', function: { name: 'test', arguments: '' } },
                             ],
@@ -842,7 +1007,8 @@ describe('StreamProcessor', () => {
             for (let i = 0; i < 100; i++) {
                 chunks.push({
                     id: `chunk-${i}`,
-                    choices: [{ index: 0, delta: { reasoning_content: `思考${i}` } }],
+                    index: 0,
+                    choices: [{ index: 0, delta: { role: 'assistant', content: '', reasoning_content: `思考${i}` } }],
                 });
             }
 
@@ -858,7 +1024,8 @@ describe('StreamProcessor', () => {
             for (let i = 0; i < 100; i++) {
                 chunks.push({
                     id: `chunk-${i}`,
-                    choices: [{ index: 0, delta: { content: `内容${i}` } }],
+                    index: 0,
+                    choices: [{ index: 0, delta: { role: 'assistant', content: `内容${i}` } }],
                 });
             }
 
@@ -873,14 +1040,19 @@ describe('StreamProcessor', () => {
             for (let i = 0; i < 50; i++) {
                 chunks.push({
                     id: `chunk-${i}`,
+                    index: 0,
                     choices: [
                         {
                             index: 0,
                             delta: {
+                                role: 'assistant',
+                                content: '',
                                 tool_calls: [
                                     {
                                         index: 0,
-                                        function: { arguments: `{"part":${i}}` },
+                                        id: '',
+                                        type: 'function',
+                                        function: { name: '', arguments: `{"part":${i}}` },
                                     },
                                 ],
                             },
@@ -903,7 +1075,13 @@ describe('StreamProcessor', () => {
             for (let i = 0; i < 20; i++) {
                 chunks.push({
                     id: `r-${i}`,
-                    choices: [{ index: 0, delta: { reasoning_content: `推理步骤${i + 1}。` } }],
+                    index: 0,
+                    choices: [
+                        {
+                            index: 0,
+                            delta: { role: 'assistant', content: '', reasoning_content: `推理步骤${i + 1}。` },
+                        },
+                    ],
                 });
             }
 
@@ -911,7 +1089,8 @@ describe('StreamProcessor', () => {
             for (let i = 0; i < 30; i++) {
                 chunks.push({
                     id: `c-${i}`,
-                    choices: [{ index: 0, delta: { content: `这是回答的第${i + 1}部分。` } }],
+                    index: 0,
+                    choices: [{ index: 0, delta: { role: 'assistant', content: `这是回答的第${i + 1}部分。` } }],
                 });
             }
 
@@ -919,16 +1098,20 @@ describe('StreamProcessor', () => {
             for (let i = 0; i < 10; i++) {
                 chunks.push({
                     id: `t-${i}`,
+                    index: 0,
                     choices: [
                         {
                             index: 0,
                             delta: {
+                                role: 'assistant',
+                                content: '',
                                 tool_calls: [
                                     {
                                         index: 0,
-                                        ...(i === 0 ? { id: 'call_1', type: 'function' } : {}),
+                                        id: i === 0 ? 'call_1' : '',
+                                        type: 'function',
                                         function: {
-                                            ...(i === 0 ? { name: 'read_file' } : {}),
+                                            name: i === 0 ? 'read_file' : '',
                                             arguments: `{"part":${i}}`,
                                         },
                                     },
@@ -942,7 +1125,8 @@ describe('StreamProcessor', () => {
             // 4. 结束
             chunks.push({
                 id: 'final',
-                choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }],
+                index: 0,
+                choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: 'tool_calls' }],
             });
 
             chunks.forEach((c) => processor.processChunk(c));

@@ -9,6 +9,7 @@ import { TruncationStorage } from '../storage';
 import { createTruncationMiddleware } from '../middleware';
 import fs from 'fs/promises';
 import type { ToolResult } from '../../tool/base';
+import type { TruncationMetadata, TruncationConfig } from '../types';
 
 // ============================================================
 // 边界条件测试
@@ -257,8 +258,8 @@ describe('Service Error Handling', () => {
 
         // Should emit error event
         expect(events).toHaveLength(1);
-        expect(events[0].type).toBe('error');
-        expect(events[0].error).toContain('Storage failed');
+        expect((events[0] as { type: string }).type).toBe('error');
+        expect((events[0] as { error: string }).error).toContain('Storage failed');
     });
 
     it('should handle custom strategy errors gracefully', async () => {
@@ -281,7 +282,7 @@ describe('Service Error Handling', () => {
         const result = await service.output(content, { toolName: 'test' });
 
         expect(result.truncated).toBe(false);
-        expect(events[0].type).toBe('error');
+        expect((events[0] as { type: string }).type).toBe('error');
     });
 });
 
@@ -293,35 +294,35 @@ describe('Middleware Error Handling', () => {
         const service = new TruncationService({ global: { maxLines: 5 } });
         const middleware = createTruncationMiddleware({ service });
 
-        const result: ToolResult = {
+        const result: ToolResult<TruncationMetadata> = {
             success: true,
             output: Array(100).fill('line').join('\n'),
             metadata: null as unknown as TruncationMetadata,
         };
 
         const modified = await middleware('test', result, { toolName: 'test' });
-        expect(modified.metadata?.truncated).toBe(true);
+        expect((modified.metadata as TruncationMetadata)?.truncated).toBe(true);
     });
 
     it('should handle undefined metadata', async () => {
         const service = new TruncationService({ global: { maxLines: 5 } });
         const middleware = createTruncationMiddleware({ service });
 
-        const result: ToolResult = {
+        const result: ToolResult<TruncationMetadata> = {
             success: true,
             output: Array(100).fill('line').join('\n'),
             metadata: undefined,
         };
 
         const modified = await middleware('test', result, { toolName: 'test' });
-        expect(modified.metadata?.truncated).toBe(true);
+        expect((modified.metadata as TruncationMetadata)?.truncated).toBe(true);
     });
 
     it('should handle failed tool result', async () => {
         const service = new TruncationService({ global: { maxLines: 5 } });
         const middleware = createTruncationMiddleware({ service });
 
-        const result: ToolResult = {
+        const result: ToolResult<TruncationMetadata> = {
             success: false,
             error: 'Tool failed',
             output: Array(100).fill('line').join('\n'),
@@ -329,14 +330,14 @@ describe('Middleware Error Handling', () => {
 
         // Should still truncate failed tool output
         const modified = await middleware('test', result, { toolName: 'test' });
-        expect(modified.metadata?.truncated).toBe(true);
+        expect((modified.metadata as TruncationMetadata)?.truncated).toBe(true);
     });
 
     it('should handle tool with truncated=false in metadata (tool processed, no truncation needed)', async () => {
         const service = new TruncationService({ global: { maxLines: 5 } });
         const middleware = createTruncationMiddleware({ service });
 
-        const result: ToolResult = {
+        const result: ToolResult<TruncationMetadata> = {
             success: true,
             output: Array(100).fill('line').join('\n'),
             metadata: { truncated: false }, // explicitly set - tool has decided no truncation
@@ -345,7 +346,7 @@ describe('Middleware Error Handling', () => {
         const modified = await middleware('test', result, { toolName: 'test' });
         // truncated: false means tool has already processed this output
         // Middleware respects the tool's decision and skips
-        expect(modified.metadata?.truncated).toBe(false);
+        expect((modified.metadata as TruncationMetadata)?.truncated).toBe(false);
     });
 });
 
@@ -360,15 +361,23 @@ describe('Strategy Edge Cases', () => {
     });
 
     it('should handle empty content', () => {
-        expect(strategy.needsTruncation('', { maxLines: 10, maxBytes: 1000 } as unknown as TruncationOptions)).toBe(
-            false
-        );
+        expect(
+            strategy.needsTruncation('', {
+                maxLines: 10,
+                maxBytes: 1000,
+                direction: 'head',
+                enabled: true,
+                retentionDays: 7,
+            } as TruncationConfig)
+        ).toBe(false);
 
         const result = strategy.truncate('', {
             maxLines: 10,
             maxBytes: 1000,
             direction: 'head',
-        } as unknown as TruncationOptions);
+            enabled: true,
+            retentionDays: 7,
+        } as TruncationConfig);
         expect(result.content).toBe('');
     });
 
@@ -378,7 +387,9 @@ describe('Strategy Edge Cases', () => {
             maxLines: 100,
             maxBytes: 100,
             direction: 'head',
-        } as unknown as TruncationOptions);
+            enabled: true,
+            retentionDays: 7,
+        } as TruncationConfig);
 
         expect(result.removedBytes).toBeGreaterThan(0);
         expect(result.content.length).toBeLessThanOrEqual(100);
@@ -387,7 +398,13 @@ describe('Strategy Edge Cases', () => {
     it('should handle content with only newlines', () => {
         const content = '\n\n\n\n\n'.repeat(10);
         expect(
-            strategy.needsTruncation(content, { maxLines: 5, maxBytes: 100000 } as unknown as TruncationOptions)
+            strategy.needsTruncation(content, {
+                maxLines: 5,
+                maxBytes: 100000,
+                direction: 'head',
+                enabled: true,
+                retentionDays: 7,
+            } as TruncationConfig)
         ).toBe(true);
     });
 
@@ -398,7 +415,9 @@ describe('Strategy Edge Cases', () => {
             maxLines: 100,
             maxBytes: 55,
             direction: 'head',
-        } as unknown as TruncationOptions);
+            enabled: true,
+            retentionDays: 7,
+        } as TruncationConfig);
 
         // Should truncate due to byte limit
         expect(result.removedBytes).toBeDefined();
@@ -410,7 +429,9 @@ describe('Strategy Edge Cases', () => {
             maxLines: 10,
             maxBytes: 100,
             direction: 'tail',
-        } as unknown as TruncationOptions);
+            enabled: true,
+            retentionDays: 7,
+        } as TruncationConfig);
         expect(result.content).toBe('single line');
     });
 });

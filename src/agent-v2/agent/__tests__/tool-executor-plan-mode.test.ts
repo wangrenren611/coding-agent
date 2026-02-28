@@ -34,6 +34,7 @@ function createToolCall(toolName: string, args: Record<string, unknown> = {}): T
     return {
         id: `call-${toolName}-${Date.now()}`,
         type: 'function',
+        index: 0,
         function: {
             name: toolName,
             arguments: JSON.stringify(args),
@@ -183,7 +184,7 @@ describe('ToolExecutor Plan Mode 阻止逻辑', () => {
             }
         });
 
-        it('应该正确报告多个被阻止的工具', async () => {
+        it('应该正确报告多个被阻止工具', async () => {
             const config = createMockConfig(true);
             const executor = new ToolExecutor(config);
 
@@ -199,7 +200,7 @@ describe('ToolExecutor Plan Mode 阻止逻辑', () => {
                 expect(error).toBeInstanceOf(LLMResponseInvalidError);
                 const message = (error as Error).message;
                 expect(message).toContain('Plan Mode');
-                // 应该包含所有被阻止的工具
+                // 应该包含所有被阻止工具
                 expect(message).toContain('write_file');
                 expect(message).toContain('bash');
             }

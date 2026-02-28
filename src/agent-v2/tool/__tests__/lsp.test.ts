@@ -7,6 +7,37 @@ import LspTool from '../lsp';
 import { TestEnvironment } from './test-utils';
 import path from 'path';
 
+interface LspSymbol {
+    name: string;
+    kind: string;
+    line: number;
+    character: number;
+}
+
+interface LspDefinition {
+    filePath: string;
+    line: number;
+    character: number;
+    name: string;
+}
+
+interface LspReference {
+    filePath: string;
+    line: number;
+    character: number;
+    isDefinition: boolean;
+}
+
+interface LspMetadata {
+    symbols?: LspSymbol[];
+    definitions?: LspDefinition[];
+    references?: LspReference[];
+    type?: string;
+    documentation?: string;
+    message?: string;
+    error?: string;
+}
+
 describe('LspTool', () => {
     let env: TestEnvironment;
 
@@ -62,13 +93,14 @@ console.log(result);`;
             });
 
             expect(result.success).toBe(true);
-            expect(result.metadata?.symbols).toBeDefined();
-            expect(result.metadata?.symbols.length).toBeGreaterThan(0);
+            const meta = result.metadata as LspMetadata;
+            expect(meta?.symbols).toBeDefined();
+            expect(meta?.symbols?.length).toBeGreaterThan(0);
 
             // Should find interface, class, functions
-            const symbols = result.metadata?.symbols || [];
-            const interfaceSymbol = symbols.find((s: { kind: string }) => s.kind === 'InterfaceDeclaration');
-            const classSymbol = symbols.find((s: { kind: string }) => s.kind === 'ClassDeclaration');
+            const symbols = meta?.symbols || [];
+            const interfaceSymbol = symbols.find((s) => s.kind === 'InterfaceDeclaration');
+            const classSymbol = symbols.find((s) => s.kind === 'ClassDeclaration');
             expect(interfaceSymbol).toBeDefined();
             expect(classSymbol).toBeDefined();
         });
@@ -84,8 +116,9 @@ console.log(result);`;
             });
 
             expect(result.success).toBe(true);
-            expect(result.metadata?.symbols).toBeDefined();
-            expect(result.metadata?.symbols.length).toBeGreaterThan(0);
+            const meta = result.metadata as LspMetadata;
+            expect(meta?.symbols).toBeDefined();
+            expect(meta?.symbols?.length).toBeGreaterThan(0);
         });
 
         it('should extract function names correctly', async () => {
@@ -107,8 +140,9 @@ class MyClass {
             });
 
             expect(result.success).toBe(true);
-            const symbols = result.metadata?.symbols || [];
-            const functionSymbol = symbols.find((s: { kind: string }) => s.name === 'myFunction');
+            const meta = result.metadata as LspMetadata;
+            const symbols = meta?.symbols || [];
+            const functionSymbol = symbols.find((s) => s.name === 'myFunction');
             expect(functionSymbol).toBeDefined();
         });
 
@@ -123,7 +157,8 @@ class MyClass {
             });
 
             expect(result.success).toBe(true);
-            const symbol = result.metadata?.symbols[0];
+            const meta = result.metadata as LspMetadata;
+            const symbol = meta?.symbols?.[0];
             expect(symbol?.line).toBeGreaterThan(0);
             expect(symbol?.character).toBeGreaterThanOrEqual(0);
         });
@@ -146,10 +181,11 @@ const u: User = { id: 1 };`;
             });
 
             expect(result.success).toBe(true);
-            expect(result.metadata?.definitions).toBeDefined();
-            if (result.metadata?.definitions && result.metadata.definitions[0]) {
-                expect(result.metadata.definitions[0].name).toBe('User');
-                expect(result.metadata.definitions[0].line).toBe(1);
+            const meta = result.metadata as LspMetadata;
+            expect(meta?.definitions).toBeDefined();
+            if (meta?.definitions && meta.definitions[0]) {
+                expect(meta.definitions[0].name).toBe('User');
+                expect(meta.definitions[0].line).toBe(1);
             }
         });
 
@@ -169,8 +205,9 @@ greet('World');`;
             });
 
             expect(result.success).toBe(true);
-            expect(result.metadata?.definitions[0].name).toBe('greet');
-            expect(result.metadata?.definitions[0].line).toBe(1);
+            const meta = result.metadata as LspMetadata;
+            expect(meta?.definitions?.[0]?.name).toBe('greet');
+            expect(meta?.definitions?.[0]?.line).toBe(1);
         });
 
         it('should handle undefined references gracefully', async () => {
@@ -185,7 +222,8 @@ greet('World');`;
             });
 
             expect(result.success).toBe(true);
-            expect(result.metadata?.message).toBeDefined();
+            const meta = result.metadata as LspMetadata;
+            expect(meta?.message).toBeDefined();
         });
     });
 
@@ -202,7 +240,8 @@ greet('World');`;
             });
 
             expect(result.success).toBe(true);
-            expect(result.metadata?.type).toBeDefined();
+            const meta = result.metadata as LspMetadata;
+            expect(meta?.type).toBeDefined();
             // For standalone files, type might be inferred or 'unknown'
             // The important thing is that the operation succeeds
         });
@@ -221,7 +260,8 @@ greet('World');`;
             });
 
             expect(result.success).toBe(true);
-            expect(result.metadata?.type).toBeDefined();
+            const meta = result.metadata as LspMetadata;
+            expect(meta?.type).toBeDefined();
         });
 
         it('should handle positions with no type information', async () => {
@@ -261,8 +301,9 @@ console.log(myVar);`;
             }
 
             expect(result.success).toBe(true);
-            expect(result.metadata?.references).toBeDefined();
-            expect(result.metadata?.references.length).toBeGreaterThan(0);
+            const meta = result.metadata as LspMetadata;
+            expect(meta?.references).toBeDefined();
+            expect(meta?.references?.length).toBeGreaterThan(0);
         });
 
         it('should include definition location in references', async () => {
@@ -280,7 +321,8 @@ test();`;
             });
 
             expect(result.success).toBe(true);
-            const references = result.metadata?.references || [];
+            const meta = result.metadata as LspMetadata;
+            const references = meta?.references || [];
 
             // Check if any reference has isDefinition property
             // Note: isDefinition might not be available in all TypeScript versions
@@ -305,8 +347,9 @@ test();`;
             });
 
             expect(result.success).toBe(true);
+            const meta = result.metadata as LspMetadata;
             // Should limit results
-            expect(result.metadata?.references.length).toBeLessThanOrEqual(50);
+            expect(meta?.references?.length).toBeLessThanOrEqual(50);
         });
     });
 
@@ -324,8 +367,9 @@ test();`;
             });
 
             expect(result.success).toBe(true);
-            expect(result.metadata?.symbols).toBeDefined();
-            expect(result.metadata?.symbols.length).toBeGreaterThan(0);
+            const meta = result.metadata as LspMetadata;
+            expect(meta?.symbols).toBeDefined();
+            expect(meta?.symbols?.length).toBeGreaterThan(0);
         });
 
         it('should limit workspace search results', async () => {
@@ -343,8 +387,9 @@ test();`;
             });
 
             expect(result.success).toBe(true);
+            const meta = result.metadata as LspMetadata;
             // Should limit results
-            expect(result.metadata?.symbols.length).toBeLessThanOrEqual(50);
+            expect(meta?.symbols?.length).toBeLessThanOrEqual(50);
         });
     });
 
@@ -359,7 +404,8 @@ test();`;
             });
 
             expect(result.success).toBe(false);
-            expect(result.metadata?.error).toBe('LSP_FILE_NOT_FOUND');
+            const meta = result.metadata as LspMetadata;
+            expect(meta?.error).toBe('LSP_FILE_NOT_FOUND');
         });
 
         it('should return error for unsupported file types', async () => {
@@ -373,7 +419,8 @@ test();`;
             });
 
             expect(result.success).toBe(false);
-            expect(result.metadata?.error).toBe('LSP_UNSUPPORTED_FILE_TYPE');
+            const meta = result.metadata as LspMetadata;
+            expect(meta?.error).toBe('LSP_UNSUPPORTED_FILE_TYPE');
         });
 
         it('should handle invalid line/character positions', async () => {
@@ -480,7 +527,8 @@ class Container {
             });
 
             expect(result.success).toBe(true);
-            const symbols = result.metadata?.symbols || [];
+            const meta = result.metadata as LspMetadata;
+            const symbols = meta?.symbols || [];
             expect(symbols.length).toBeGreaterThan(0);
         });
 
@@ -500,14 +548,15 @@ const result = identity<string>("test");`;
             });
 
             expect(result.success).toBe(true);
+            const meta = result.metadata as LspMetadata;
             // For standalone files, definitions might be found or empty
             // The important thing is that the operation succeeds
-            if (result.metadata?.definitions && result.metadata.definitions.length > 0) {
-                expect(result.metadata.definitions[0].name).toBe('identity');
+            if (meta?.definitions && meta.definitions.length > 0) {
+                expect(meta.definitions[0].name).toBe('identity');
             } else {
                 // For standalone files without full project context,
                 // it's acceptable to not find definitions
-                expect(result.metadata?.message || result.metadata?.definitions).toBeDefined();
+                expect(meta?.message || meta?.definitions).toBeDefined();
             }
         });
 
@@ -527,8 +576,9 @@ fetchData().then(console.log);`;
             });
 
             expect(result.success).toBe(true);
-            const symbols = result.metadata?.symbols || [];
-            const funcSymbol = symbols.find((s: { kind: string }) => s.name === 'fetchData');
+            const meta = result.metadata as LspMetadata;
+            const symbols = meta?.symbols || [];
+            const funcSymbol = symbols.find((s) => s.name === 'fetchData');
             expect(funcSymbol).toBeDefined();
         });
     });

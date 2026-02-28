@@ -25,15 +25,21 @@ class MockProvider {
     async generate(_messages: unknown[], _options?: LLMGenerateOptions) {
         this.callCount++;
         const response: LLMResponse = {
-            messages: [
+            id: 'msg-1',
+            object: 'chat.completion',
+            created: Date.now(),
+            model: 'mock-model',
+            choices: [
                 {
-                    messageId: 'msg-1',
-                    role: 'assistant',
-                    content: 'Hello',
+                    index: 0,
+                    message: {
+                        role: 'assistant',
+                        content: 'Hello',
+                    },
+                    finish_reason: 'stop',
                 },
             ],
-            usage: { inputTokens: 10, outputTokens: 5 },
-            finishReason: 'stop',
+            usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
         };
         return response;
     }

@@ -6,7 +6,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { TruncationService } from '../service';
 import { DefaultTruncationStrategy } from '../strategies';
 import { TruncationStorage } from '../storage';
-import type { TruncationEvent } from '../types';
+import type { TruncationEvent, TruncationConfig } from '../types';
 
 describe('TruncationService', () => {
     let service: TruncationService;
@@ -139,26 +139,28 @@ describe('DefaultTruncationStrategy', () => {
         strategy = new DefaultTruncationStrategy();
     });
 
+    const defaultConfig: TruncationConfig = {
+        maxLines: 100,
+        maxBytes: 10000,
+        direction: 'head',
+        enabled: true,
+        retentionDays: 7,
+    };
+
     describe('needsTruncation', () => {
         it('should return false for content within limits', () => {
             const content = 'short content';
-            expect(
-                strategy.needsTruncation(content, { maxLines: 100, maxBytes: 10000 } as unknown as TruncationOptions)
-            ).toBe(false);
+            expect(strategy.needsTruncation(content, { ...defaultConfig, maxLines: 100, maxBytes: 10000 })).toBe(false);
         });
 
         it('should return true when lines exceed limit', () => {
             const content = Array(200).fill('line').join('\n');
-            expect(
-                strategy.needsTruncation(content, { maxLines: 100, maxBytes: 100000 } as unknown as TruncationOptions)
-            ).toBe(true);
+            expect(strategy.needsTruncation(content, { ...defaultConfig, maxLines: 100, maxBytes: 100000 })).toBe(true);
         });
 
         it('should return true when bytes exceed limit', () => {
             const content = 'x'.repeat(10000);
-            expect(
-                strategy.needsTruncation(content, { maxLines: 100, maxBytes: 1000 } as unknown as TruncationOptions)
-            ).toBe(true);
+            expect(strategy.needsTruncation(content, { ...defaultConfig, maxLines: 100, maxBytes: 1000 })).toBe(true);
         });
     });
 
@@ -166,10 +168,11 @@ describe('DefaultTruncationStrategy', () => {
         it('should truncate to maxLines', () => {
             const content = Array(100).fill('line').join('\n');
             const result = strategy.truncate(content, {
+                ...defaultConfig,
                 maxLines: 10,
                 maxBytes: 100000,
                 direction: 'head',
-            } as unknown as TruncationOptions);
+            });
 
             const resultLines = result.content.split('\n');
             expect(resultLines.length).toBe(10);
@@ -179,10 +182,11 @@ describe('DefaultTruncationStrategy', () => {
         it('should respect byte limit', () => {
             const content = 'x'.repeat(10000);
             const result = strategy.truncate(content, {
+                ...defaultConfig,
                 maxLines: 100,
                 maxBytes: 100,
                 direction: 'head',
-            } as unknown as TruncationOptions);
+            });
 
             expect(Buffer.byteLength(result.content, 'utf-8')).toBeLessThanOrEqual(100);
             expect(result.removedBytes).toBeGreaterThan(0);
@@ -191,10 +195,11 @@ describe('DefaultTruncationStrategy', () => {
         it('should keep head when direction is head', () => {
             const content = 'line1\nline2\nline3\nline4\nline5';
             const result = strategy.truncate(content, {
+                ...defaultConfig,
                 maxLines: 2,
                 maxBytes: 10000,
                 direction: 'head',
-            } as unknown as TruncationOptions);
+            });
 
             expect(result.content).toBe('line1\nline2');
         });
@@ -202,10 +207,11 @@ describe('DefaultTruncationStrategy', () => {
         it('should keep tail when direction is tail', () => {
             const content = 'line1\nline2\nline3\nline4\nline5';
             const result = strategy.truncate(content, {
+                ...defaultConfig,
                 maxLines: 2,
                 maxBytes: 10000,
                 direction: 'tail',
-            } as unknown as TruncationOptions);
+            });
 
             expect(result.content).toBe('line4\nline5');
         });

@@ -150,7 +150,7 @@ describe('createErrorFromStatus', () => {
     it('should return LLMNotFoundError for 404', () => {
         const error = createErrorFromStatus(404, 'Not Found', 'Resource not found');
         expect(error).toBeInstanceOf(LLMNotFoundError);
-        expect(error.resourceType).toBe('resource');
+        expect((error as LLMNotFoundError).resourceType).toBe('resource');
     });
 
     it('should return LLMRateLimitError for 429', () => {

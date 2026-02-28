@@ -233,7 +233,7 @@ describe('SurgicalEditTool - Deep Tests', () => {
             });
 
             expect(result.success).toBe(false);
-            expect(result.metadata?.error).toContain('FILE_NOT_FOUND');
+            expect((result.metadata as { error: string })?.error).toContain('FILE_NOT_FOUND');
         });
 
         it('should return error when line number is out of range', async () => {
@@ -248,8 +248,8 @@ describe('SurgicalEditTool - Deep Tests', () => {
             });
 
             expect(result.success).toBe(false);
-            expect(result.metadata?.error).toContain('LINE_OUT_OF_RANGE');
-            expect(result.metadata?.fileLength).toBe(3);
+            expect((result.metadata as { error: string })?.error).toContain('LINE_OUT_OF_RANGE');
+            expect((result.metadata as { fileLength: number })?.fileLength).toBe(3);
         });
 
         it('should return error when oldText does not match exactly', async () => {
@@ -264,7 +264,7 @@ describe('SurgicalEditTool - Deep Tests', () => {
             });
 
             expect(result.success).toBe(false);
-            expect(result.metadata?.error).toContain('TEXT_NOT_FOUND');
+            expect((result.metadata as { error: string })?.error).toContain('TEXT_NOT_FOUND');
         });
 
         it('should return error when multiline oldText spans beyond file end', async () => {
@@ -279,8 +279,8 @@ describe('SurgicalEditTool - Deep Tests', () => {
             });
 
             expect(result.success).toBe(false);
-            expect(result.metadata?.error).toContain('TEXT_NOT_FOUND');
-            expect(result.metadata?.reason).toContain('Not enough lines');
+            expect((result.metadata as { error: string })?.error).toContain('TEXT_NOT_FOUND');
+            expect((result.metadata as { reason: string })?.reason).toContain('Not enough lines');
         });
 
         it('should handle case-sensitive matching', async () => {

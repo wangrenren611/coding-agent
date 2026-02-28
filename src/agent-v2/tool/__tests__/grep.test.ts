@@ -6,6 +6,27 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import GrepTool from '../grep';
 import { TestEnvironment } from './test-utils';
 
+interface GrepMatch {
+    line: number | null;
+    column: number | null;
+    content: string;
+    matchText?: string;
+}
+
+interface GrepFileResult {
+    file: string;
+    mtimeMs: number | null;
+    mtimeIso: string | null;
+    matches: GrepMatch[];
+}
+
+interface GrepMetadata {
+    countFiles?: number;
+    countMatches?: number;
+    results?: GrepFileResult[];
+    error?: string;
+}
+
 describe('GrepTool', () => {
     let env: TestEnvironment;
 
@@ -28,8 +49,9 @@ describe('GrepTool', () => {
             });
 
             expect(result.success).toBe(true);
-            expect(result.metadata?.countFiles).toBeGreaterThan(0);
-            expect(result.metadata?.countMatches).toBeGreaterThan(0);
+            const meta = result.metadata as GrepMetadata;
+            expect(meta?.countFiles).toBeGreaterThan(0);
+            expect(meta?.countMatches).toBeGreaterThan(0);
         });
 
         it('should find pattern in multiple files', async () => {
@@ -44,7 +66,8 @@ describe('GrepTool', () => {
             });
 
             expect(result.success).toBe(true);
-            expect(result.metadata?.countFiles).toBe(2);
+            const meta = result.metadata as GrepMetadata;
+            expect(meta?.countFiles).toBe(2);
         });
 
         it('should handle case-sensitive search', async () => {
@@ -58,7 +81,8 @@ describe('GrepTool', () => {
 
             expect(result.success).toBe(true);
             // Should only find lowercase 'hello'
-            expect(result.metadata?.results?.[0]?.matches).toHaveLength(1);
+            const meta = result.metadata as GrepMetadata;
+            expect(meta?.results?.[0]?.matches).toHaveLength(1);
         });
 
         it('should handle case-insensitive search', async () => {
@@ -73,7 +97,8 @@ describe('GrepTool', () => {
             expect(result.success).toBe(true);
             // Note: Current implementation only returns first match per line
             // This is a known limitation
-            expect(result.metadata?.countMatches).toBeGreaterThanOrEqual(1);
+            const meta = result.metadata as GrepMetadata;
+            expect(meta?.countMatches).toBeGreaterThanOrEqual(1);
         });
 
         it('should handle smart case (default)', async () => {
@@ -86,7 +111,8 @@ describe('GrepTool', () => {
 
             expect(result.success).toBe(true);
             // Smart case should match all when pattern is lowercase
-            expect(result.metadata?.countMatches).toBeGreaterThan(0);
+            const meta = result.metadata as GrepMetadata;
+            expect(meta?.countMatches).toBeGreaterThan(0);
         });
     });
 
@@ -100,7 +126,8 @@ describe('GrepTool', () => {
             });
 
             expect(result.success).toBe(true);
-            expect(result.metadata?.countMatches).toBeGreaterThan(0);
+            const meta = result.metadata as GrepMetadata;
+            expect(meta?.countMatches).toBeGreaterThan(0);
         });
 
         it('should support word boundaries', async () => {
@@ -114,7 +141,8 @@ describe('GrepTool', () => {
 
             expect(result.success).toBe(true);
             // Should only find 'cat' not 'category' or 'concatenated'
-            expect(result.metadata?.countMatches).toBe(1);
+            const meta = result.metadata as GrepMetadata;
+            expect(meta?.countMatches).toBe(1);
         });
 
         it('should support multiline mode', async () => {
@@ -144,8 +172,9 @@ describe('GrepTool', () => {
             });
 
             expect(result.success).toBe(true);
-            expect(result.metadata?.countFiles).toBe(1);
-            expect(result.metadata?.results?.[0]?.file).toContain('.js');
+            const meta = result.metadata as GrepMetadata;
+            expect(meta?.countFiles).toBe(1);
+            expect(meta?.results?.[0]?.file).toContain('.js');
         });
 
         it('should ignore node_modules by default', async () => {
@@ -160,7 +189,8 @@ describe('GrepTool', () => {
 
             expect(result.success).toBe(true);
             // Should not find files in node_modules
-            expect(result.metadata?.results?.every((r) => !r.file.includes('node_modules'))).toBe(true);
+            const meta = result.metadata as GrepMetadata;
+            expect(meta?.results?.every((r: GrepFileResult) => !r.file.includes('node_modules'))).toBe(true);
         });
 
         it('should include hidden files when requested', async () => {
@@ -175,7 +205,8 @@ describe('GrepTool', () => {
             });
 
             expect(result.success).toBe(true);
-            expect(result.metadata?.countFiles).toBe(2);
+            const meta = result.metadata as GrepMetadata;
+            expect(meta?.countFiles).toBe(2);
         });
 
         it('should respect noIgnore flag', async () => {
@@ -191,7 +222,8 @@ describe('GrepTool', () => {
 
             expect(result.success).toBe(true);
             // Should find in both files including .min.js
-            expect(result.metadata?.countFiles).toBe(2);
+            const meta = result.metadata as GrepMetadata;
+            expect(meta?.countFiles).toBe(2);
         });
     });
 
@@ -229,7 +261,8 @@ describe('GrepTool', () => {
             });
 
             expect(result.success).toBe(false);
-            expect(result.metadata?.error).toContain('SEARCH_PATH_NOT_FOUND');
+            const meta = result.metadata as GrepMetadata;
+            expect(meta?.error).toContain('SEARCH_PATH_NOT_FOUND');
         });
 
         it('should handle no matches gracefully', async () => {
@@ -241,8 +274,9 @@ describe('GrepTool', () => {
             });
 
             expect(result.success).toBe(true);
-            expect(result.metadata?.countMatches).toBe(0);
-            expect(result.metadata?.results).toHaveLength(0);
+            const meta = result.metadata as GrepMetadata;
+            expect(meta?.countMatches).toBe(0);
+            expect(meta?.results).toHaveLength(0);
         });
     });
 
@@ -256,7 +290,8 @@ describe('GrepTool', () => {
             });
 
             expect(result.success).toBe(true);
-            const match = result.metadata?.results?.[0]?.matches?.[0];
+            const meta = result.metadata as GrepMetadata;
+            const match = meta?.results?.[0]?.matches?.[0];
             expect(match?.line).toBeGreaterThan(0);
             expect(match?.column).toBeGreaterThan(0);
         });
@@ -270,7 +305,8 @@ describe('GrepTool', () => {
             });
 
             expect(result.success).toBe(true);
-            const match = result.metadata?.results?.[0]?.matches?.[0];
+            const meta = result.metadata as GrepMetadata;
+            const match = meta?.results?.[0]?.matches?.[0];
             expect(match?.matchText).toBeDefined();
         });
 
@@ -283,7 +319,8 @@ describe('GrepTool', () => {
             });
 
             expect(result.success).toBe(true);
-            const fileResult = result.metadata?.results?.[0];
+            const meta = result.metadata as GrepMetadata;
+            const fileResult = meta?.results?.[0];
             expect(fileResult?.mtimeMs).toBeDefined();
             expect(fileResult?.mtimeIso).toBeDefined();
         });
@@ -322,7 +359,8 @@ describe('GrepTool', () => {
 
             expect(result.success).toBe(true);
             // Should cap at 100 files
-            expect(result.metadata?.countFiles).toBeLessThanOrEqual(100);
+            const meta = result.metadata as GrepMetadata;
+            expect(meta?.countFiles).toBeLessThanOrEqual(100);
         });
     });
 });

@@ -18,7 +18,8 @@ import { AgentState } from './core/agent-state';
 import { Compaction } from '../session/compaction';
 import { createMemoryManager } from '../memory';
 import { EventType } from '../eventbus';
-import type { LLMGenerateOptions, LLMResponse } from '../../providers/types';
+import { LLMProvider } from '../../providers/types';
+import type { LLMGenerateOptions, LLMResponse, MessageContent } from '../../providers/types';
 import type { Message } from '../session/types';
 
 // ==================== Mock Provider ====================
@@ -197,7 +198,7 @@ describe('AgentState 状态管理测试', () => {
             state.startTask();
             state.incrementLoop();
             state.recordRetryableError();
-            state.failTask({ code: 'TEST', userMessage: 'test' });
+            state.failTask({ code: 'AGENT_RUNTIME_ERROR', userMessage: 'test' });
 
             state.startTask();
             expect(state.loopCount).toBe(0);
@@ -214,9 +215,9 @@ describe('AgentState 状态管理测试', () => {
 
         it('failTask 应该设置状态为 FAILED', () => {
             state.startTask();
-            state.failTask({ code: 'TEST_ERROR', userMessage: 'Test failed' });
+            state.failTask({ code: 'AGENT_RUNTIME_ERROR', userMessage: 'Test failed' });
             expect(state.status).toBe(AgentStatus.FAILED);
-            expect(state.lastFailure?.code).toBe('TEST_ERROR');
+            expect(state.lastFailure?.code).toBe('AGENT_RUNTIME_ERROR');
         });
 
         it('abort 应该设置状态为 ABORTED', () => {
@@ -312,7 +313,7 @@ describe('Agent 完成条件判断测试', () => {
                                 finish_reason: 'tool_calls',
                             },
                         ],
-                    };
+                    } as LLMResponse;
                 }
                 return originalGenerate(messages, options);
             };
@@ -372,7 +373,7 @@ describe('Agent 完成条件判断测试', () => {
                                 finish_reason: 'stop',
                             },
                         ],
-                    };
+                    } as LLMResponse;
                 }
                 return originalGenerate(messages, options);
             };
@@ -464,9 +465,14 @@ describe('Agent 完成条件判断测试', () => {
                 ],
             } as Message);
 
-            let capturedMessages: unknown[] = [];
+            let capturedMessages: Array<{
+                role?: string;
+                tool_calls?: Array<{ id?: string }>;
+                tool_call_id?: string;
+                content?: unknown;
+            }> = [];
             mockProvider.generate = async (messages: unknown[]) => {
-                capturedMessages = messages;
+                capturedMessages = messages as typeof capturedMessages;
                 return {
                     id: 'filtered-test',
                     object: 'chat.completion',
@@ -544,9 +550,14 @@ describe('Agent 完成条件判断测试', () => {
                 type: 'tool-result',
             } as Message);
 
-            let capturedMessages: unknown[] = [];
+            let capturedMessages: Array<{
+                role?: string;
+                tool_calls?: Array<{ id?: string }>;
+                tool_call_id?: string;
+                content?: unknown;
+            }> = [];
             mockProvider.generate = async (messages: unknown[]) => {
-                capturedMessages = messages;
+                capturedMessages = messages as typeof capturedMessages;
                 return {
                     id: 'tool-protocol-fixed',
                     object: 'chat.completion',
@@ -646,7 +657,7 @@ describe('Agent 重试机制测试', () => {
                             finish_reason: 'tool_calls',
                         },
                     ],
-                };
+                } as LLMResponse;
             };
 
             const agent = new Agent({
@@ -1360,7 +1371,7 @@ describe('消息处理测试', () => {
                 { type: 'text', text: 'world' },
             ];
 
-            const result = await agent.execute(content);
+            const result = await agent.execute(content as MessageContent);
             expect(result).toBeDefined();
         });
     });
@@ -1422,7 +1433,7 @@ describe('Task 子 Agent 事件透传', () => {
 
     it('Agent 执行 task 工具时应触发 SUBAGENT_EVENT', async () => {
         let callCount = 0;
-        const events: unknown[] = [];
+        const events: Array<{ type: AgentMessageType; payload?: { event?: unknown } }> = [];
 
         const provider = new MockProvider();
         provider.generate = async () => {
@@ -1500,7 +1511,7 @@ describe('Task 子 Agent 事件透传', () => {
             systemPrompt: 'Test',
             stream: true,
             memoryManager,
-            streamCallback: (msg) => events.push(msg),
+            streamCallback: (msg) => events.push(msg as (typeof events)[number]),
         });
 
         const result = await agent.execute('run task');
@@ -1560,7 +1571,7 @@ describe('工具执行测试', () => {
                                 finish_reason: 'tool_calls',
                             },
                         ],
-                    };
+                    } as LLMResponse;
                 }
                 return originalGenerate(messages, options);
             };

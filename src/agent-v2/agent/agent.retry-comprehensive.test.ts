@@ -183,7 +183,7 @@ describe('AgentState 重试机制测试', () => {
 
         it('startTask 应该重置 lastFailure', () => {
             state.startTask();
-            state.failTask({ code: 'TEST_ERROR', userMessage: 'Test failure' });
+            state.failTask({ code: 'AGENT_RUNTIME_ERROR', userMessage: 'Test failure' });
             expect(state.lastFailure).toBeDefined();
 
             state.startTask();

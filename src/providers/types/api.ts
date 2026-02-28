@@ -87,10 +87,10 @@ export interface Usage {
     completion_tokens: number;
     /** 该请求中，所有 token 的数量（prompt + completion） */
     total_tokens: number;
-    /** 用户 prompt 中未命中缓存的 token 数 */
-    prompt_cache_miss_tokens: number;
-    /** 用户 prompt 中命中缓存的 token 数 */
-    prompt_cache_hit_tokens: number;
+    /** 用户 prompt 中未命中缓存的 token 数（可选，部分提供商支持） */
+    prompt_cache_miss_tokens?: number;
+    /** 用户 prompt 中命中缓存的 token 数（可选，部分提供商支持） */
+    prompt_cache_hit_tokens?: number;
 }
 
 /**

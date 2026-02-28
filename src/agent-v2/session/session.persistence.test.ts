@@ -5,7 +5,7 @@ import * as path from 'path';
 import { createMemoryManager } from '../memory';
 import type { IMemoryManager } from '../memory/types';
 import { Session } from './index';
-import type { Usage } from '../../providers';
+import type { Usage, ToolCall } from '../../providers';
 
 function createUsage(total = 36): Usage {
     return {
@@ -486,11 +486,11 @@ describe('Session persistence queue', () => {
         // 只保留合法的 tool calls（valid + empty）
         const assistantMessage = messages.find((msg) => msg.messageId === 'assistant-truncated');
         expect(assistantMessage).toBeDefined();
-        const toolCalls = assistantMessage!.tool_calls;
+        const toolCalls = assistantMessage!.tool_calls as ToolCall[];
         expect(toolCalls).toBeDefined();
-        expect(toolCalls!.length).toBe(2);
+        expect(toolCalls.length).toBe(2);
 
-        const validIds = toolCalls!.map((call) => call.id).sort();
+        const validIds = toolCalls.map((call) => call.id).sort();
         expect(validIds).toEqual(['call_empty', 'call_valid']);
 
         // 被过滤的 tool calls（truncated/invalid）会被直接丢弃

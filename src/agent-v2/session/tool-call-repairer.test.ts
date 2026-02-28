@@ -177,7 +177,7 @@ describe('ToolCallRepairer', () => {
 
         it('应该创建有效的 JSON 内容', () => {
             const result = repairer.createInterruptedResult('call-123');
-            const parsed = JSON.parse(result.content);
+            const parsed = JSON.parse(result.content as string);
 
             expect(parsed.success).toBe(false);
             expect(parsed.error).toBe('TOOL_CALL_INTERRUPTED');

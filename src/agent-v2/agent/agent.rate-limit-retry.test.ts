@@ -187,6 +187,7 @@ describe('RATE_LIMIT 重试场景测试', () => {
                                         {
                                             id: 'call_test_123',
                                             type: 'function',
+                                            index: 0,
                                             function: {
                                                 name: 'glob',
                                                 arguments: '{"pattern":"**/*.ts"}',
@@ -325,6 +326,7 @@ describe('RATE_LIMIT 重试场景测试', () => {
                                         {
                                             id: 'call_task_123',
                                             type: 'function',
+                                            index: 0,
                                             function: {
                                                 name: 'task',
                                                 arguments: JSON.stringify({
@@ -385,7 +387,7 @@ describe('RATE_LIMIT 重试场景测试', () => {
                 role: m.role,
                 content: typeof m.content === 'string' ? m.content.substring(0, 50) : '[non-string]',
                 finish_reason: m.finish_reason,
-                tool_calls: m.tool_calls?.length,
+                tool_calls: (m.tool_calls as unknown[])?.length,
             }))
         );
 

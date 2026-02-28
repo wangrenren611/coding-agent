@@ -19,10 +19,15 @@ vi.mock('../loader', async () => {
 
 describe('SkillTool', () => {
     let env: SkillTestEnvironment;
+    // Use a type that allows access to mock methods like mockReturnValue
     let mockLoader: {
-        initialize: () => Promise<void>;
-        listSkills: () => unknown[];
-        getSkill: () => unknown;
+        initialize: ReturnType<typeof vi.fn>;
+        getAllMetadata: ReturnType<typeof vi.fn>;
+        hasSkill: ReturnType<typeof vi.fn>;
+        loadSkill: ReturnType<typeof vi.fn>;
+        size: number;
+        clearCache: ReturnType<typeof vi.fn>;
+        reloadSkill: ReturnType<typeof vi.fn>;
     };
 
     beforeEach(async () => {
@@ -38,9 +43,12 @@ describe('SkillTool', () => {
             ]),
             hasSkill: vi.fn((name: string) => ['test-skill', 'another-skill'].includes(name)),
             loadSkill: vi.fn(),
+            size: 2,
+            clearCache: vi.fn(),
+            reloadSkill: vi.fn(),
         };
 
-        vi.mocked(getSkillLoader).mockReturnValue(mockLoader);
+        vi.mocked(getSkillLoader).mockReturnValue(mockLoader as unknown as ReturnType<typeof getSkillLoader>);
     });
 
     afterEach(async () => {

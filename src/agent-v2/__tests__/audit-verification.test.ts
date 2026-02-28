@@ -190,36 +190,36 @@ describe('P0-6: WebFetch SSRF 防护', () => {
         const { WebFetchTool } = await import('../tool/web-fetch');
         const tool = new WebFetchTool();
 
-        const result = await tool.execute({ url: 'http://localhost/test' });
+        const result = await tool.execute({ url: 'http://localhost/test', format: 'markdown' });
         expect(result.success).toBe(false);
-        expect(result.metadata?.error).toBe('SSRF_BLOCKED');
+        expect((result.metadata as { error: string }).error).toBe('SSRF_BLOCKED');
     });
 
     it('FIXED: 应该阻止 127.0.0.1', async () => {
         const { WebFetchTool } = await import('../tool/web-fetch');
         const tool = new WebFetchTool();
 
-        const result = await tool.execute({ url: 'http://127.0.0.1/test' });
+        const result = await tool.execute({ url: 'http://127.0.0.1/test', format: 'markdown' });
         expect(result.success).toBe(false);
-        expect(result.metadata?.error).toBe('SSRF_BLOCKED');
+        expect((result.metadata as { error: string }).error).toBe('SSRF_BLOCKED');
     });
 
     it('FIXED: 应该阻止内网 IP (192.168.x.x)', async () => {
         const { WebFetchTool } = await import('../tool/web-fetch');
         const tool = new WebFetchTool();
 
-        const result = await tool.execute({ url: 'http://192.168.1.1/test' });
+        const result = await tool.execute({ url: 'http://192.168.1.1/test', format: 'markdown' });
         expect(result.success).toBe(false);
-        expect(result.metadata?.error).toBe('SSRF_BLOCKED');
+        expect((result.metadata as { error: string }).error).toBe('SSRF_BLOCKED');
     });
 
     it('FIXED: 应该阻止 AWS 元数据地址', async () => {
         const { WebFetchTool } = await import('../tool/web-fetch');
         const tool = new WebFetchTool();
 
-        const result = await tool.execute({ url: 'http://169.254.169.254/latest/meta-data/' });
+        const result = await tool.execute({ url: 'http://169.254.169.254/latest/meta-data/', format: 'markdown' });
         expect(result.success).toBe(false);
-        expect(result.metadata?.error).toBe('SSRF_BLOCKED');
+        expect((result.metadata as { error: string }).error).toBe('SSRF_BLOCKED');
     });
 
     it('FIXED: 应该允许正常的外部 URL', async () => {
@@ -228,12 +228,12 @@ describe('P0-6: WebFetch SSRF 防护', () => {
 
         // 使用一个可靠的外部 URL 进行测试
         // 注意：这个测试需要网络连接
-        const result = await tool.execute({ url: 'https://httpbin.org/get', timeout: 10 });
+        const result = await tool.execute({ url: 'https://httpbin.org/get', format: 'markdown', timeout: 10 });
 
         // 只要不是 SSRF_BLOCKED 错误就算通过
         // 可能因为网络问题失败，但不应该是 SSRF 阻止
         if (!result.success) {
-            expect(result.metadata?.error).not.toBe('SSRF_BLOCKED');
+            expect((result.metadata as { error: string }).error).not.toBe('SSRF_BLOCKED');
         }
     });
 });
