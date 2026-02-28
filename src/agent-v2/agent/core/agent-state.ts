@@ -112,6 +112,10 @@ export class AgentState {
 
     /**
      * 检查是否超过最大重试次数
+     * maxRetries 表示允许的最大重试次数（不包括第一次调用）
+     * 使用 > 而不是 >=，确保：
+     * - maxRetries=0: 允许第一次调用，失败后不重试
+     * - maxRetries=3: 允许第一次调用 + 最多 3 次重试
      */
     isRetryExceeded(): boolean {
         return this._retryCount > this.config.maxRetries;

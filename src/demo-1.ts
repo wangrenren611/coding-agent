@@ -7,6 +7,7 @@ import { AgentMessage, AgentMessageType, BaseAgentEvent, SubagentEventMessage } 
 import { createMemoryManager } from './agent-v2';
 import { operatorPrompt } from './agent-v2/prompts/operator';
 import { platform } from 'os';
+import path from 'path';
 
 dotenv.config({
     path: './.env.development',
@@ -818,7 +819,17 @@ async function demo1() {
         });
 
         // 执行查询
-        const query = cliQuery || '存在多子agent执行时出现这个样式（./query.text），一个agent的时候显示正常的"';
+        let query = cliQuery;
+
+        if (!query) {
+            query = fs.readFileSync(path.join(process.cwd(), 'src/query.text'), 'utf-8');
+        }
+
+        if (query.trim().length === 0) {
+            console.error(`${COLORS.red}错误: 查询内容不能为空${COLORS.reset}`);
+            process.exit(1);
+        }
+
         printUserInput(query);
 
         const response = await agent.execute(query);

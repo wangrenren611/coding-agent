@@ -4,7 +4,7 @@ import { AgentMessageType, type AgentMessage } from './stream-types';
 import { AgentStatus } from './types';
 import { createMemoryManager } from '../memory';
 import { LLMRetryableError } from '../../providers';
-import type { LLMResponse, LLMGenerateOptions, LLMRequestMessage, Chunk } from '../../providers';
+import type { LLMProvider, LLMResponse, LLMGenerateOptions, LLMRequestMessage, Chunk } from '../../providers';
 
 type ProviderStep =
     | LLMResponse

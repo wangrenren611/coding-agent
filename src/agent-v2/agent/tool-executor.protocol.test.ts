@@ -6,6 +6,7 @@ import { ToolExecutor } from './core/tool-executor';
 import { LLMResponseInvalidError } from './errors';
 import { ToolCallValidationError } from '../tool/registry';
 import type { ToolCall } from './core-types';
+import type { LLMProvider } from '../../providers';
 
 function createToolCall(callId: string, toolName: string, args: Record<string, unknown>): ToolCall {
     return {

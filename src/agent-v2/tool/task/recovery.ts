@@ -19,7 +19,6 @@ import { SubagentType, BackgroundTaskStatus } from './shared';
 import { ToolRegistry } from '../registry';
 import type { ToolRegistryConfig } from '../registry';
 
-
 /**
  * 中断的任务信息
  */
@@ -120,10 +119,7 @@ export async function findInterruptedTasks(
  * @param options 恢复选项
  * @returns 恢复结果
  */
-export async function recoverTask(
-    task: InterruptedTask,
-    options: RecoveryOptions
-): Promise<RecoveryResult> {
+export async function recoverTask(task: InterruptedTask, options: RecoveryOptions): Promise<RecoveryResult> {
     const { provider, memoryManager, workingDirectory = process.cwd(), streamCallback, restart = false } = options;
 
     const config = AGENT_CONFIGS[task.subagentType];

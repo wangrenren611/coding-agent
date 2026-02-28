@@ -394,9 +394,7 @@ export class Compaction {
         // 方法1（优先）：使用最后一条 assistant 消息的 usage.prompt_tokens
         // usage.prompt_tokens 是当前请求的完整上下文大小，已经包含 system prompt 和所有历史消息
         // 注意：不能累加，因为每条消息的 prompt_tokens 都是当时完整的上下文大小
-        const lastAssistant = [...messages].reverse().find(
-            (m) => m.role === 'assistant' && m.usage?.prompt_tokens
-        );
+        const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant' && m.usage?.prompt_tokens);
         const latestUsage = lastAssistant?.usage?.prompt_tokens ?? 0;
 
         // 方法2（备用）：基于内容估算

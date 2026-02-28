@@ -1,8 +1,8 @@
 import { StandardAdapter } from './standard';
 import type { LLMRequest } from '../types';
 export class KimiAdapter extends StandardAdapter {
-    constructor(_options: { endpointPath?: string; defaultModel?: string } = {}) {
-        super();
+    constructor(options: { endpointPath?: string; defaultModel?: string } = {}) {
+        super(options);
     }
 
     transformRequest(options?: LLMRequest): LLMRequest {

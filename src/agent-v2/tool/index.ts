@@ -7,7 +7,15 @@ import { WebSearchTool } from './web-search';
 import { WebFetchTool } from './web-fetch';
 import { BatchReplaceTool } from './batch-replace';
 import { LspTool } from './lsp';
-import { TaskCreateTool, TaskGetTool, TaskListTool, TaskOutputTool, TaskStopTool, TaskTool, TaskUpdateTool } from './task';
+import {
+    TaskCreateTool,
+    TaskGetTool,
+    TaskListTool,
+    TaskOutputTool,
+    TaskStopTool,
+    TaskTool,
+    TaskUpdateTool,
+} from './task';
 import { ToolRegistry } from './registry';
 import { SkillTool } from '../skill';
 import { PlanCreateTool } from '../plan/tools';

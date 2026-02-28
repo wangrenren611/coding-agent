@@ -83,7 +83,7 @@ describe('RATE_LIMIT 重试场景测试', () => {
         mockProvider.reset();
     });
 
-    it('验证：isRetryExceeded 使用 > 而不是 >=，需要重试次数 > maxRetries 才会触发', async () => {
+    it('验证：isRetryExceeded 使用 >，需要重试次数 > maxRetries 才会触发', async () => {
         // maxRetries = 3，需要 failureCount > 3（即 4 次）才会触发 isRetryExceeded
         // 但由于每次失败后 retryCount++，所以：
         // - 第 1 次失败后 retryCount = 1
@@ -149,7 +149,10 @@ describe('RATE_LIMIT 重试场景测试', () => {
 
         console.log('Messages count:', messages.length);
         console.log('Last message role:', lastMessage?.role);
-        console.log('Last message content:', typeof lastMessage?.content === 'string' ? lastMessage.content.substring(0, 100) : lastMessage?.content);
+        console.log(
+            'Last message content:',
+            typeof lastMessage?.content === 'string' ? lastMessage.content.substring(0, 100) : lastMessage?.content
+        );
 
         // 最后一条消息应该是用户消息（因为没有成功的助手响应）
         expect(lastMessage?.role).toBe('user');
@@ -422,5 +425,4 @@ describe('RATE_LIMIT 重试场景测试', () => {
 
         console.log('Rate limit error recovery hint:', rateLimitError.recoveryHint);
     });
-
 });

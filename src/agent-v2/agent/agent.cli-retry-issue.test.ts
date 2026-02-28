@@ -11,6 +11,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { Agent } from './agent';
 import { createMemoryManager } from '../memory';
 import type { LLMResponse } from '../../providers/types';
+import type { LLMProvider } from '../../providers';
 
 // 延迟函数，等待持久化完成
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
