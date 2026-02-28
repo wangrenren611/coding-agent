@@ -7,6 +7,40 @@ const MAX_RESPONSE_SIZE = 5 * 1024 * 1024; // 5MB
 const DEFAULT_TIMEOUT = 30 * 1000; // 30秒
 const MAX_TIMEOUT = 120 * 1000; // 120秒
 
+// SSRF 防护：禁止访问的地址模式
+const BLOCKED_HOST_PATTERNS: RegExp[] = [
+    // localhost 和回环地址
+    /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])$/i,
+    // 内网 IP
+    /^10\./,
+    /^172\.(1[6-9]|2[0-9]|3[0-1])\./,
+    /^192\.168\./,
+    // 链路本地和 AWS/GCP 元数据地址
+    /^169\.254\./,
+    // 云服务元数据
+    /^(metadata\.google\.internal|metadata\.azure)$/i,
+];
+
+/**
+ * 检查 URL 是否为内网或敏感地址（SSRF 防护）
+ */
+function isBlockedAddress(url: string): { blocked: boolean; reason?: string } {
+    try {
+        const parsed = new URL(url);
+        const hostname = parsed.hostname.toLowerCase();
+
+        for (const pattern of BLOCKED_HOST_PATTERNS) {
+            if (pattern.test(hostname)) {
+                return { blocked: true, reason: 'Access to internal/restricted address is blocked' };
+            }
+        }
+
+        return { blocked: false };
+    } catch {
+        return { blocked: true, reason: 'Invalid URL format' };
+    }
+}
+
 // 定义 schema
 const schema = z.object({
     url: z.string().describe('The URL to fetch content from'),
@@ -34,6 +68,19 @@ export class WebFetchTool extends BaseTool<typeof schema> {
                     duration: Date.now() - startTime,
                 },
                 output: 'INVALID_URL: URL must start with http:// or https://',
+            });
+        }
+
+        // SSRF 防护：检查是否为内网或敏感地址
+        const ssrfCheck = isBlockedAddress(params.url);
+        if (ssrfCheck.blocked) {
+            return this.result({
+                success: false,
+                metadata: {
+                    error: 'SSRF_BLOCKED',
+                    duration: Date.now() - startTime,
+                },
+                output: `SSRF_BLOCKED: ${ssrfCheck.reason || 'Access denied'}`,
             });
         }
 

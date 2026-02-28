@@ -160,10 +160,23 @@ export function stringifyContentPart(part: InputContentPart): string {
 
 /**
  * 检查内容是否有实际值
+ * - 字符串：检查长度
+ * - 数组：检查是否有非空内容的部分
  */
 export function hasContent(content: MessageContent): boolean {
+    if (content == null) return false;
     if (typeof content === 'string') {
-        return content?.length > 0;
+        return content.length > 0;
     }
-    return content?.length > 0;
+    if (!Array.isArray(content) || content.length === 0) {
+        return false;
+    }
+    // 检查数组中是否有实际内容
+    return content.some((part) => {
+        if (part.type === 'text') {
+            return (part.text ?? '').length > 0;
+        }
+        // 其他类型（图片、文件等）视为有内容
+        return true;
+    });
 }

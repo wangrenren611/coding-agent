@@ -365,6 +365,13 @@ export interface IMemoryManager {
 
     /** 关闭存储并清理资源 */
     close(): Promise<void>;
+
+    /**
+     * 等待初始化完成（如果正在进行或尚未开始）
+     * 如果尚未初始化，会自动启动初始化
+     * 用于确保 MemoryManager 已初始化后再调用其他方法
+     */
+    waitForInitialization?(): Promise<void>;
 }
 
 /**

@@ -34,8 +34,8 @@ export const TOOL_TRUNCATION_CONFIGS: Record<string, Partial<TruncationConfig>> 
         maxLines: 3000,
     },
 
-    // read 文件本身支持分页，不需要额外截断
-    read: {
+    // read_file 文件本身支持分页，不需要额外截断
+    read_file: {
         enabled: false,
     },
 

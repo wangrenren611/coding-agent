@@ -6,13 +6,14 @@ import { describe, it, expect } from 'vitest';
 import { createTruncationMiddleware } from '../middleware';
 import { TruncationService } from '../service';
 import type { ToolResult } from '../../tool/base';
+import type { TruncationMetadata } from '../types';
 
 describe('TruncationMiddleware', () => {
     it('should not modify result when no output', async () => {
         const service = new TruncationService({ global: { maxLines: 5 } });
         const middleware = createTruncationMiddleware({ service });
 
-        const result: ToolResult = {
+        const result: ToolResult<TruncationMetadata> = {
             success: true,
             output: '',
         };
@@ -20,14 +21,14 @@ describe('TruncationMiddleware', () => {
         const modified = await middleware('test', result, { toolName: 'test' });
 
         expect(modified.output).toBe('');
-        expect(modified.metadata?.truncated).toBeUndefined();
+        expect((modified.metadata as TruncationMetadata)?.truncated).toBeUndefined();
     });
 
     it('should not modify result when already truncated', async () => {
         const service = new TruncationService({ global: { maxLines: 5 } });
         const middleware = createTruncationMiddleware({ service });
 
-        const result: ToolResult = {
+        const result: ToolResult<TruncationMetadata> = {
             success: true,
             output: Array(100).fill('line').join('\n'),
             metadata: { truncated: true }, // already processed
@@ -36,7 +37,7 @@ describe('TruncationMiddleware', () => {
         const modified = await middleware('test', result, { toolName: 'test' });
 
         // should not call service.output, just return as-is
-        expect(modified.metadata?.truncated).toBe(true);
+        expect((modified.metadata as TruncationMetadata)?.truncated).toBe(true);
     });
 
     it('should skip tools in skipTools list', async () => {
@@ -46,28 +47,28 @@ describe('TruncationMiddleware', () => {
             skipTools: ['skip_me'],
         });
 
-        const result: ToolResult = {
+        const result: ToolResult<TruncationMetadata> = {
             success: true,
             output: Array(100).fill('line').join('\n'),
         };
 
         const modified = await middleware('skip_me', result, { toolName: 'skip_me' });
 
-        expect(modified.metadata?.truncated).toBeUndefined();
+        expect((modified.metadata as TruncationMetadata)?.truncated).toBeUndefined();
     });
 
     it('should truncate long output', async () => {
         const service = new TruncationService({ global: { maxLines: 5 } });
         const middleware = createTruncationMiddleware({ service });
 
-        const result: ToolResult = {
+        const result: ToolResult<TruncationMetadata> = {
             success: true,
             output: Array(100).fill('line').join('\n'),
         };
 
         const modified = await middleware('test', result, { toolName: 'test' });
 
-        expect(modified.metadata?.truncated).toBe(true);
+        expect((modified.metadata as TruncationMetadata)?.truncated).toBe(true);
         expect(modified.output).toContain('truncated');
     });
 
@@ -87,21 +88,21 @@ describe('TruncationMiddleware', () => {
         const longOutput = Array(100).fill('line').join('\n');
 
         // regular tool - should not truncate
-        const result1: ToolResult = { success: true, output: longOutput };
+        const result1: ToolResult<TruncationMetadata> = { success: true, output: longOutput };
         const modified1 = await middleware('regular', result1, { toolName: 'regular' });
-        expect(modified1.metadata?.truncated).toBeUndefined();
+        expect((modified1.metadata as TruncationMetadata)?.truncated).toBeUndefined();
 
         // special tool - should truncate with custom limit
-        const result2: ToolResult = { success: true, output: longOutput };
+        const result2: ToolResult<TruncationMetadata> = { success: true, output: longOutput };
         const modified2 = await middleware('special', result2, { toolName: 'special' });
-        expect(modified2.metadata?.truncated).toBe(true);
+        expect((modified2.metadata as TruncationMetadata)?.truncated).toBe(true);
     });
 
     it('should preserve existing metadata', async () => {
         const service = new TruncationService({ global: { maxLines: 5 } });
         const middleware = createTruncationMiddleware({ service });
 
-        const result: ToolResult = {
+        const result: ToolResult<TruncationMetadata> = {
             success: true,
             output: Array(100).fill('line').join('\n'),
             metadata: { customField: 'value' },
@@ -109,7 +110,7 @@ describe('TruncationMiddleware', () => {
 
         const modified = await middleware('test', result, { toolName: 'test' });
 
-        expect(modified.metadata?.customField).toBe('value');
-        expect(modified.metadata?.truncated).toBe(true);
+        expect((modified.metadata as TruncationMetadata)?.customField).toBe('value');
+        expect((modified.metadata as TruncationMetadata)?.truncated).toBe(true);
     });
 });

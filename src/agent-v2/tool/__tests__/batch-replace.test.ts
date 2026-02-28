@@ -33,7 +33,7 @@ describe('BatchReplaceTool - Deep Tests', () => {
             });
 
             expect(result.success).toBe(true);
-            expect(result.metadata?.modifiedCount).toBe(3);
+            expect((result.metadata as { modifiedCount: number })?.modifiedCount).toBe(3);
             const modified = await env.readFile('test.txt');
             expect(modified).toBe('Line 1 NEW\nLine 2 NEW\nLine 3 NEW');
         });
@@ -52,9 +52,9 @@ describe('BatchReplaceTool - Deep Tests', () => {
             });
 
             expect(result.success).toBe(true); // Partial success still returns success
-            expect(result.metadata?.modifiedCount).toBe(2);
-            expect(result.metadata?.failedCount).toBe(1);
-            expect(result.metadata?.hasErrors).toBe(true);
+            expect((result.metadata as { modifiedCount: number })?.modifiedCount).toBe(2);
+            expect((result.metadata as { failedCount: number })?.failedCount).toBe(1);
+            expect((result.metadata as { hasErrors: boolean })?.hasErrors).toBe(true);
             const modified = await env.readFile('test.txt');
             expect(modified).toBe('Line 1 NEW\nLine 2 NOMATCH\nLine 3 NEW');
         });
@@ -69,7 +69,7 @@ describe('BatchReplaceTool - Deep Tests', () => {
             });
 
             expect(result.success).toBe(false);
-            expect(result.metadata?.error).toContain('EMPTY_REPLACEMENTS');
+            expect((result.metadata as { error: string })?.error).toContain('EMPTY_REPLACEMENTS');
         });
     });
 
@@ -106,7 +106,7 @@ describe('BatchReplaceTool - Deep Tests', () => {
             });
 
             expect(result.success).toBe(true);
-            expect(result.metadata?.modifiedCount).toBe(3);
+            expect((result.metadata as { modifiedCount: number })?.modifiedCount).toBe(3);
             const modified = await env.readFile('test.txt');
             // Each replacement uses original line content, last one wins
             // Replacement 3: 'VAR1 + VAR2 + VAR3' → 'VAR1 + VAR2 + C'
@@ -125,7 +125,7 @@ describe('BatchReplaceTool - Deep Tests', () => {
             });
 
             expect(result.success).toBe(true); // Still success because file wasn't damaged
-            expect(result.metadata?.modifiedCount).toBe(0);
+            expect((result.metadata as { modifiedCount: number })?.modifiedCount).toBe(0);
             const modified = await env.readFile('test.txt');
             expect(modified).toBe('CORRECT original line'); // Unchanged
         });
@@ -273,7 +273,7 @@ return oldName;`;
             });
 
             expect(result.success).toBe(true);
-            expect(result.metadata?.modifiedCount).toBe(3);
+            expect((result.metadata as { modifiedCount: number })?.modifiedCount).toBe(3);
             const modified = await env.readFile('code.js');
             expect(modified).toContain('newName');
         });
@@ -352,7 +352,7 @@ import { Util } from './other/path';`;
             });
 
             expect(result.success).toBe(false);
-            expect(result.metadata?.error).toContain('FILE_NOT_FOUND');
+            expect((result.metadata as { error: string })?.error).toContain('FILE_NOT_FOUND');
         });
 
         it('should return error for out of range line numbers', async () => {
@@ -368,8 +368,8 @@ import { Util } from './other/path';`;
             });
 
             expect(result.success).toBe(true); // Still overall success
-            expect(result.metadata?.modifiedCount).toBe(1);
-            expect(result.metadata?.failedCount).toBe(1);
+            expect((result.metadata as { modifiedCount: number })?.modifiedCount).toBe(1);
+            expect((result.metadata as { failedCount: number })?.failedCount).toBe(1);
         });
 
         it('should return error for line number 0', async () => {
@@ -384,8 +384,8 @@ import { Util } from './other/path';`;
             });
 
             expect(result.success).toBe(true); // Still returns success with error in results
-            expect(result.metadata?.modifiedCount).toBe(0);
-            expect(result.metadata?.failedCount).toBe(1);
+            expect((result.metadata as { modifiedCount: number })?.modifiedCount).toBe(0);
+            expect((result.metadata as { failedCount: number })?.failedCount).toBe(1);
         });
 
         it('should return error for negative line numbers', async () => {
@@ -398,7 +398,7 @@ import { Util } from './other/path';`;
             });
 
             expect(result.success).toBe(true);
-            expect(result.metadata?.failedCount).toBe(1);
+            expect((result.metadata as { failedCount: number })?.failedCount).toBe(1);
         });
 
         it('should handle all replacements failing', async () => {
@@ -415,8 +415,8 @@ import { Util } from './other/path';`;
             });
 
             expect(result.success).toBe(true); // No exception thrown
-            expect(result.metadata?.modifiedCount).toBe(0);
-            expect(result.metadata?.failedCount).toBe(3);
+            expect((result.metadata as { modifiedCount: number })?.modifiedCount).toBe(0);
+            expect((result.metadata as { failedCount: number })?.failedCount).toBe(3);
             const modified = await env.readFile('test.txt');
             expect(modified).toBe(content); // File unchanged
         });
@@ -441,7 +441,7 @@ import { Util } from './other/path';`;
             });
 
             expect(result.success).toBe(true);
-            expect(result.metadata?.modifiedCount).toBe(100);
+            expect((result.metadata as { modifiedCount: number })?.modifiedCount).toBe(100);
             const modified = await env.readFile('large.txt');
             expect(modified).toContain('REPLACED');
         });
@@ -456,7 +456,7 @@ import { Util } from './other/path';`;
             });
 
             expect(result.success).toBe(true);
-            expect(result.metadata?.failedCount).toBe(1);
+            expect((result.metadata as { failedCount: number })?.failedCount).toBe(1);
         });
 
         it('should handle single line file', async () => {
@@ -518,11 +518,12 @@ import { Util } from './other/path';`;
             });
 
             expect(result.success).toBe(true);
-            expect(result.metadata?.results).toHaveLength(3);
-            expect(result.metadata?.results[0].success).toBe(true);
-            expect(result.metadata?.results[1].success).toBe(false);
-            expect(result.metadata?.results[2].success).toBe(true);
-            expect(result.metadata?.results[1].message).toContain('not found');
+            const results = (result.metadata as { results: Array<{ success: boolean; message?: string }> })?.results;
+            expect(results).toHaveLength(3);
+            expect(results?.[0]?.success).toBe(true);
+            expect(results?.[1]?.success).toBe(false);
+            expect(results?.[2]?.success).toBe(true);
+            expect(results?.[1]?.message).toContain('not found');
         });
     });
 });

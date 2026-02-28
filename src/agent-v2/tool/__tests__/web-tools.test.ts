@@ -31,7 +31,7 @@ describe('Web Tools', () => {
             });
 
             expect(result.success).toBe(false);
-            expect(result.metadata?.error).toContain('API_KEY_MISSING');
+            expect((result.metadata as { error: string })?.error).toContain('API_KEY_MISSING');
         });
 
         it('should handle missing query parameter', async () => {
@@ -62,6 +62,7 @@ describe('Web Tools', () => {
             const tool = new WebSearchTool();
             const result = await tool.execute({
                 query: 'test search',
+                maxResults: 5,
             });
 
             expect(result).toBeDefined();
@@ -77,7 +78,7 @@ describe('Web Tools', () => {
             });
 
             expect(result.success).toBe(false);
-            expect(result.metadata?.error).toContain('INVALID_URL');
+            expect((result.metadata as { error: string })?.error).toContain('INVALID_URL');
         });
 
         it('should return error for URL without http/https', async () => {
@@ -88,7 +89,7 @@ describe('Web Tools', () => {
             });
 
             expect(result.success).toBe(false);
-            expect(result.metadata?.error).toContain('INVALID_URL');
+            expect((result.metadata as { error: string })?.error).toContain('INVALID_URL');
         });
 
         it('should validate timeout range', async () => {
@@ -138,6 +139,7 @@ describe('Web Tools', () => {
             const tool = new WebFetchTool();
             const result = await tool.execute({
                 url: 'https://example.com',
+                format: 'markdown',
             });
 
             expect(result).toBeDefined();
@@ -175,7 +177,7 @@ describe('Web Tools', () => {
             });
 
             if (result.success) {
-                expect(result.metadata?.duration).toBeDefined();
+                expect((result.metadata as { duration: number })?.duration).toBeDefined();
             }
         });
 
@@ -187,8 +189,8 @@ describe('Web Tools', () => {
             });
 
             if (result.success) {
-                expect(result.metadata?.size).toBeDefined();
-                expect(typeof result.metadata?.size).toBe('number');
+                expect((result.metadata as { size: number })?.size).toBeDefined();
+                expect(typeof (result.metadata as { size: number })?.size).toBe('number');
             }
         });
 
@@ -200,7 +202,7 @@ describe('Web Tools', () => {
             });
 
             if (result.success) {
-                expect(result.metadata?.contentType).toBeDefined();
+                expect((result.metadata as { contentType: string })?.contentType).toBeDefined();
             }
         });
 

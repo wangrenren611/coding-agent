@@ -83,7 +83,7 @@ Your responses should be:
 
 Complete the user's search request efficiently and report your findings clearly.
 `,
-        maxRetries: 8,
+        maxRetries: 20,
         // 探索任务需要遍历大量文件，使用更长的超时
         idleTimeoutMs: LONG_IDLE_TIMEOUT_MS,
     },

@@ -39,6 +39,10 @@ export class TestEnvironment {
         return this.testDir;
     }
 
+    get workingDir(): string {
+        return this.testDir;
+    }
+
     async createFile(relativePath: string, content: string): Promise<string> {
         const fullPath = path.join(this.testDir, relativePath);
         await mkdir(path.dirname(fullPath), { recursive: true });
