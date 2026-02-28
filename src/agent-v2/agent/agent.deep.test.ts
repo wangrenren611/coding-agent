@@ -13,6 +13,7 @@ import { createMemoryManager } from '../memory';
 import { KimiAdapter } from '../../providers/adapters/kimi';
 import { StandardAdapter } from '../../providers/adapters/standard';
 import type { LLMRequest, LLMGenerateOptions } from '../../providers/types';
+import type { LLMProvider } from '../../providers';
 import type { AgentOptions } from './types';
 
 // Mock Provider

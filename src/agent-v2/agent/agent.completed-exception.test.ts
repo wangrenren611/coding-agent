@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { Agent } from './agent';
-import { AgentMessageType, type AgentMessage } from './stream-types';
+import { AgentMessageType, type AgentMessage, type StatusMessage } from './stream-types';
 import { AgentStatus } from './types';
 import { createMemoryManager } from '../memory';
 import { LLMRetryableError } from '../../providers';
-import type { LLMResponse, LLMGenerateOptions, LLMRequestMessage, Chunk } from '../../providers';
+import type { LLMProvider, LLMResponse, LLMGenerateOptions, LLMRequestMessage, Chunk } from '../../providers';
 
 type ProviderStep =
     | LLMResponse
@@ -113,6 +113,7 @@ function createToolCallResponse(toolName: string, args: Record<string, unknown>)
                         {
                             id: 'call-1',
                             type: 'function',
+                            index: 0,
                             function: {
                                 name: toolName,
                                 arguments: JSON.stringify(args),
@@ -142,6 +143,7 @@ function createInvalidToolCallResponse(): LLMResponse {
                         {
                             id: '',
                             type: 'function',
+                            index: 0,
                             function: {
                                 name: 'list_files',
                                 arguments: '{}',
@@ -289,7 +291,9 @@ describe('Agent completed and exception scenarios', () => {
             (e) => e.type === AgentMessageType.STATUS && e.payload.state === AgentStatus.RETRYING
         );
         expect(retryStatuses.length).toBeGreaterThan(0);
-        expect(retryStatuses.some((e) => String(e.payload.message || '').includes('EMPTY_RESPONSE'))).toBe(true);
+        expect(
+            retryStatuses.some((e) => String((e as StatusMessage).payload.message || '').includes('EMPTY_RESPONSE'))
+        ).toBe(true);
     });
 
     it('tool failure warning path should still complete when next turn returns final text', async () => {
@@ -317,7 +321,7 @@ describe('Agent completed and exception scenarios', () => {
             (e) =>
                 e.type === AgentMessageType.STATUS &&
                 e.payload.state === AgentStatus.RUNNING &&
-                String(e.payload.message || '').includes('Tool execution partially or fully failed')
+                String((e as StatusMessage).payload.message || '').includes('Tool execution partially or fully failed')
         );
         expect(warnStatuses.length).toBeGreaterThan(0);
 
@@ -351,10 +355,12 @@ describe('Agent completed and exception scenarios', () => {
             (e) =>
                 e.type === AgentMessageType.STATUS &&
                 e.payload.state === AgentStatus.RETRYING &&
-                String(e.payload.message || '').startsWith('Retrying...')
+                String((e as StatusMessage).payload.message || '').startsWith('Retrying...')
         );
         expect(retryStatuses.length).toBeGreaterThan(0);
-        expect(retryStatuses.some((e) => String(e.payload.message || '').includes('EMPTY_RESPONSE'))).toBe(true);
+        expect(
+            retryStatuses.some((e) => String((e as StatusMessage).payload.message || '').includes('EMPTY_RESPONSE'))
+        ).toBe(true);
 
         const failedStatuses = events.filter(
             (e) => e.type === AgentMessageType.STATUS && e.payload.state === AgentStatus.FAILED
@@ -389,19 +395,23 @@ describe('Agent completed and exception scenarios', () => {
             (e) =>
                 e.type === AgentMessageType.STATUS &&
                 e.payload.state === AgentStatus.RETRYING &&
-                String(e.payload.message || '').startsWith('Retrying...')
+                String((e as StatusMessage).payload.message || '').startsWith('Retrying...')
         );
         expect(genericRetryingStatuses.length).toBeGreaterThanOrEqual(2);
-        expect(genericRetryingStatuses.some((e) => String(e.payload.message || '').includes('TIMEOUT'))).toBe(true);
-        expect(genericRetryingStatuses.some((e) => String(e.payload.message || '').includes('EMPTY_RESPONSE'))).toBe(
-            true
-        );
+        expect(
+            genericRetryingStatuses.some((e) => String((e as StatusMessage).payload.message || '').includes('TIMEOUT'))
+        ).toBe(true);
+        expect(
+            genericRetryingStatuses.some((e) =>
+                String((e as StatusMessage).payload.message || '').includes('EMPTY_RESPONSE')
+            )
+        ).toBe(true);
 
         const compensationStatuses = events.filter(
             (e) =>
                 e.type === AgentMessageType.STATUS &&
                 e.payload.state === AgentStatus.RETRYING &&
-                String(e.payload.message || '').includes('Compensation retry')
+                String((e as StatusMessage).payload.message || '').includes('Compensation retry')
         );
         expect(compensationStatuses).toHaveLength(0);
     });
@@ -442,7 +452,7 @@ describe('Agent completed and exception scenarios', () => {
 
         const retryingMessages = events
             .filter((e) => e.type === AgentMessageType.STATUS && e.payload.state === AgentStatus.RETRYING)
-            .map((e) => String(e.payload.message || ''));
+            .map((e) => String((e as StatusMessage).payload.message || ''));
 
         expect(retryingMessages.some((msg) => msg.includes('internal_server_error'))).toBe(true);
         expect(retryingMessages.some((msg) => msg.includes('EMPTY_RESPONSE'))).toBe(false);
@@ -496,7 +506,7 @@ describe('Agent completed and exception scenarios', () => {
                     {
                         id: 'chunk-overflow',
                         index: 0,
-                        choices: [{ index: 0, delta: { content: '0123456789' } }],
+                        choices: [{ index: 0, delta: { role: 'assistant', content: '0123456789' } }],
                     },
                 ]),
         ]);
@@ -521,7 +531,7 @@ describe('Agent completed and exception scenarios', () => {
 
         const retryingMessages = events
             .filter((e) => e.type === AgentMessageType.STATUS && e.payload.state === AgentStatus.RETRYING)
-            .map((e) => String(e.payload.message || ''));
+            .map((e) => String((e as StatusMessage).payload.message || ''));
         expect(retryingMessages).toHaveLength(0);
     });
 
@@ -548,7 +558,7 @@ describe('Agent completed and exception scenarios', () => {
             (e) =>
                 e.type === AgentMessageType.STATUS &&
                 e.payload.state === AgentStatus.RETRYING &&
-                String(e.payload.message || '').includes('Compensation retry')
+                String((e as StatusMessage).payload.message || '').includes('Compensation retry')
         );
         expect(compensationStatuses).toHaveLength(0);
     });
@@ -601,7 +611,7 @@ describe('Agent completed and exception scenarios', () => {
 
         const retryingMessages = events
             .filter((e) => e.type === AgentMessageType.STATUS && e.payload.state === AgentStatus.RETRYING)
-            .map((e) => String(e.payload.message || ''));
+            .map((e) => String((e as StatusMessage).payload.message || ''));
         expect(retryingMessages.some((msg) => msg.includes('[TIMEOUT] Gateway timeout'))).toBe(true);
     });
 

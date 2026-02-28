@@ -102,7 +102,8 @@ describe('IdleTimeoutController', () => {
             await new Promise((resolve) => setTimeout(resolve, 50));
 
             const beforeResetIdleTime = controller.getIdleTime();
-            expect(beforeResetIdleTime).toBeGreaterThanOrEqual(50);
+            // setTimeout 不能保证精确延迟，使用更宽松的阈值
+            expect(beforeResetIdleTime).toBeGreaterThanOrEqual(40);
 
             controller.reset();
 

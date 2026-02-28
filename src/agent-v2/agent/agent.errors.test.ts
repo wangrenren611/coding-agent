@@ -14,6 +14,7 @@ import { Agent } from './agent';
 import { AgentStatus } from './types';
 import { createMemoryManager } from '../memory';
 import type { LLMResponse } from '../../providers/types';
+import type { LLMProvider } from '../../providers';
 
 // 导入错误类和常量
 import {

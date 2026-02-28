@@ -12,6 +12,7 @@ import { TestEnvironment } from './test-utils';
 import { createMemoryManager } from '../../memory';
 import type { IMemoryManager } from '../../memory';
 import { TaskTool, clearTaskState } from '../task';
+import { SubagentType } from '../task/shared';
 import { AgentMessageType, type AgentMessage } from '../../agent/stream-types';
 
 /**
@@ -137,6 +138,7 @@ describe('Subagent Event Bubbling', () => {
             sessionId,
             memoryManager,
             streamCallback: eventCollector.callback,
+            workingDirectory: process.cwd(),
         };
         clearTaskState();
     });
@@ -159,7 +161,7 @@ describe('Subagent Event Bubbling', () => {
             const result = await taskTool.execute({
                 description: 'Analyze code',
                 prompt: 'Analyze the project structure',
-                subagent_type: 'explore',
+                subagent_type: SubagentType.Explore,
                 run_in_background: false,
             });
 
@@ -200,7 +202,7 @@ describe('Subagent Event Bubbling', () => {
             const result = await taskTool.execute({
                 description: 'Simple task',
                 prompt: 'Do something simple',
-                subagent_type: 'explore',
+                subagent_type: SubagentType.Explore,
                 run_in_background: false,
             });
 
@@ -219,22 +221,26 @@ describe('Subagent Event Bubbling', () => {
             const result = await taskTool.execute({
                 description: 'Test metadata',
                 prompt: 'Test that metadata is correct',
-                subagent_type: 'explore',
+                subagent_type: SubagentType.Explore,
                 run_in_background: false,
             });
 
             expect(result.success).toBe(true);
-            expect(result.metadata?.task_id).toBeDefined();
-            expect(result.metadata?.child_session_id).toBeDefined();
+            expect((result.metadata as Record<string, unknown>)?.task_id).toBeDefined();
+            expect((result.metadata as Record<string, unknown>)?.child_session_id).toBeDefined();
 
             const subagentEvents = eventCollector.getSubagentEvents();
 
             if (subagentEvents.length > 0) {
                 // 验证所有事件的 metadata 与结果一致
                 for (const event of subagentEvents) {
-                    expect(event.payload.task_id).toBe(result.metadata?.task_id);
-                    expect(event.payload.subagent_type).toBe('explore');
-                    expect(event.payload.child_session_id).toBe(result.metadata?.child_session_id);
+                    expect((event.payload as Record<string, unknown>).task_id).toBe(
+                        (result.metadata as Record<string, unknown>)?.task_id
+                    );
+                    expect((event.payload as Record<string, unknown>).subagent_type).toBe(SubagentType.Explore);
+                    expect((event.payload as Record<string, unknown>).child_session_id).toBe(
+                        (result.metadata as Record<string, unknown>)?.child_session_id
+                    );
                 }
             }
         });
@@ -247,7 +253,7 @@ describe('Subagent Event Bubbling', () => {
             const result = await taskTool.execute({
                 description: 'Text output test',
                 prompt: 'Generate some text',
-                subagent_type: 'explore',
+                subagent_type: SubagentType.Explore,
                 run_in_background: false,
             });
 
@@ -258,7 +264,7 @@ describe('Subagent Event Bubbling', () => {
 
             // 查找文本相关的事件
             const textEvents = subagentEvents.filter((e) => {
-                const innerEvent = e.payload.event;
+                const innerEvent = (e.payload as Record<string, unknown>).event as { type: string };
                 return (
                     innerEvent.type === AgentMessageType.TEXT_DELTA ||
                     innerEvent.type === AgentMessageType.TEXT_START ||
@@ -270,7 +276,11 @@ describe('Subagent Event Bubbling', () => {
 
             // 如果有事件冒泡，验证文本内容
             if (textEvents.length > 0) {
-                const textDeltaEvents = textEvents.filter((e) => e.payload.event.type === AgentMessageType.TEXT_DELTA);
+                const textDeltaEvents = textEvents.filter(
+                    (e) =>
+                        ((e.payload as Record<string, unknown>).event as { type: string }).type ===
+                        AgentMessageType.TEXT_DELTA
+                );
 
                 // 应该有文本增量事件
                 expect(textDeltaEvents.length).toBeGreaterThan(0);
@@ -285,7 +295,7 @@ describe('Subagent Event Bubbling', () => {
             const result = await taskTool.execute({
                 description: 'Status test',
                 prompt: 'Test status events',
-                subagent_type: 'explore',
+                subagent_type: SubagentType.Explore,
                 run_in_background: false,
             });
 
@@ -295,7 +305,9 @@ describe('Subagent Event Bubbling', () => {
 
             // 查找状态事件
             const statusEvents = subagentEvents.filter((e) => {
-                return e.payload.event.type === AgentMessageType.STATUS;
+                return (
+                    ((e.payload as Record<string, unknown>).event as { type: string }).type === AgentMessageType.STATUS
+                );
             });
 
             console.log('Status events found:', statusEvents.length);
@@ -303,7 +315,10 @@ describe('Subagent Event Bubbling', () => {
             if (statusEvents.length > 0) {
                 // 验证状态事件结构
                 for (const event of statusEvents) {
-                    const innerEvent = event.payload.event;
+                    const innerEvent = (event.payload as Record<string, unknown>).event as {
+                        type: string;
+                        payload: Record<string, unknown>;
+                    };
                     expect(innerEvent.payload).toHaveProperty('state');
                     expect(innerEvent.payload).toHaveProperty('message');
                 }
@@ -321,12 +336,12 @@ describe('Subagent Event Bubbling', () => {
             const startResult = await taskTool.execute({
                 description: 'Background task',
                 prompt: 'Run in background',
-                subagent_type: 'explore',
+                subagent_type: SubagentType.Explore,
                 run_in_background: true,
             });
 
             expect(startResult.success).toBe(true);
-            expect(startResult.metadata?.status).toBe('queued');
+            expect((startResult.metadata as Record<string, unknown>)?.status).toBe('queued');
 
             // 等待任务完成
             await new Promise((resolve) => setTimeout(resolve, 500));

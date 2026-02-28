@@ -8,11 +8,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { LLMProvider } from '../../../providers';
 import type { LLMGenerateOptions, LLMRequestMessage, LLMResponse } from '../../../providers';
 import type { ToolContext } from '../base';
+import type { ToolResult } from '../base';
 import { TestEnvironment } from './test-utils';
 import { createMemoryManager } from '../../memory';
 import type { IMemoryManager } from '../../memory';
 import { TaskTool, clearTaskState } from '../task';
-import { AgentMessageType, type AgentMessage } from '../../agent/stream-types';
+import { SubagentType } from '../task/shared';
+import { AgentMessageType, type AgentMessage, type SubagentEventMessage } from '../../agent/stream-types';
 
 /**
  * 模拟 Provider - 返回包含工具调用的响应
@@ -96,13 +98,19 @@ class EventCollector {
         return this.events.filter((e) => e.type === type);
     }
 
-    getSubagentEvents(): AgentMessage[] {
-        return this.getEventsByType(AgentMessageType.SUBAGENT_EVENT);
+    getSubagentEvents(): SubagentEventMessage[] {
+        return this.events.filter((e): e is SubagentEventMessage => e.type === AgentMessageType.SUBAGENT_EVENT);
     }
 
     clear(): void {
         this.events = [];
     }
+}
+
+interface TaskMetadata {
+    task_id?: string;
+    child_session_id?: string;
+    status?: string;
 }
 
 describe('Subagent Message Passing', () => {
@@ -111,13 +119,6 @@ describe('Subagent Message Passing', () => {
     let memoryManager: IMemoryManager;
     let eventCollector: EventCollector;
     let toolContext: ToolContext;
-
-    const withContext = <T extends { execute: (...args: unknown[]) => unknown }>(tool: T): T => {
-        const rawExecute = tool.execute.bind(tool);
-        (tool as unknown as { execute: (args?: unknown) => unknown }).execute = (args?: unknown) =>
-            rawExecute(args as never, toolContext);
-        return tool;
-    };
 
     beforeEach(async () => {
         env = new TestEnvironment('subagent-msg-test');
@@ -133,6 +134,7 @@ describe('Subagent Message Passing', () => {
             environment: process.cwd(),
             platform: process.platform,
             time: new Date().toISOString(),
+            workingDirectory: process.cwd(),
             sessionId,
             memoryManager,
             streamCallback: eventCollector.callback,
@@ -152,14 +154,16 @@ describe('Subagent Message Passing', () => {
                 createTextResponse('Analysis complete. All tests passed.'),
             ]);
 
-            const taskTool = withContext(new TaskTool(provider, process.cwd()));
-
-            const result = await taskTool.execute({
-                description: 'Analyze code',
-                prompt: 'Analyze the project',
-                subagent_type: 'explore',
-                run_in_background: false,
-            });
+            const taskTool = new TaskTool(provider, process.cwd());
+            const result = (await taskTool.execute(
+                {
+                    description: 'Analyze code',
+                    prompt: 'Analyze the project',
+                    subagent_type: SubagentType.Explore,
+                    run_in_background: false,
+                },
+                toolContext
+            )) as ToolResult<TaskMetadata>;
 
             expect(result.success).toBe(true);
 
@@ -190,14 +194,16 @@ describe('Subagent Message Passing', () => {
 
             const provider = new MockProviderWithResponses([createTextResponse('Task done.')]);
 
-            const taskTool = withContext(new TaskTool(provider, process.cwd()));
-
-            const result = await taskTool.execute({
-                description: 'Simple task',
-                prompt: 'Do something',
-                subagent_type: 'explore',
-                run_in_background: false,
-            });
+            const taskTool = new TaskTool(provider, process.cwd());
+            const result = (await taskTool.execute(
+                {
+                    description: 'Simple task',
+                    prompt: 'Do something',
+                    subagent_type: SubagentType.Explore,
+                    run_in_background: false,
+                },
+                toolContext
+            )) as ToolResult;
 
             expect(result.success).toBe(true);
 
@@ -209,14 +215,16 @@ describe('Subagent Message Passing', () => {
         it('should include correct metadata in passed events', async () => {
             const provider = new MockProviderWithResponses([createTextResponse('Done.')]);
 
-            const taskTool = withContext(new TaskTool(provider, process.cwd()));
-
-            const result = await taskTool.execute({
-                description: 'Metadata test',
-                prompt: 'Test metadata',
-                subagent_type: 'explore',
-                run_in_background: false,
-            });
+            const taskTool = new TaskTool(provider, process.cwd());
+            const result = (await taskTool.execute(
+                {
+                    description: 'Metadata test',
+                    prompt: 'Test metadata',
+                    subagent_type: SubagentType.Explore,
+                    run_in_background: false,
+                },
+                toolContext
+            )) as ToolResult<TaskMetadata>;
 
             expect(result.success).toBe(true);
             expect(result.metadata?.task_id).toBeDefined();
@@ -227,7 +235,7 @@ describe('Subagent Message Passing', () => {
             if (subagentEvents.length > 0) {
                 for (const event of subagentEvents) {
                     expect(event.payload.task_id).toBe(result.metadata?.task_id);
-                    expect(event.payload.subagent_type).toBe('explore');
+                    expect(event.payload.subagent_type).toBe(SubagentType.Explore);
                     expect(event.payload.child_session_id).toBe(result.metadata?.child_session_id);
                 }
                 console.log('All events have correct metadata');
@@ -237,14 +245,16 @@ describe('Subagent Message Passing', () => {
         it('should collect multiple event types from subagent', async () => {
             const provider = new MockProviderWithResponses([createTextResponse('Response text here.')]);
 
-            const taskTool = withContext(new TaskTool(provider, process.cwd()));
-
-            const result = await taskTool.execute({
-                description: 'Multi event test',
-                prompt: 'Generate events',
-                subagent_type: 'explore',
-                run_in_background: false,
-            });
+            const taskTool = new TaskTool(provider, process.cwd());
+            const result = (await taskTool.execute(
+                {
+                    description: 'Multi event test',
+                    prompt: 'Generate events',
+                    subagent_type: SubagentType.Explore,
+                    run_in_background: false,
+                },
+                toolContext
+            )) as ToolResult;
 
             expect(result.success).toBe(true);
 
@@ -255,7 +265,7 @@ describe('Subagent Message Passing', () => {
                 // 统计各种事件类型
                 const eventTypes = new Map<string, number>();
                 for (const event of subagentEvents) {
-                    const innerType = event.payload.event.type;
+                    const innerType = (event.payload.event as { type: string }).type;
                     eventTypes.set(innerType, (eventTypes.get(innerType) || 0) + 1);
                 }
 
@@ -271,14 +281,16 @@ describe('Subagent Message Passing', () => {
         it('should pass events from background tasks', async () => {
             const provider = new MockProviderWithResponses([createTextResponse('Background complete.')]);
 
-            const taskTool = withContext(new TaskTool(provider, process.cwd()));
-
-            const startResult = await taskTool.execute({
-                description: 'BG task',
-                prompt: 'Run background',
-                subagent_type: 'explore',
-                run_in_background: true,
-            });
+            const taskTool = new TaskTool(provider, process.cwd());
+            const startResult = (await taskTool.execute(
+                {
+                    description: 'BG task',
+                    prompt: 'Run background',
+                    subagent_type: SubagentType.Explore,
+                    run_in_background: true,
+                },
+                toolContext
+            )) as ToolResult<TaskMetadata>;
 
             expect(startResult.success).toBe(true);
             expect(startResult.metadata?.status).toBe('queued');

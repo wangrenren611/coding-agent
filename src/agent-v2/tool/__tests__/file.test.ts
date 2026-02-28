@@ -26,7 +26,7 @@ describe('File Tools', () => {
             const result = await tool.execute({ filePath: testFile });
 
             expect(result.success).toBe(true);
-            expect(result.metadata?.content).toBe('Hello, World!');
+            expect((result.metadata as { content: string })?.content).toBe('Hello, World!');
         });
 
         it('should read file content with line range', async () => {
@@ -40,8 +40,11 @@ describe('File Tools', () => {
             });
 
             expect(result.success).toBe(true);
-            expect(result.metadata?.content).toBe('Line 2\nLine 3\nLine 4');
-            expect(result.metadata?.range).toEqual({ startLine: 2, endLine: 4 });
+            expect((result.metadata as { content: string })?.content).toBe('Line 2\nLine 3\nLine 4');
+            expect((result.metadata as { range: { startLine: number; endLine: number } })?.range).toEqual({
+                startLine: 2,
+                endLine: 4,
+            });
         });
 
         it('should read from startLine to end when endLine is not specified', async () => {
@@ -54,7 +57,7 @@ describe('File Tools', () => {
             });
 
             expect(result.success).toBe(true);
-            expect(result.metadata?.content).toBe('Line 3\nLine 4\nLine 5');
+            expect((result.metadata as { content: string })?.content).toBe('Line 3\nLine 4\nLine 5');
         });
 
         it('should read from beginning to endLine when startLine is not specified', async () => {
@@ -67,7 +70,7 @@ describe('File Tools', () => {
             });
 
             expect(result.success).toBe(true);
-            expect(result.metadata?.content).toBe('Line 1\nLine 2\nLine 3');
+            expect((result.metadata as { content: string })?.content).toBe('Line 1\nLine 2\nLine 3');
         });
 
         it('should return error when file not found', async () => {
@@ -75,7 +78,7 @@ describe('File Tools', () => {
             const result = await tool.execute({ filePath: 'nonexistent.txt' });
 
             expect(result.success).toBe(false);
-            expect(result.metadata?.error).toContain('FILE_NOT_FOUND');
+            expect((result.metadata as { error: string })?.error).toContain('FILE_NOT_FOUND');
         });
 
         it('should return error when path is a directory', async () => {
@@ -85,7 +88,7 @@ describe('File Tools', () => {
             const result = await tool.execute({ filePath: dirPath });
 
             expect(result.success).toBe(false);
-            expect(result.metadata?.error).toContain('PATH_IS_DIRECTORY');
+            expect((result.metadata as { error: string })?.error).toContain('PATH_IS_DIRECTORY');
         });
 
         it('should detect binary files', async () => {
@@ -94,7 +97,7 @@ describe('File Tools', () => {
             const result = await tool.execute({ filePath: binaryFile });
 
             expect(result.success).toBe(false);
-            expect(result.metadata?.error).toContain('BINARY_FILE');
+            expect((result.metadata as { error: string })?.error).toContain('BINARY_FILE');
         });
 
         it('should return error when startLine is out of range', async () => {
@@ -107,7 +110,7 @@ describe('File Tools', () => {
             });
 
             expect(result.success).toBe(false);
-            expect(result.metadata?.error).toBe('START_LINE_OUT_OF_RANGE');
+            expect((result.metadata as { error: string })?.error).toBe('START_LINE_OUT_OF_RANGE');
         });
 
         it('should return error when line range is invalid', async () => {
@@ -121,7 +124,7 @@ describe('File Tools', () => {
             });
 
             expect(result.success).toBe(false);
-            expect(result.metadata?.error).toBe('INVALID_LINE_RANGE');
+            expect((result.metadata as { error: string })?.error).toBe('INVALID_LINE_RANGE');
         });
 
         it('should handle large files', async () => {
@@ -130,7 +133,7 @@ describe('File Tools', () => {
             const result = await tool.execute({ filePath: testFile });
 
             expect(result.success).toBe(true);
-            expect(result.metadata?.content).toBeDefined();
+            expect((result.metadata as { content: string })?.content).toBeDefined();
         });
 
         it('should truncate oversized read output consistently', async () => {
@@ -140,9 +143,9 @@ describe('File Tools', () => {
             const result = await tool.execute({ filePath: testFile });
 
             expect(result.success).toBe(true);
-            expect(result.metadata?.truncated).toBe(true);
-            expect(result.metadata?.originalLength).toBe(60000);
-            expect((result.metadata?.content as string).length).toBe(50000);
+            expect((result.metadata as { truncated: boolean })?.truncated).toBe(true);
+            expect((result.metadata as { originalLength: number })?.originalLength).toBe(60000);
+            expect(((result.metadata as { content: string })?.content as string).length).toBe(50000);
             expect(result.output).toContain('[... Content truncated for brevity ...]');
         });
 
@@ -153,7 +156,7 @@ describe('File Tools', () => {
             const result = await tool.execute({ filePath: testFile });
 
             expect(result.success).toBe(true);
-            expect(result.metadata?.content).toBe(content);
+            expect((result.metadata as { content: string })?.content).toBe(content);
         });
 
         it('should handle empty files', async () => {
@@ -162,7 +165,7 @@ describe('File Tools', () => {
             const result = await tool.execute({ filePath: testFile });
 
             expect(result.success).toBe(true);
-            expect(result.metadata?.content).toBe('');
+            expect((result.metadata as { content: string })?.content).toBe('');
         });
 
         it('should handle files with only newlines', async () => {
@@ -172,7 +175,7 @@ describe('File Tools', () => {
             const result = await tool.execute({ filePath: testFile });
 
             expect(result.success).toBe(true);
-            expect(result.metadata?.content).toBe(content);
+            expect((result.metadata as { content: string })?.content).toBe(content);
         });
 
         it('should read relative paths correctly', async () => {
@@ -182,7 +185,7 @@ describe('File Tools', () => {
 
             // Note: This might not work depending on CWD, so we skip if file not found
             if (result.success) {
-                expect(result.metadata?.content).toBe('Relative path test');
+                expect((result.metadata as { content: string })?.content).toBe('Relative path test');
             }
         });
     });
@@ -197,7 +200,7 @@ describe('File Tools', () => {
             });
 
             expect(result.success).toBe(true);
-            expect(result.metadata?.success).toBe(true);
+            expect((result.metadata as { success: boolean })?.success).toBe(true);
             expect(await env.fileExists('test.txt')).toBe(true);
         });
 
@@ -236,7 +239,7 @@ describe('File Tools', () => {
             });
 
             expect(result.success).toBe(false);
-            expect(result.metadata?.error).toBe('PATH_IS_DIRECTORY');
+            expect((result.metadata as { error: string })?.error).toBe('PATH_IS_DIRECTORY');
         });
 
         it('should return error when trying to write binary-like content', async () => {
@@ -250,7 +253,7 @@ describe('File Tools', () => {
             });
 
             expect(result.success).toBe(false);
-            expect(result.metadata?.error).toContain('CANNOT_WRITE_BINARY_FILE');
+            expect((result.metadata as { error: string })?.error).toContain('CANNOT_WRITE_BINARY_FILE');
         });
 
         it('should write files with special characters', async () => {

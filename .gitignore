@@ -1,7 +1,7 @@
 .env
 # .env.local
 # .env.*.local
-.env.*
+.env.development
 node_modules
 dist
 .claude/backups
@@ -22,3 +22,4 @@ data
 data/agent-memory
 request.json
 coverage/
+plans

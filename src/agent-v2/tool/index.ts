@@ -7,7 +7,15 @@ import { WebSearchTool } from './web-search';
 import { WebFetchTool } from './web-fetch';
 import { BatchReplaceTool } from './batch-replace';
 import { LspTool } from './lsp';
-import { TaskCreateTool, TaskGetTool, TaskListTool, TaskStopTool, TaskTool, TaskUpdateTool } from './task';
+import {
+    TaskCreateTool,
+    TaskGetTool,
+    TaskListTool,
+    TaskOutputTool,
+    TaskStopTool,
+    TaskTool,
+    TaskUpdateTool,
+} from './task';
 import { ToolRegistry } from './registry';
 import { SkillTool } from '../skill';
 import { PlanCreateTool } from '../plan/tools';
@@ -42,6 +50,7 @@ export function getDefaultTools(
         new TaskListTool(),
         new TaskUpdateTool(),
         new TaskStopTool(),
+        new TaskOutputTool(),
         new BatchReplaceTool(),
         new LspTool(),
         new SkillTool(),
@@ -93,6 +102,7 @@ export function getPlanModeTools(
         new TaskListTool(),
         new TaskUpdateTool(),
         new TaskStopTool(),
+        new TaskOutputTool(),
         // Skill
         new SkillTool(),
     ];
@@ -150,16 +160,32 @@ export const createDefaultToolRegistry = (
  * @param config 工具注册表配置
  * @returns 配置好的 Plan 模式工具注册表
  */
-export const createPlanModeToolRegistry = (config: ToolRegistryConfig, provider?: LLMProvider) => {
+export const createPlanModeToolRegistry = (
+    config: ToolRegistryConfig | CreateDefaultToolRegistryConfig,
+    provider?: LLMProvider
+) => {
     const registryConfig: ToolRegistryConfig = {
         workingDirectory: config.workingDirectory,
         planBaseDir: config.planBaseDir,
         toolTimeout: config.toolTimeout,
     };
 
+    const truncationConfig = 'truncation' in config ? config.truncation : undefined;
+
     const toolRegistry = new ToolRegistry(registryConfig);
     // 只注册 Plan 模式允许的工具
     toolRegistry.register(getPlanModeTools(registryConfig.workingDirectory, provider));
+
+    // 如果配置了截断，设置截断中间件
+    if (truncationConfig) {
+        const truncationService =
+            truncationConfig === true
+                ? new TruncationService() // 使用默认配置
+                : new TruncationService(truncationConfig);
+
+        const middleware = createTruncationMiddleware({ service: truncationService });
+        toolRegistry.setTruncationMiddleware(middleware);
+    }
 
     return toolRegistry;
 };
@@ -179,6 +205,7 @@ export {
     TaskCreateTool,
     TaskGetTool,
     TaskListTool,
+    TaskOutputTool,
     TaskUpdateTool,
     TaskStopTool,
     SubagentType,

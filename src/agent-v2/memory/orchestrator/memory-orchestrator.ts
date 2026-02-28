@@ -25,6 +25,7 @@ import { TaskService } from './task-service';
 
 export class MemoryOrchestrator implements IMemoryManager {
     private initialized = false;
+    private initializePromise: Promise<void> | null = null;
     private readonly cache = createMemoryCache();
     private readonly sessionContext: SessionContextService;
     private readonly taskService: TaskService;
@@ -37,13 +38,32 @@ export class MemoryOrchestrator implements IMemoryManager {
     }
 
     async initialize(): Promise<void> {
+        // 已初始化则直接返回
         if (this.initialized) return;
+        // 如果有正在进行的初始化，等待它完成
+        if (this.initializePromise) {
+            return this.initializePromise;
+        }
+        // 创建初始化 Promise 并立即赋值，防止并发初始化
+        this.initializePromise = this.doInitialize();
+        try {
+            await this.initializePromise;
+        } finally {
+            this.initializePromise = null;
+        }
+    }
+
+    private async doInitialize(): Promise<void> {
         await prepareStores(this.stores);
         await loadAndRepairCache(this.cache, this.stores);
         this.initialized = true;
     }
 
     async close(): Promise<void> {
+        // 等待正在进行的初始化完成
+        if (this.initializePromise) {
+            await this.initializePromise.catch(() => undefined);
+        }
         await this.stores.close();
         this.initialized = false;
     }
@@ -158,7 +178,24 @@ export class MemoryOrchestrator implements IMemoryManager {
 
     private ensureInitialized(): void {
         if (!this.initialized) {
-            throw new Error('MemoryOrchestrator not initialized. Call initialize() first.');
+            throw new Error(
+                'MemoryOrchestrator not initialized. Call initialize() first. ' +
+                    'If this error occurs during sub-agent execution, ensure the main agent has completed initialization.'
+            );
         }
+    }
+
+    /**
+     * 等待初始化完成（如果正在进行或尚未开始）
+     * 如果尚未初始化，会自动启动初始化
+     */
+    async waitForInitialization(): Promise<void> {
+        if (this.initialized) return;
+        if (this.initializePromise) {
+            await this.initializePromise;
+            return;
+        }
+        // 未初始化且没有正在进行的初始化，自动启动初始化
+        await this.initialize();
     }
 }

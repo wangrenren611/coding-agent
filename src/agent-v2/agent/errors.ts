@@ -104,12 +104,34 @@ export class AgentBusyError extends AgentError {
  * 超过最大重试次数错误
  */
 export class AgentMaxRetriesExceededError extends AgentError {
+    /** 是否因为 RATE_LIMIT 错误导致 */
+    public readonly isRateLimit: boolean;
+    /** 恢复建议 */
+    public readonly recoveryHint?: string;
+
     constructor(reason?: string) {
+        // 检测是否是 RATE_LIMIT 错误
+        const isRateLimit =
+            reason?.includes('RATE_LIMIT') || reason?.includes('429') || reason?.includes('rate limit') || false;
+
+        // 生成恢复建议
+        let recoveryHint: string | undefined;
+        if (isRateLimit) {
+            recoveryHint =
+                'Rate limit exceeded. You can: (1) Wait a few minutes and retry with the same sessionId, (2) Reduce request frequency, or (3) Check your API quota.';
+        }
+
         const message = reason
             ? `Agent failed after maximum retries. ${reason}`
             : 'Agent failed after maximum retries.';
-        super(message, { code: AgentErrorCode.MAX_RETRIES_EXCEEDED });
+
+        super(message, {
+            code: AgentErrorCode.MAX_RETRIES_EXCEEDED,
+            context: { isRateLimit, recoveryHint },
+        });
         this.name = 'AgentMaxRetriesExceededError';
+        this.isRateLimit = isRateLimit;
+        this.recoveryHint = recoveryHint;
     }
 }
 

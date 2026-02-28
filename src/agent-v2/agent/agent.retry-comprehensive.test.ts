@@ -18,6 +18,7 @@ import { AgentState } from './core/agent-state';
 import { EventType } from '../eventbus';
 import { createMemoryManager } from '../memory';
 import type { LLMGenerateOptions, LLMResponse } from '../../providers/types';
+import type { LLMProvider } from '../../providers';
 
 // ==================== Mock Provider ====================
 
@@ -182,7 +183,7 @@ describe('AgentState 重试机制测试', () => {
 
         it('startTask 应该重置 lastFailure', () => {
             state.startTask();
-            state.failTask({ code: 'TEST_ERROR', userMessage: 'Test failure' });
+            state.failTask({ code: 'AGENT_RUNTIME_ERROR', userMessage: 'Test failure' });
             expect(state.lastFailure).toBeDefined();
 
             state.startTask();
@@ -425,7 +426,8 @@ describe('Agent 各类错误重试测试', () => {
             });
 
             await expect(agent.execute('Hello')).rejects.toThrow('maximum retries');
-            expect(agent.getRetryCount()).toBe(3); // 0, 1, 2, 3 (exceeded)
+            // maxRetries=2: 第一次调用 + 2 次重试，失败后 retryCount=3 > maxRetries=2
+            expect(agent.getRetryCount()).toBe(3);
         }, 10000);
 
         it('maxRetries=0 时不允许任何重试', async () => {
@@ -445,7 +447,8 @@ describe('Agent 各类错误重试测试', () => {
             });
 
             await expect(agent.execute('Hello')).rejects.toThrow('maximum retries');
-            expect(agent.getRetryCount()).toBe(1); // 只尝试 1 次就失败
+            // maxRetries=0: 第一次调用失败后 retryCount=1 > maxRetries=0
+            expect(agent.getRetryCount()).toBe(1);
         }, 10000);
 
         it('错误信息应该包含最后一次重试原因', async () => {

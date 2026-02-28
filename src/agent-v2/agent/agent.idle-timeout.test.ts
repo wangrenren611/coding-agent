@@ -16,44 +16,33 @@ import type { Chunk, LLMGenerateOptions, LLMRequestMessage, LLMResponse } from '
 /**
  * 可控的 Mock Provider，支持模拟流式输出
  */
-class MockStreamProvider extends LLMProvider {
-    public callCount = 0;
-    public chunkCount = 0;
-    public chunkInterval = 50; // 每个 chunk 间隔 50ms
-    public totalChunks = 10;
+function createMockStreamProvider() {
+    let callCount = 0;
+    let chunkCount = 0;
+    let chunkInterval = 50;
+    let totalChunks = 10;
 
-    constructor() {
-        super({
-            apiKey: 'test-key',
-            baseURL: 'https://example.test',
-            model: 'test-model',
-            max_tokens: 128,
-            LLMMAX_TOKENS: 4096,
-            temperature: 0,
-        });
-    }
-
-    async generate(
+    async function generate(
         _messages: LLMRequestMessage[],
         options?: LLMGenerateOptions
-    ): Promise<LLMResponse | null> | AsyncGenerator<Chunk> {
-        this.callCount++;
-        this.chunkCount = 0;
+    ): Promise<LLMResponse | AsyncGenerator<Chunk> | null> {
+        callCount++;
+        chunkCount = 0;
 
         if (options?.stream) {
-            return this.generateStream(options.abortSignal);
+            return generateStream(options.abortSignal);
         }
 
         // 非流式请求
         return {
-            id: `test-id-${this.callCount}`,
+            id: `test-id-${callCount}`,
             object: 'chat.completion',
             created: Date.now(),
             model: 'test-model',
             choices: [
                 {
                     index: 0,
-                    message: { role: 'assistant', content: `Response ${this.callCount}` },
+                    message: { role: 'assistant' as const, content: `Response ${callCount}` },
                     finish_reason: 'stop',
                 },
             ],
@@ -61,56 +50,69 @@ class MockStreamProvider extends LLMProvider {
         };
     }
 
-    private async *generateStream(abortSignal?: AbortSignal): AsyncGenerator<Chunk> {
-        for (let i = 0; i < this.totalChunks; i++) {
+    async function* generateStream(abortSignal?: AbortSignal): AsyncGenerator<Chunk> {
+        for (let i = 0; i < totalChunks; i++) {
             // 检查是否已中止
             if (abortSignal?.aborted) {
                 return;
             }
 
-            await new Promise((resolve) => setTimeout(resolve, this.chunkInterval));
-            this.chunkCount++;
+            await new Promise((resolve) => setTimeout(resolve, chunkInterval));
+            chunkCount++;
 
             yield {
-                id: `chunk-${this.callCount}-${i}`,
+                id: `chunk-${callCount}-${i}`,
+                index: 0,
                 object: 'chat.completion.chunk',
                 created: Date.now(),
                 model: 'test-model',
                 choices: [
                     {
                         index: 0,
-                        delta: { content: `Chunk ${i + 1} ` },
-                        finish_reason: i === this.totalChunks - 1 ? 'stop' : undefined,
+                        delta: { role: 'assistant' as const, content: `Chunk ${i + 1} ` },
+                        finish_reason: i === totalChunks - 1 ? 'stop' : undefined,
                     },
                 ],
             };
         }
     }
 
-    getTimeTimeout(): number {
-        return 3 * 60 * 1000; // 3 分钟
-    }
-
-    getLLMMaxTokens(): number {
-        return 4096;
-    }
-
-    getMaxOutputTokens(): number {
-        return 128;
-    }
-
-    reset(): void {
-        this.callCount = 0;
-        this.chunkCount = 0;
-    }
+    return {
+        generate,
+        getTimeTimeout: () => 3 * 60 * 1000,
+        getLLMMaxTokens: () => 4096,
+        getMaxOutputTokens: () => 128,
+        get callCount() {
+            return callCount;
+        },
+        get chunkCount() {
+            return chunkCount;
+        },
+        get chunkInterval() {
+            return chunkInterval;
+        },
+        set chunkInterval(v: number) {
+            chunkInterval = v;
+        },
+        get totalChunks() {
+            return totalChunks;
+        },
+        set totalChunks(v: number) {
+            totalChunks = v;
+        },
+        reset: () => {
+            callCount = 0;
+            chunkCount = 0;
+        },
+    };
 }
 
 describe('Agent 空闲超时集成测试', () => {
-    let provider: MockStreamProvider;
+    let provider: ReturnType<typeof createMockStreamProvider>;
     const memoryManagers: Array<ReturnType<typeof createMemoryManager>> = [];
 
     beforeEach(() => {
-        provider = new MockStreamProvider();
+        provider = createMockStreamProvider();
     });
 
     afterEach(async () => {
@@ -133,7 +135,7 @@ describe('Agent 空闲超时集成测试', () => {
             // 配置：总共 10 个 chunk，每个间隔 50ms，总计约 500ms
             // 空闲超时设置为 200ms，但因为持续有数据，不应该超时
             const agent = new Agent({
-                provider,
+                provider: provider as unknown as LLMProvider,
                 systemPrompt: 'test',
                 stream: true,
                 memoryManager,
@@ -163,7 +165,7 @@ describe('Agent 空闲超时集成测试', () => {
             // 配置：总共 20 个 chunk，每个间隔 100ms，总计约 2 秒
             // 空闲超时设置为 500ms，但因为持续有数据，不应该超时
             const agent = new Agent({
-                provider,
+                provider: provider as unknown as LLMProvider,
                 systemPrompt: 'test',
                 stream: true,
                 memoryManager,
@@ -193,7 +195,7 @@ describe('Agent 空闲超时集成测试', () => {
             await memoryManager.initialize();
 
             const agent = new Agent({
-                provider,
+                provider: provider as unknown as LLMProvider,
                 systemPrompt: 'test',
                 stream: false, // 非流式
                 memoryManager,
@@ -217,7 +219,7 @@ describe('Agent 空闲超时集成测试', () => {
             await memoryManager.initialize();
 
             const agent = new Agent({
-                provider,
+                provider: provider as unknown as LLMProvider,
                 systemPrompt: 'test',
                 stream: false, // 非流式
                 memoryManager,
@@ -243,7 +245,7 @@ describe('Agent 空闲超时集成测试', () => {
 
             // 不配置 idleTimeout，使用默认值（3 分钟）
             const agent = new Agent({
-                provider,
+                provider: provider as unknown as LLMProvider,
                 systemPrompt: 'test',
                 stream: true,
                 memoryManager,
@@ -268,7 +270,7 @@ describe('Agent 空闲超时集成测试', () => {
 
             // 配置自定义空闲超时
             const agent = new Agent({
-                provider,
+                provider: provider as unknown as LLMProvider,
                 systemPrompt: 'test',
                 stream: true,
                 memoryManager,

@@ -15,18 +15,30 @@ import type { LLMGenerateOptions, LLMResponse, LLMProvider } from '../../../prov
 class MockProvider {
     public callCount = 0;
 
-    async generate(_messages: unknown[], _options?: LLMGenerateOptions) {
+    async generate(_messages: unknown[], _options?: LLMGenerateOptions): Promise<LLMResponse> {
         this.callCount++;
         const response: LLMResponse = {
-            messages: [
+            id: 'test-id',
+            object: 'chat.completion',
+            created: Date.now(),
+            model: 'test-model',
+            choices: [
                 {
-                    messageId: 'msg-1',
-                    role: 'assistant',
-                    content: 'Hello',
+                    index: 0,
+                    message: {
+                        role: 'assistant',
+                        content: 'Hello',
+                    },
+                    finish_reason: 'stop',
                 },
             ],
-            usage: { inputTokens: 10, outputTokens: 5 },
-            finishReason: 'stop',
+            usage: {
+                prompt_tokens: 10,
+                completion_tokens: 5,
+                total_tokens: 15,
+                prompt_cache_miss_tokens: 10,
+                prompt_cache_hit_tokens: 0,
+            },
         };
         return response;
     }

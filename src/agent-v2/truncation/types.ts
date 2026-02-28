@@ -142,6 +142,22 @@ export interface TruncationEvent {
 export type TruncationEventCallback = (event: TruncationEvent) => void;
 
 /**
+ * 截断元数据（附加到 ToolResult.metadata）
+ */
+export interface TruncationMetadata {
+    /** 是否已截断 */
+    truncated?: boolean;
+    /** 截断文件存储路径 */
+    truncationPath?: string;
+    /** 移除的行数 */
+    truncationRemovedLines?: number;
+    /** 移除的字节数 */
+    truncationRemovedBytes?: number;
+    /** 自定义字段 */
+    [key: string]: unknown;
+}
+
+/**
  * 存储接口（便于扩展不同存储后端）
  */
 export interface ITruncationStorage {

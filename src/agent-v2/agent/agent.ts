@@ -65,7 +65,7 @@ const AGENT_DEFAULTS = {
     /** 最大循环次数 */
     LOOP_MAX: 3000,
     /** 最大重试次数 */
-    MAX_RETRIES: 10,
+    MAX_RETRIES: 20,
     /** 默认重试延迟（毫秒）- 10 秒 */
     RETRY_DELAY_MS: 10 * 1000,
     /** Abort 重试延迟（毫秒） */
@@ -135,13 +135,21 @@ export class Agent {
         } else if (config.planMode) {
             // Plan 模式使用独立的只读工具注册表
             this.toolRegistry = createPlanModeToolRegistry(
-                { workingDirectory: process.cwd(), planBaseDir: config.planBaseDir },
+                {
+                    workingDirectory: process.cwd(),
+                    planBaseDir: config.planBaseDir,
+                    truncation: true, // 启用默认截断配置
+                },
                 this.provider
             );
         } else {
             // 普通模式使用完整工具注册表
             this.toolRegistry = createDefaultToolRegistry(
-                { workingDirectory: process.cwd(), planBaseDir: config.planBaseDir },
+                {
+                    workingDirectory: process.cwd(),
+                    planBaseDir: config.planBaseDir,
+                    truncation: true, // 启用默认截断配置
+                },
                 this.provider
             );
         }

@@ -25,6 +25,7 @@ import {
     TASK_CREATE_DESCRIPTION,
     TASK_GET_DESCRIPTION,
     TASK_LIST_DESCRIPTION,
+    TASK_OUTPUT_DESCRIPTION,
     TASK_STOP_DESCRIPTION,
     TASK_TOOL_DESCRIPTION,
     TASK_UPDATE_DESCRIPTION,
@@ -780,6 +781,116 @@ export class TaskStopTool extends BaseTool<typeof taskStopSchema> {
                 storage: execution.storage,
             },
             output: finalOutput,
+        });
+    }
+}
+
+const taskOutputSchema = z
+    .object({
+        task_id: z.string().min(1).describe('The task identifier to retrieve output for'),
+        block: z.boolean().default(true).describe('Wait for task completion before returning'),
+        timeout: z.number().min(1000).max(600000).default(30000).describe('Timeout in milliseconds when blocking'),
+    })
+    .strict();
+
+export class TaskOutputTool extends BaseTool<typeof taskOutputSchema> {
+    name = 'task_output';
+    description = TASK_OUTPUT_DESCRIPTION;
+    schema = taskOutputSchema;
+    // TaskOutput 可能需要等待长时间运行的任务完成
+    executionTimeoutMs = null;
+
+    async execute(args: z.infer<typeof this.schema>, context?: ToolContext): Promise<ToolResult> {
+        const { task_id, block, timeout } = args;
+
+        // 获取内存中的后台执行状态
+        const execution = getBackgroundExecution(task_id);
+        // 获取持久化的运行记录
+        const runRecord = await getSubTaskRunRecord(context?.memoryManager, task_id);
+
+        if (!execution && !runRecord) {
+            return this.result({
+                success: false,
+                metadata: { error: 'TASK_NOT_FOUND' },
+                output: `Task not found: ${task_id}`,
+            });
+        }
+
+        // 如果任务正在运行且 block=true，等待完成
+        if (block && execution && (execution.status === 'queued' || execution.status === 'running')) {
+            if (execution.promise) {
+                const waitResult = await waitWithTimeout(execution.promise, timeout);
+                if (waitResult.timedOut) {
+                    // 超时，返回当前状态
+                    return this.result({
+                        success: true,
+                        metadata: {
+                            task_id: execution.taskId,
+                            status: execution.status,
+                            parent_session_id: execution.parentSessionId,
+                            child_session_id: execution.childSessionId,
+                            storage: execution.storage,
+                            timed_out: true,
+                            turns: execution.turns,
+                            tools_used: execution.toolsUsed,
+                            message_count: getMessageCount(execution.messages),
+                        },
+                        output: execution.output || `Task ${task_id} is still running after ${timeout}ms timeout`,
+                    });
+                }
+            }
+        }
+
+        // 优先使用内存中的执行状态（更实时）
+        if (execution) {
+            return this.result({
+                success: execution.status === 'completed',
+                metadata: {
+                    task_id: execution.taskId,
+                    status: execution.status,
+                    parent_session_id: execution.parentSessionId,
+                    child_session_id: execution.childSessionId,
+                    storage: execution.storage,
+                    turns: execution.turns,
+                    tools_used: execution.toolsUsed,
+                    error: execution.error,
+                    message_count: getMessageCount(execution.messages),
+                    created_at: execution.createdAt,
+                    started_at: execution.startedAt,
+                    finished_at: execution.finishedAt,
+                    last_activity_at: execution.lastActivityAt,
+                },
+                output: execution.output || `Task ${task_id} status: ${execution.status}`,
+            });
+        }
+
+        // 使用持久化记录
+        if (runRecord) {
+            return this.result({
+                success: runRecord.status === 'completed',
+                metadata: {
+                    task_id: runRecord.runId,
+                    status: runRecord.status,
+                    parent_session_id: runRecord.parentSessionId,
+                    child_session_id: runRecord.childSessionId,
+                    storage: 'memory_manager',
+                    mode: runRecord.mode,
+                    turns: runRecord.turns,
+                    tools_used: runRecord.toolsUsed,
+                    error: runRecord.error,
+                    message_count: runRecord.messageCount,
+                    created_at: runRecord.metadata?.createdAtIso,
+                    started_at: runRecord.metadata?.startedAtIso,
+                    finished_at: runRecord.metadata?.finishedAtIso,
+                },
+                output: runRecord.output || `Task ${task_id} status: ${runRecord.status}`,
+            });
+        }
+
+        return this.result({
+            success: false,
+            metadata: { error: 'TASK_NOT_FOUND' },
+            output: `Task not found: ${task_id}`,
         });
     }
 }
