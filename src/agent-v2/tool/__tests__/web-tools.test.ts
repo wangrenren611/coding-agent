@@ -100,9 +100,9 @@ describe('Web Tools', () => {
                 timeout: 200, // Too large (max 120)
             });
 
-            // Should cap at max timeout
+            // Should cap at max timeout (and attempt fetch, may fail due to network)
             expect(result).toBeDefined();
-        });
+        }, 30000); // Increase timeout for network request
 
         it('should support markdown format', async () => {
             const tool = new WebFetchTool();

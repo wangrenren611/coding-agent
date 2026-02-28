@@ -14,6 +14,7 @@
  */
 
 import { LLMError, LLMAbortedError, LLMRetryableError, createErrorFromStatus } from '../types';
+import { classifyAbortReason } from '../types';
 
 export interface HttpClientOptions {
     /** 启用调试日志 */
@@ -107,16 +108,13 @@ export class HTTPClient {
      * 获取 AbortSignal 的中止原因
      */
     private getAbortReason(signal: AbortSignal): 'timeout' | 'abort' | 'unknown' {
-        // AbortSignal.timeout() 创建的信号会有特定的 reason
         try {
-            const reason = signal.reason;
-            if (reason instanceof Error) {
-                if (reason.name === 'TimeoutError' || reason.message?.toLowerCase().includes('timeout')) {
-                    return 'timeout';
-                }
-            }
-            if (typeof reason === 'string' && reason.toLowerCase().includes('timeout')) {
+            const reason = classifyAbortReason(signal.reason);
+            if (reason === 'idle_timeout' || reason === 'timeout') {
                 return 'timeout';
+            }
+            if (reason === 'abort') {
+                return 'abort';
             }
         } catch {
             // 忽略访问 reason 的错误

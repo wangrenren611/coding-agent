@@ -11,7 +11,12 @@
 
 import { v4 as uuid } from 'uuid';
 import {
+    isPermanentStreamChunkError,
+    abortReasonToText,
+    classifyAbortReason,
+    isTimeoutReasonText,
     LLMRetryableError,
+    LLMAbortedError,
     LLMPermanentError,
     type Chunk,
     type LLMProvider,
@@ -130,6 +135,9 @@ export class LLMCaller {
             const idleTimeoutMs = this.config.idleTimeoutMs ?? 5 * 60 * 1000; // 默认 5 分钟
             idleTimeoutController = new IdleTimeoutController(idleTimeoutMs);
             signals.push(idleTimeoutController.signal);
+            // 流式请求同样受总请求超时保护（requestTimeout）
+            const requestTimeout = this.config.requestTimeoutMs ?? this.config.provider.getTimeTimeout();
+            signals.push(AbortSignal.timeout(requestTimeout));
         } else {
             // 非流式请求：使用固定超时
             const requestTimeout = this.config.requestTimeoutMs ?? this.config.provider.getTimeTimeout();
@@ -169,6 +177,8 @@ export class LLMCaller {
             }
 
             return { response, messageId };
+        } catch (error) {
+            throw this.attachMessageId(error, messageId);
         } finally {
             // 清理空闲超时控制器
             if (idleTimeoutController) {
@@ -202,32 +212,44 @@ export class LLMCaller {
 
         const stream = streamResult as AsyncIterable<Chunk>;
 
-        for await (const chunk of stream) {
-            const streamError = this.extractStreamChunkError(chunk);
-            if (streamError) {
-                throw this.createStreamChunkError(streamError, chunk.id);
-            }
-
-            this.streamProcessor.processChunk(chunk);
-
-            if (this.streamProcessor.isAborted()) {
-                const abortReason = this.streamProcessor.getAbortReason();
-                if (abortReason === 'buffer_overflow') {
-                    throw new LLMPermanentError(
-                        `Stream response exceeded max buffer size (${this.config.maxBufferSize})`,
-                        undefined,
-                        'STREAM_BUFFER_OVERFLOW'
-                    );
+        try {
+            for await (const chunk of stream) {
+                const streamError = this.extractStreamChunkError(chunk);
+                if (streamError) {
+                    throw this.createStreamChunkError(streamError, chunk.id);
                 }
-                if (abortReason === 'validation_violation') {
-                    throw new LLMPermanentError(
-                        'Stream response failed validation checks',
-                        undefined,
-                        'STREAM_VALIDATION_VIOLATION'
-                    );
+
+                this.streamProcessor.processChunk(chunk);
+
+                if (this.streamProcessor.isAborted()) {
+                    const abortReason = this.streamProcessor.getAbortReason();
+                    if (abortReason === 'buffer_overflow') {
+                        throw new LLMPermanentError(
+                            `Stream response exceeded max buffer size (${this.config.maxBufferSize})`,
+                            undefined,
+                            'STREAM_BUFFER_OVERFLOW'
+                        );
+                    }
+                    if (abortReason === 'validation_violation') {
+                        throw new LLMPermanentError(
+                            'Stream response failed validation checks',
+                            undefined,
+                            'STREAM_VALIDATION_VIOLATION'
+                        );
+                    }
+                    throw new LLMRetryableError('Stream processor aborted unexpectedly', undefined, 'STREAM_ABORTED');
                 }
-                throw new LLMRetryableError('Stream processor aborted unexpectedly', undefined, 'STREAM_ABORTED');
             }
+        } catch (error) {
+            if (options.abortSignal?.aborted) {
+                throw this.mapAbortSignalToError(options.abortSignal, error);
+            }
+            throw error;
+        }
+
+        // 某些 provider 会在 abort 后“正常结束”流循环，需在这里二次校验。
+        if (options.abortSignal?.aborted) {
+            throw this.mapAbortSignalToError(options.abortSignal);
         }
 
         return this.streamProcessor.buildResponse();
@@ -306,29 +328,52 @@ export class LLMCaller {
                   ? chunkError.type
                   : 'STREAM_CHUNK_ERROR';
 
-        const signature = `${rawCode} ${message}`.toLowerCase();
-        if (this.isPermanentStreamError(signature)) {
+        if (isPermanentStreamChunkError(rawCode, message)) {
             return new LLMPermanentError(message, undefined, rawCode);
         }
         return new LLMRetryableError(message, undefined, rawCode);
     }
 
-    private isPermanentStreamError(signature: string): boolean {
-        const permanentIndicators = [
-            'invalid_request',
-            'bad_request',
-            'authentication',
-            'auth',
-            'permission',
-            'forbidden',
-            'not_found',
-            'unsupported',
-            'context_length',
-            'content_filter',
-            'safety',
-            'invalid_parameter_error',
-        ];
+    private mapAbortSignalToError(signal: AbortSignal, fallback?: unknown): Error {
+        const reason = signal.reason;
+        const reasonText = abortReasonToText(reason);
+        const reasonCategory = classifyAbortReason(reason);
 
-        return permanentIndicators.some((indicator) => signature.includes(indicator));
+        if (reasonCategory === 'idle_timeout') {
+            return new LLMRetryableError(
+                reasonText || 'Idle timeout during stream response',
+                undefined,
+                'IDLE_TIMEOUT'
+            );
+        }
+
+        if (reasonCategory === 'timeout') {
+            return new LLMRetryableError(reasonText || 'Request timeout', undefined, 'TIMEOUT');
+        }
+
+        if (fallback instanceof Error && isTimeoutReasonText(`${fallback.name} ${fallback.message}`)) {
+            return new LLMRetryableError(fallback.message || 'Request timeout', undefined, 'TIMEOUT');
+        }
+
+        const abortMessage =
+            reasonText ||
+            (fallback instanceof Error && fallback.message.trim().length > 0
+                ? fallback.message
+                : 'Request was cancelled');
+        return new LLMAbortedError(abortMessage);
+    }
+
+    private attachMessageId(error: unknown, messageId: string): Error {
+        if (error instanceof Error) {
+            const withMeta = error as Error & { messageId?: string };
+            if (!withMeta.messageId) {
+                withMeta.messageId = messageId;
+            }
+            return withMeta;
+        }
+
+        const wrapped = new Error(String(error));
+        (wrapped as Error & { messageId?: string }).messageId = messageId;
+        return wrapped;
     }
 }
