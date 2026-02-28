@@ -280,7 +280,7 @@ function handleSubagentEvent(parts: MessagePart[], subagentMsg: SubagentEventMes
 
 export const { Provider: AgentProvider, use: useAgent } = createSimpleContext<AgentContextValue>('Agent', () => {
     const [config, setConfigState] = useState<AgentConfig>({
-        modelId: 'qwen3.5-plus',
+        modelId: 'kimi-k2.5',
         thinking: true,
     });
     const [initialized, setInitialized] = useState(false);
