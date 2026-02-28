@@ -38,6 +38,13 @@ export { LLMProvider } from './provider';
 
 // 错误类型
 export {
+    PERMANENT_STREAM_ERROR_CODE_MARKERS,
+    PERMANENT_STREAM_ERROR_MESSAGE_PATTERNS,
+    isPermanentStreamChunkError,
+    abortReasonToText,
+    isIdleTimeoutReasonText,
+    isTimeoutReasonText,
+    classifyAbortReason,
     LLMError,
     LLMRetryableError,
     LLMRateLimitError,

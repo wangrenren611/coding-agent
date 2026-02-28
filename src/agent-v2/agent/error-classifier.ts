@@ -4,7 +4,7 @@
  * 负责错误分类、识别和用户友好的错误消息转换
  */
 
-import { LLMError, isAbortedError } from '../../providers';
+import { LLMError, isAbortedError, isTimeoutReasonText } from '../../providers';
 import {
     AgentError,
     ToolError,
@@ -157,14 +157,7 @@ export class ErrorClassifier {
     private isTimeoutLikeError(error: unknown): boolean {
         if (!(error instanceof Error)) return false;
         const message = `${error.name} ${error.message}`.toLowerCase();
-        return (
-            message.includes('timeout') ||
-            message.includes('timed out') ||
-            message.includes('time out') ||
-            message.includes('signal timed out') ||
-            message.includes('body timeout') ||
-            message.includes('terminated')
-        );
+        return isTimeoutReasonText(message) || message.includes('body timeout') || message.includes('terminated');
     }
 
     /**

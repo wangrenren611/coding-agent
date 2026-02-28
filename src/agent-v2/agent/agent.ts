@@ -110,7 +110,7 @@ export class Agent {
         this.streamCallback = config.streamCallback;
         this.thinking = config.thinking;
         this.requestTimeoutMs = this.normalizeMs(config.requestTimeout);
-        this.idleTimeoutMs = config.idleTimeout ?? AGENT_DEFAULTS.IDLE_TIMEOUT_MS;
+        this.idleTimeoutMs = this.normalizeMs(config.idleTimeout) ?? AGENT_DEFAULTS.IDLE_TIMEOUT_MS;
 
         this.timeProvider = config.timeProvider ?? new DefaultTimeProvider();
         this.eventBus = new EventBus();
@@ -637,10 +637,13 @@ export class Agent {
 
         const tools = this.toolRegistry.toLLMTools();
         const abortSignal = this.createAbortSignal();
+        let messageId: string | undefined;
 
         try {
             // 传递 options 给 llmCaller，允许动态覆盖配置
-            const { response, messageId } = await this.llmCaller.execute(messages, tools, abortSignal, options);
+            const callResult = await this.llmCaller.execute(messages, tools, abortSignal, options);
+            messageId = callResult.messageId;
+            const { response } = callResult;
 
             try {
                 if (!response) {
@@ -664,6 +667,14 @@ export class Agent {
                 }
                 throw error;
             }
+        } catch (error) {
+            if (!(error instanceof LLMResponseInvalidError)) {
+                const candidateId = this.extractMessageIdFromError(error) ?? messageId;
+                if (candidateId) {
+                    await this.removeAssistantMessageFromContext(candidateId, 'invalid_response');
+                }
+            }
+            throw error;
         } finally {
             // LLMCaller 内部已清理
         }
@@ -872,6 +883,17 @@ export class Agent {
                 typeof toolCall.function.arguments === 'string';
             return hasValidId && hasValidType && hasValidFunction;
         });
+    }
+
+    private extractMessageIdFromError(error: unknown): string | undefined {
+        if (!error || typeof error !== 'object') {
+            return undefined;
+        }
+        const maybeMessageId = (error as { messageId?: unknown }).messageId;
+        if (typeof maybeMessageId !== 'string' || maybeMessageId.trim().length === 0) {
+            return undefined;
+        }
+        return maybeMessageId;
     }
 
     /**
