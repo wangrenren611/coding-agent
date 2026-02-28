@@ -809,6 +809,7 @@ async function demo1() {
             ...(cliSessionId ? { sessionId: cliSessionId } : {}),
             stream: true,
             thinking: true,
+            idleTimeout: 1000 * 60 * 5,
             enableCompaction: true,
             compactionConfig: {
                 keepMessagesNum: 40,

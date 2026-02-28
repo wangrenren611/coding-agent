@@ -4,6 +4,13 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+    PERMANENT_STREAM_ERROR_CODE_MARKERS,
+    PERMANENT_STREAM_ERROR_MESSAGE_PATTERNS,
+    isPermanentStreamChunkError,
+    abortReasonToText,
+    isIdleTimeoutReasonText,
+    isTimeoutReasonText,
+    classifyAbortReason,
     LLMError,
     LLMRetryableError,
     LLMRateLimitError,
@@ -296,5 +303,56 @@ describe('isAbortedError', () => {
     it('should return false for non-Error objects', () => {
         expect(isAbortedError('string')).toBe(false);
         expect(isAbortedError(null)).toBe(false);
+    });
+});
+
+describe('abort reason helpers', () => {
+    it('abortReasonToText should normalize Error and string', () => {
+        expect(abortReasonToText(new Error('boom'))).toContain('boom');
+        expect(abortReasonToText(' manual abort ')).toBe('manual abort');
+        expect(abortReasonToText({})).toBe('');
+    });
+
+    it('isIdleTimeoutReasonText should detect idle timeout signatures', () => {
+        expect(isIdleTimeoutReasonText('Idle timeout after 300000ms')).toBe(true);
+        expect(isIdleTimeoutReasonText('IDLE_TIMEOUT')).toBe(true);
+        expect(isIdleTimeoutReasonText('Request timeout')).toBe(false);
+    });
+
+    it('isTimeoutReasonText should detect timeout signatures', () => {
+        expect(isTimeoutReasonText('TimeoutError Request timeout')).toBe(true);
+        expect(isTimeoutReasonText('signal timed out')).toBe(true);
+        expect(isTimeoutReasonText('manual abort')).toBe(false);
+    });
+
+    it('classifyAbortReason should classify idle timeout, timeout and abort', () => {
+        expect(classifyAbortReason(new DOMException('Idle timeout after 1000ms', 'TimeoutError'))).toBe('idle_timeout');
+        expect(classifyAbortReason(new DOMException('The operation timed out', 'TimeoutError'))).toBe('timeout');
+        expect(classifyAbortReason('Request was cancelled by user')).toBe('abort');
+        expect(classifyAbortReason(undefined)).toBe('unknown');
+    });
+});
+
+describe('stream chunk permanent error helpers', () => {
+    it('should expose permanent stream error rule sets', () => {
+        expect(PERMANENT_STREAM_ERROR_CODE_MARKERS.length).toBeGreaterThan(0);
+        expect(PERMANENT_STREAM_ERROR_MESSAGE_PATTERNS.length).toBeGreaterThan(0);
+    });
+
+    it('should classify known permanent stream errors by code first', () => {
+        expect(isPermanentStreamChunkError('invalid_request_error', 'temporary issue')).toBe(true);
+        expect(isPermanentStreamChunkError('permission_denied', 'temporary issue')).toBe(true);
+        expect(isPermanentStreamChunkError('unsupported_model', 'temporary issue')).toBe(true);
+    });
+
+    it('should not misclassify auth-like but unrelated code tokens', () => {
+        // 不应因为包含 "auth" 子串而误判（例如 authoring）。
+        expect(isPermanentStreamChunkError('authoring_tool_error', 'retry later')).toBe(false);
+    });
+
+    it('should fallback to message patterns when code is missing', () => {
+        expect(isPermanentStreamChunkError(undefined, 'Bad request: invalid parameter')).toBe(true);
+        expect(isPermanentStreamChunkError('', 'Permission denied for this model')).toBe(true);
+        expect(isPermanentStreamChunkError(undefined, 'transient upstream timeout')).toBe(false);
     });
 });

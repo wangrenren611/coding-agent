@@ -90,6 +90,7 @@ export interface AgentOptions {
      *
      * - 默认值：5 分钟
      * - 如果不设置，使用 Provider.getTimeTimeout() 的返回值
+     * - 流式模式下表示“单次调用总时长上限”
      * - 超时后会触发重试机制（最多 maxRetries 次）
      */
     requestTimeout?: number;

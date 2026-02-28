@@ -102,6 +102,103 @@ export class LLMAbortedError extends LLMError {
 // 工具函数
 // =============================================================================
 
+export type AbortReasonCategory = 'idle_timeout' | 'timeout' | 'abort' | 'unknown';
+
+export const PERMANENT_STREAM_ERROR_CODE_MARKERS = [
+    'invalid_request',
+    'bad_request',
+    'authentication',
+    'permission',
+    'forbidden',
+    'not_found',
+    'unsupported',
+    'context_length',
+    'content_filter',
+    'safety',
+    'invalid_parameter_error',
+] as const;
+
+export const PERMANENT_STREAM_ERROR_MESSAGE_PATTERNS: ReadonlyArray<RegExp> = [
+    /\binvalid[\s_-]?request\b/i,
+    /\bbad[\s_-]?request\b/i,
+    /\bauthentication\b/i,
+    /\bunauthorized\b/i,
+    /\bpermission\b/i,
+    /\bforbidden\b/i,
+    /\bnot[\s_-]?found\b/i,
+    /\bunsupported\b/i,
+    /\bcontext[\s_-]?length\b/i,
+    /\bcontent[\s_-]?filter\b/i,
+    /\bsafety\b/i,
+    /\binvalid[\s_-]?parameter\b/i,
+];
+
+export function abortReasonToText(reason: unknown): string {
+    if (reason instanceof Error) {
+        return `${reason.name} ${reason.message}`.trim();
+    }
+    if (typeof reason === 'string') {
+        return reason.trim();
+    }
+    return '';
+}
+
+export function isIdleTimeoutReasonText(reasonText: string): boolean {
+    const signature = reasonText.toLowerCase();
+    return (
+        signature.includes('idle timeout') || signature.includes('idletimeout') || signature.includes('idle_timeout')
+    );
+}
+
+export function isTimeoutReasonText(reasonText: string): boolean {
+    const signature = reasonText.toLowerCase();
+    return (
+        signature.includes('timeout') ||
+        signature.includes('timed out') ||
+        signature.includes('time out') ||
+        signature.includes('signal timed out')
+    );
+}
+
+export function classifyAbortReason(reason: unknown): AbortReasonCategory {
+    const reasonText = abortReasonToText(reason);
+    if (!reasonText) {
+        return 'unknown';
+    }
+
+    if (isIdleTimeoutReasonText(reasonText)) {
+        return 'idle_timeout';
+    }
+
+    if (isTimeoutReasonText(reasonText)) {
+        return 'timeout';
+    }
+
+    const signature = reasonText.toLowerCase();
+    if (signature.includes('abort') || signature.includes('cancel')) {
+        return 'abort';
+    }
+
+    return 'unknown';
+}
+
+export function isPermanentStreamChunkError(code?: string, message?: string): boolean {
+    const normalizedCode = typeof code === 'string' ? code.toLowerCase() : '';
+    if (normalizedCode) {
+        const matchedByCode = PERMANENT_STREAM_ERROR_CODE_MARKERS.some((marker) => normalizedCode.includes(marker));
+        if (matchedByCode) {
+            return true;
+        }
+    }
+
+    const normalizedMessage = typeof message === 'string' ? message : '';
+    if (!normalizedMessage) {
+        return false;
+    }
+
+    return PERMANENT_STREAM_ERROR_MESSAGE_PATTERNS.some((pattern) => pattern.test(normalizedMessage));
+}
+
 export function createErrorFromStatus(status: number, statusText: string, errorText: string): LLMError {
     let details = errorText;
     try {
