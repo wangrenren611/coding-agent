@@ -92,6 +92,12 @@ function MessagePartComponent({ part }: { part: MessagePart }) {
             return <CodePatchPart part={part} />;
         case 'subagent':
             return <SubagentPart part={part} />;
+        case 'image':
+            return <ImagePart part={part} />;
+        case 'video':
+            return <VideoPart part={part} />;
+        case 'file':
+            return <FilePart part={part} />;
         default:
             return null;
     }
@@ -283,6 +289,55 @@ function CodePatchPart({ part }: { part: MessagePart }) {
             <text fg={theme.textMuted} width="100%" wrapMode="word">
                 {preview}
             </text>
+        </box>
+    );
+}
+
+function ImagePart({ part: _part }: { part: MessagePart }) {
+    const { theme } = useTheme();
+    return (
+        <box
+            marginTop={1}
+            border={['left']}
+            borderColor={theme.success}
+            paddingLeft={1}
+            flexDirection="column"
+            backgroundColor={theme.backgroundElement}
+        >
+            <text fg={theme.success}>[图片]</text>
+        </box>
+    );
+}
+
+function VideoPart({ part: _part }: { part: MessagePart }) {
+    const { theme } = useTheme();
+    return (
+        <box
+            marginTop={1}
+            border={['left']}
+            borderColor={theme.warning}
+            paddingLeft={1}
+            flexDirection="column"
+            backgroundColor={theme.backgroundElement}
+        >
+            <text fg={theme.warning}>[视频]</text>
+        </box>
+    );
+}
+
+function FilePart({ part }: { part: MessagePart }) {
+    const { theme } = useTheme();
+    const filename = part.filename || 'unknown';
+    return (
+        <box
+            marginTop={1}
+            border={['left']}
+            borderColor={theme.accent}
+            paddingLeft={1}
+            flexDirection="column"
+            backgroundColor={theme.backgroundElement}
+        >
+            <text fg={theme.accent}>[文件: {filename}]</text>
         </box>
     );
 }

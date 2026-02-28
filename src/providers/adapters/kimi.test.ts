@@ -23,13 +23,13 @@ describe('KimiAdapter 请求头测试', () => {
         expect(headers.get('Content-Type')).toBe('application/json');
 
         // Kimi 平台标识头
-        expect(headers.get('X-Msh-Platform')).toBe('claude_cli');
+        expect(headers.get('X-Msh-Platform')).toBe('kimi_cli');
         expect(headers.get('X-Msh-Version')).toMatch(/^\d+\.\d+\.\d+$/);
         expect(headers.get('X-Msh-Device-Name')).toBeTruthy();
         expect(headers.get('X-Msh-Device-Model')).toBeTruthy();
         expect(headers.get('X-Msh-Os-Version')).toBeTruthy();
         expect(headers.get('X-Msh-Device-Id')).toMatch(/^[a-f0-9]{32}$/i);
-        expect(headers.get('User-Agent')).toBe('claude-cli/2.1.19 (external, cli)');
+        expect(headers.get('User-Agent')).toBe(`KimiCLI/1.0.0`);
     });
 });
 
@@ -37,7 +37,7 @@ describe('kimi-headers 模块测试', () => {
     it('getCommonHeaders 应该返回正确的平台标识', () => {
         const headers = getCommonHeaders();
 
-        expect(headers['X-Msh-Platform']).toBe('claude_cli');
+        expect(headers['X-Msh-Platform']).toBe('kimi_cli');
         expect(headers['X-Msh-Version']).toMatch(/^\d+\.\d+\.\d+$/);
         expect(headers['X-Msh-Device-Name']).toBeTruthy();
         expect(headers['X-Msh-Device-Model']).toBeTruthy();
@@ -46,13 +46,13 @@ describe('kimi-headers 模块测试', () => {
     });
 
     it('getUserAgent 应该返回正确的 User-Agent', () => {
-        expect(getUserAgent()).toBe('claude-cli/2.1.19 (external, cli)');
+        expect(getUserAgent()).toBe('KimiCLI/1.0.0');
     });
 
     it('getKimiHeaders 应该合并所有请求头', () => {
         const headers = getKimiHeaders();
 
-        expect(headers['X-Msh-Platform']).toBe('claude_cli');
-        expect(headers['User-Agent']).toBe('claude-cli/2.1.19 (external, cli)');
+        expect(headers['X-Msh-Platform']).toBe('kimi_cli');
+        expect(headers['User-Agent']).toBe(`KimiCLI/1.0.0`);
     });
 });

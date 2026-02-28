@@ -149,7 +149,7 @@ export function getCommonHeaders(): Record<string, string> {
     const version = PACKAGE_VERSION;
 
     return {
-        'X-Msh-Platform': 'claude_cli',
+        'X-Msh-Platform': 'kimi_cli',
         'X-Msh-Version': asciiHeaderValue(version),
         'X-Msh-Device-Name': asciiHeaderValue(deviceName),
         'X-Msh-Device-Model': asciiHeaderValue(deviceModel),
@@ -162,8 +162,8 @@ export function getCommonHeaders(): Record<string, string> {
  * 获取 User-Agent
  */
 export function getUserAgent(): string {
-    return 'claude-cli/2.1.19 (external, cli)';
-    // return `KimiCLI/${PACKAGE_VERSION}`;
+    // return 'claude-cli/2.1.19 (external, cli)';
+    return `KimiCLI/${PACKAGE_VERSION}`;
 }
 
 /**
