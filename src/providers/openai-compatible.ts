@@ -39,7 +39,7 @@ import {
 } from './types';
 
 /** Provider 默认超时时间（毫秒），作为 Agent.requestTimeout 的回退值 */
-const PROVIDER_DEFAULT_TIMEOUT = 1000 * 60 * 3; // 3 分钟
+const PROVIDER_DEFAULT_TIMEOUT = 1000 * 60 * 10; // 10分钟
 
 /**
  * OpenAI 兼容 Provider 基类

@@ -54,7 +54,9 @@ export class HTTPClient {
             // 检查 HTTP 错误
             if (!response.ok) {
                 const errorText = await response.text();
-                throw createErrorFromStatus(response.status, response.statusText, errorText);
+                // 提取 Retry-After 响应头（用于 429 等错误）
+                const retryAfterMs = this.extractRetryAfterMs(response);
+                throw createErrorFromStatus(response.status, response.statusText, errorText, retryAfterMs);
             }
 
             return response;
@@ -120,6 +122,39 @@ export class HTTPClient {
             // 忽略访问 reason 的错误
         }
         return 'unknown';
+    }
+
+    /**
+     * 从响应头中提取 Retry-After 值（毫秒）
+     *
+     * Retry-After 可以是秒数或日期字符串
+     * @see https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Retry-After
+     */
+    private extractRetryAfterMs(response: Response): number | undefined {
+        const retryAfter = response.headers.get('Retry-After');
+        if (!retryAfter) {
+            return undefined;
+        }
+
+        // 尝试解析为秒数
+        const seconds = parseInt(retryAfter, 10);
+        if (!isNaN(seconds) && seconds > 0) {
+            return seconds * 1000;
+        }
+
+        // 尝试解析为日期字符串
+        try {
+            const date = new Date(retryAfter);
+            const now = new Date();
+            const diffMs = date.getTime() - now.getTime();
+            if (diffMs > 0) {
+                return diffMs;
+            }
+        } catch {
+            // 忽略解析错误
+        }
+
+        return undefined;
     }
 
     /**

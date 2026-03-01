@@ -16,12 +16,11 @@ import {
 } from '../../agent-v2';
 import { ProviderRegistry } from '../../providers';
 import { operatorPrompt } from '../../agent-v2/prompts/operator';
-import type { ModelId } from '../../providers';
+import type { ModelId, InputContentPart, MessageContent } from '../../providers';
+import { platform } from 'os';
+import { parseFilePaths } from '../utils/file';
 
 const CLI_REQUEST_TIMEOUT_MS = 90 * 1000;
-const CLI_MAX_RETRIES = 2;
-const CLI_RETRY_DELAY_MS = 1500;
-const CLI_MAX_LOOPS = 80;
 
 export interface SubagentInfo {
     taskId: string;
@@ -31,7 +30,7 @@ export interface SubagentInfo {
 
 export interface MessagePart {
     id: string;
-    type: 'text' | 'tool-call' | 'tool-result' | 'reasoning' | 'code-patch' | 'subagent';
+    type: 'text' | 'tool-call' | 'tool-result' | 'reasoning' | 'code-patch' | 'subagent' | 'image' | 'video' | 'file';
     content: string;
     toolName?: string;
     toolArgs?: string;
@@ -45,6 +44,8 @@ export interface MessagePart {
     subagent?: SubagentInfo;
     /** 子 Agent 的消息部分（嵌套） */
     subagentParts?: MessagePart[];
+    /** 文件名（用于显示） */
+    filename?: string;
 }
 
 export interface ChatMessage {
@@ -60,6 +61,13 @@ export interface ChatMessage {
     };
 }
 
+export interface RetryInfo {
+    attempt: number;
+    max: number;
+    delayMs: number;
+    reason?: string;
+}
+
 export interface AgentState {
     status: AgentStatus;
     currentSessionId: string | null;
@@ -70,6 +78,8 @@ export interface AgentState {
         completion_tokens: number;
         total_tokens: number;
     };
+    /** 当前重试信息（仅在 RETRYING 状态时有值） */
+    retryInfo?: RetryInfo;
 }
 
 export interface AgentConfig {
@@ -83,6 +93,7 @@ interface AgentContextValue {
     config: AgentConfig;
     setConfig: (config: Partial<AgentConfig>) => void;
     sendMessage: (content: string) => Promise<void>;
+    sendMessageWithFiles: (contentParts: InputContentPart[], text: string) => Promise<void>;
     abort: () => void;
     clearSession: () => void;
     initialized: boolean;
@@ -279,7 +290,7 @@ function handleSubagentEvent(parts: MessagePart[], subagentMsg: SubagentEventMes
 
 export const { Provider: AgentProvider, use: useAgent } = createSimpleContext<AgentContextValue>('Agent', () => {
     const [config, setConfigState] = useState<AgentConfig>({
-        modelId: 'qwen3.5-plus',
+        modelId: 'qwen3.5-plus', //'kimi-k2.5',
         thinking: true,
     });
     const [initialized, setInitialized] = useState(false);
@@ -305,7 +316,11 @@ export const { Provider: AgentProvider, use: useAgent } = createSimpleContext<Ag
             // toolRegistryRef.current.register([new BashTool()]);
 
             // 2. 创建内存管理器
-            const memoryPath = './data/cli/agent-memory';
+            const memoryPath =
+                platform() === 'win32'
+                    ? 'D:/work/coding-agent-data/agent-memory'
+                    : '/Users/wrr/work/coding-agent-data/agent-memory';
+
             const fs = await import('fs');
             try {
                 fs.mkdirSync(memoryPath, { recursive: true });
@@ -454,8 +469,24 @@ export const { Provider: AgentProvider, use: useAgent } = createSimpleContext<Ag
                     break;
                 }
 
-                case AgentMessageType.STATUS:
-                    return { ...s, status: msg.payload.state };
+                case AgentMessageType.STATUS: {
+                    // 如果是重试状态，保存重试信息到 state
+                    if (msg.payload.state === AgentStatus.RETRYING && msg.payload.meta?.retry) {
+                        const retry = msg.payload.meta.retry;
+                        return {
+                            ...s,
+                            status: msg.payload.state,
+                            retryInfo: {
+                                attempt: retry.attempt,
+                                max: retry.max ?? 0,
+                                delayMs: retry.delayMs ?? 0,
+                                reason: retry.reason,
+                            },
+                        };
+                    }
+                    // 非 RETRYING 状态时清除重试信息
+                    return { ...s, status: msg.payload.state, retryInfo: undefined };
+                }
 
                 case AgentMessageType.USAGE_UPDATE:
                     messages[msgIndex] = {
@@ -501,23 +532,53 @@ export const { Provider: AgentProvider, use: useAgent } = createSimpleContext<Ag
         });
     }, []);
 
-    const sendMessage = useCallback(
-        async (content: string) => {
+    /**
+     * 发送多模态消息（包含文件）
+     */
+    const sendMessageWithFiles = useCallback(
+        async (contentParts: InputContentPart[], text: string) => {
             // 确保已初始化
             if (!initialized) {
                 await init();
             }
 
-            // if (!memoryManagerRef.current || !toolRegistryRef.current) {
-            //   setState((s) => ({ ...s, error: "Agent not initialized" }));
-            //   return;
-            // }
+            // 构建 UI 显示用的消息部分
+            const uiParts: MessagePart[] = [];
+
+            // 添加文本部分
+            if (text) {
+                uiParts.push({ id: `part-text-${Date.now()}`, type: 'text', content: text });
+            }
+
+            // 添加文件部分（用于 UI 显示）
+            for (const part of contentParts) {
+                if (part.type === 'image_url') {
+                    uiParts.push({
+                        id: `part-image-${Date.now()}-${Math.random()}`,
+                        type: 'image',
+                        content: '[图片]',
+                    });
+                } else if (part.type === 'input_video') {
+                    uiParts.push({
+                        id: `part-video-${Date.now()}-${Math.random()}`,
+                        type: 'video',
+                        content: '[视频]',
+                    });
+                } else if (part.type === 'file') {
+                    uiParts.push({
+                        id: `part-file-${Date.now()}-${Math.random()}`,
+                        type: 'file',
+                        content: `[文件: ${part.file.filename}]`,
+                        filename: part.file.filename,
+                    });
+                }
+            }
 
             // 添加用户消息
             const userMessage: ChatMessage = {
                 id: `user-${Date.now()}`,
                 role: 'user',
-                parts: [{ id: `part-${Date.now()}`, type: 'text', content }],
+                parts: uiParts.length > 0 ? uiParts : [{ id: `part-${Date.now()}`, type: 'text', content: text }],
                 timestamp: Date.now(),
                 status: AgentStatus.IDLE,
             };
@@ -553,11 +614,6 @@ export const { Provider: AgentProvider, use: useAgent } = createSimpleContext<Ag
                 agentRef.current = new Agent({
                     provider,
                     systemPrompt,
-                    // toolRegistry: toolRegistryRef.current,
-                    requestTimeout: CLI_REQUEST_TIMEOUT_MS,
-                    maxRetries: CLI_MAX_RETRIES,
-                    retryDelayMs: CLI_RETRY_DELAY_MS,
-                    maxLoops: CLI_MAX_LOOPS,
                     // 恢复会话（如果配置了 sessionId）
                     sessionId: config.sessionId || state.currentSessionId || undefined,
                     stream: true,
@@ -583,8 +639,9 @@ export const { Provider: AgentProvider, use: useAgent } = createSimpleContext<Ag
                     currentSessionId: agentRef.current!.getSessionId(),
                 }));
 
-                // 执行查询
-                await agentRef.current.execute(content);
+                // 执行查询 - 使用多模态内容
+                const messageContent: MessageContent = contentParts.length > 0 ? contentParts : text;
+                await agentRef.current.execute(messageContent);
 
                 // 更新最终消息状态
                 setState((s) => ({
@@ -622,6 +679,34 @@ export const { Provider: AgentProvider, use: useAgent } = createSimpleContext<Ag
         [initialized, init, config, state.currentSessionId, handleStreamMessage]
     );
 
+    /**
+     * 发送纯文本消息（兼容旧接口，自动解析 @文件路径）
+     */
+    const sendMessage = useCallback(
+        async (content: string) => {
+            // 解析文件路径
+            const { text, contentParts, errors } = parseFilePaths(content, process.cwd());
+
+            // 如果有错误，显示警告但不阻止发送
+            if (errors.length > 0) {
+                console.warn('文件解析警告:', errors.join('; '));
+            }
+
+            // 如果没有文件，直接发送文本
+            if (contentParts.length === 0 || (contentParts.length === 1 && contentParts[0].type === 'text')) {
+                const textContent =
+                    contentParts.length === 1 && contentParts[0].type === 'text'
+                        ? (contentParts[0] as { type: 'text'; text: string }).text
+                        : content;
+                await sendMessageWithFiles([], textContent);
+            } else {
+                // 有文件，发送多模态消息
+                await sendMessageWithFiles(contentParts, text);
+            }
+        },
+        [sendMessageWithFiles]
+    );
+
     const abort = useCallback(() => {
         if (agentRef.current) {
             agentRef.current.abort();
@@ -652,11 +737,12 @@ export const { Provider: AgentProvider, use: useAgent } = createSimpleContext<Ag
             config,
             setConfig,
             sendMessage,
+            sendMessageWithFiles,
             abort,
             clearSession,
             initialized,
         }),
-        [state, config, setConfig, sendMessage, abort, clearSession, initialized]
+        [state, config, setConfig, sendMessage, sendMessageWithFiles, abort, clearSession, initialized]
     );
 });
 
