@@ -8,7 +8,7 @@
 
 import { z } from 'zod';
 import { Agent } from '../agent/agent';
-import { LLMProvider } from '../../providers';
+import { LLMProvider, type LLMGenerateOptions } from '../../providers';
 import { BaseTool, ToolContext, ToolResult } from './base';
 import { ToolRegistry } from './registry';
 import type { ToolRegistryConfig } from './registry';
@@ -61,6 +61,7 @@ import {
     getBackgroundExecution,
     persistExecutionSnapshot,
     refreshExecutionProgress,
+    scheduleBackgroundExecutionCleanup,
     setBackgroundExecution,
     startExecutionHeartbeat,
     stopExecutionHeartbeat,
@@ -72,7 +73,12 @@ const taskRunSchema = z
         description: z.string().min(1).max(200).describe('A short (3-5 words) description of the task'),
         prompt: z.string().min(1).describe('The task for the agent to perform'),
         subagent_type: SubagentTypeSchema.describe('The type of specialized agent to use for this task'),
-        model: z.enum(['sonnet', 'opus', 'haiku']).optional().describe('Optional model hint for this subagent'),
+        model: z
+            .enum(['sonnet', 'opus', 'haiku'])
+            .optional()
+            .describe(
+                'Optional model hint for this subagent. Resolved via TASK_SUBAGENT_MODEL_<HINT>; Claude defaults are built in.'
+            ),
         resume: z.string().min(1).optional().describe('Optional resume token/id (currently informational)'),
         run_in_background: z.boolean().default(false).describe('Run task in background and return task_id immediately'),
     })
@@ -110,6 +116,17 @@ export class TaskTool extends BaseTool<typeof taskRunSchema> {
         const taskId = createExecutionId();
         const childSessionId = `${parentSessionId}::subtask::${taskId}`;
         const startedAt = nowIso();
+        const modelOverride = this.resolveModelOverride(model);
+        const subagentOptions = this.buildSubagentOptions(modelOverride);
+        const modelForStorage = modelOverride ?? model;
+        const modelMetadata = model
+            ? {
+                  model,
+                  model_hint: model,
+                  model_resolved: modelOverride || null,
+                  model_applied: Boolean(modelOverride),
+              }
+            : {};
         let subagent: Agent | undefined;
 
         try {
@@ -135,7 +152,7 @@ export class TaskTool extends BaseTool<typeof taskRunSchema> {
                     description,
                     prompt,
                     subagentType: subagent_type,
-                    model,
+                    model: modelForStorage as ModelHint | undefined,
                     resume,
                     toolsUsed: [],
                     messageCount: 0,
@@ -152,8 +169,9 @@ export class TaskTool extends BaseTool<typeof taskRunSchema> {
                     subagentType: subagent_type,
                     prompt,
                     description,
-                    model,
+                    model: modelForStorage as ModelHint | undefined,
                     resume,
+                    subagentOptions,
                 });
                 const execution = getBackgroundExecution(backgroundTaskId);
                 return this.result({
@@ -164,7 +182,7 @@ export class TaskTool extends BaseTool<typeof taskRunSchema> {
                         parent_session_id: parentSessionId,
                         child_session_id: childSessionId,
                         subagent_type,
-                        model,
+                        ...modelMetadata,
                         resume,
                         storage: execution?.storage || 'memory_fallback',
                     },
@@ -172,7 +190,7 @@ export class TaskTool extends BaseTool<typeof taskRunSchema> {
                 });
             }
 
-            const result = await this.runSubagent(subagent, prompt);
+            const result = await this.runSubagent(subagent, prompt, subagentOptions);
             const finishedAt = nowIso();
             const storage = await saveSubTaskRunRecord(
                 memoryManager,
@@ -190,7 +208,7 @@ export class TaskTool extends BaseTool<typeof taskRunSchema> {
                     description,
                     prompt,
                     subagentType: subagent_type,
-                    model,
+                    model: modelForStorage as ModelHint | undefined,
                     resume,
                     turns: result.turns,
                     toolsUsed: result.toolsUsed,
@@ -211,7 +229,7 @@ export class TaskTool extends BaseTool<typeof taskRunSchema> {
                     turns: result.turns,
                     toolsUsed: result.toolsUsed,
                     error: result.errorCode,
-                    model,
+                    ...modelMetadata,
                     resume,
                     storage,
                 },
@@ -241,7 +259,7 @@ export class TaskTool extends BaseTool<typeof taskRunSchema> {
                         description,
                         prompt,
                         subagentType: subagent_type,
-                        model,
+                        model: modelForStorage as ModelHint | undefined,
                         resume,
                         turns: subagent.getLoopCount(),
                         toolsUsed,
@@ -258,6 +276,7 @@ export class TaskTool extends BaseTool<typeof taskRunSchema> {
                     task_id: taskId,
                     parent_session_id: parentSessionId,
                     child_session_id: childSessionId,
+                    ...modelMetadata,
                     storage,
                 },
                 output: `Agent execution failed: ${err.message}`,
@@ -338,6 +357,7 @@ Execution context:
         description,
         model,
         resume,
+        subagentOptions,
     }: {
         taskId: string;
         subagent: Agent;
@@ -349,6 +369,7 @@ Execution context:
         description: string;
         model?: ModelHint;
         resume?: string;
+        subagentOptions?: LLMGenerateOptions;
     }): Promise<string> {
         const createdAt = nowIso();
         const execution: BackgroundExecution = {
@@ -381,7 +402,7 @@ Execution context:
         await persistExecutionSnapshot(execution);
         startExecutionHeartbeat(execution);
 
-        const runPromise = this.runSubagent(subagent, prompt)
+        const runPromise = this.runSubagent(subagent, prompt, subagentOptions)
             .then(async (result) => {
                 execution.turns = result.turns;
                 execution.toolsUsed = result.toolsUsed;
@@ -393,6 +414,7 @@ Execution context:
                 execution.output = result.output;
                 execution.finishedAt = nowIso();
                 await persistExecutionSnapshot(execution);
+                scheduleBackgroundExecutionCleanup(execution.taskId);
             })
             .catch(async (error) => {
                 execution.messages = normalizeMessagesForStorage(execution.agent?.getMessages());
@@ -409,6 +431,7 @@ Execution context:
                 }
                 execution.finishedAt = nowIso();
                 await persistExecutionSnapshot(execution);
+                scheduleBackgroundExecutionCleanup(execution.taskId);
             })
             .finally(() => {
                 stopExecutionHeartbeat(execution);
@@ -420,8 +443,8 @@ Execution context:
         return taskId;
     }
 
-    private async runSubagent(subagent: Agent, prompt: string): Promise<SubagentResult> {
-        const execution = await subagent.executeWithResult(prompt);
+    private async runSubagent(subagent: Agent, prompt: string, options?: LLMGenerateOptions): Promise<SubagentResult> {
+        const execution = await subagent.executeWithResult(prompt, options);
         const turns = subagent.getLoopCount();
         const rawMessages = subagent.getMessages();
         const toolsUsed = extractToolsUsed(rawMessages);
@@ -453,6 +476,42 @@ Execution context:
             output,
             messages: normalizedMessages,
         };
+    }
+
+    private buildSubagentOptions(modelOverride?: string): LLMGenerateOptions | undefined {
+        if (!modelOverride) return undefined;
+        return { model: modelOverride };
+    }
+
+    private resolveModelOverride(modelHint?: ModelHint): string | undefined {
+        if (!modelHint) return undefined;
+
+        const normalizedHint = modelHint.toLowerCase().trim();
+        const envKey = this.getModelHintEnvKey(normalizedHint);
+        const envMappedModel = process.env[envKey]?.trim();
+        if (envMappedModel) {
+            return envMappedModel;
+        }
+
+        const providerModel = this.provider.config?.model;
+        if (typeof providerModel === 'string' && providerModel.toLowerCase().includes('claude')) {
+            switch (normalizedHint) {
+                case 'opus':
+                    return 'claude-opus-4-6';
+                case 'sonnet':
+                    return 'claude-sonnet-4-5';
+                case 'haiku':
+                    return 'claude-3-5-haiku';
+                default:
+                    return undefined;
+            }
+        }
+
+        return undefined;
+    }
+
+    private getModelHintEnvKey(modelHint: string): string {
+        return `TASK_SUBAGENT_MODEL_${modelHint.toUpperCase()}`;
     }
 }
 
@@ -760,6 +819,7 @@ export class TaskStopTool extends BaseTool<typeof taskStopSchema> {
                 execution.lastActivityAt = execution.finishedAt;
                 await refreshExecutionProgress(execution, true);
                 await persistExecutionSnapshot(execution);
+                scheduleBackgroundExecutionCleanup(execution.taskId);
             }
         }
 

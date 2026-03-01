@@ -134,6 +134,20 @@ class FailingProvider extends LLMProvider {
     }
 }
 
+class ModelCaptureProvider extends MockProvider {
+    readonly requestedModels: string[] = [];
+
+    override async generate(
+        messages: LLMRequestMessage[],
+        options?: LLMGenerateOptions
+    ): Promise<LLMResponse | null> {
+        if (options?.model) {
+            this.requestedModels.push(options.model);
+        }
+        return super.generate(messages, options);
+    }
+}
+
 // Type helpers for metadata access
 interface TaskCreateMetadata {
     id: string;
@@ -184,6 +198,9 @@ interface TaskToolMetadata {
     child_session_id?: string;
     subagent_type?: string;
     model?: string;
+    model_hint?: string;
+    model_resolved?: string | null;
+    model_applied?: boolean;
     resume?: string;
     storage?: string;
     error?: string;
@@ -608,6 +625,68 @@ describe('Task tools', () => {
         expect(resultMeta?.status).toBe('failed');
         expect(resultMeta?.error).toBe('LLM_REQUEST_FAILED');
         expect(result.output).toContain('Agent execution failed');
+    });
+
+    it('should apply model hint mapping from env and pass resolved model to provider', async () => {
+        const previous = process.env.TASK_SUBAGENT_MODEL_OPUS;
+        process.env.TASK_SUBAGENT_MODEL_OPUS = 'mock-opus-model';
+
+        try {
+            const provider = new ModelCaptureProvider('model hint routed');
+            const taskTool = withContext(new TaskTool(provider));
+            const result = await taskTool.execute({
+                description: 'Model routing',
+                prompt: 'Route by model hint',
+                subagent_type: SubagentType.Explore as SubagentType,
+                model: 'opus',
+                run_in_background: false,
+            });
+
+            const resultMeta = result.metadata as TaskToolMetadata | undefined;
+
+            expect(result.success).toBe(true);
+            expect(provider.requestedModels).toContain('mock-opus-model');
+            expect(resultMeta?.model).toBe('opus');
+            expect(resultMeta?.model_hint).toBe('opus');
+            expect(resultMeta?.model_resolved).toBe('mock-opus-model');
+            expect(resultMeta?.model_applied).toBe(true);
+        } finally {
+            if (previous === undefined) {
+                delete process.env.TASK_SUBAGENT_MODEL_OPUS;
+            } else {
+                process.env.TASK_SUBAGENT_MODEL_OPUS = previous;
+            }
+        }
+    });
+
+    it('should keep model_applied false when no model mapping is available', async () => {
+        const previous = process.env.TASK_SUBAGENT_MODEL_HAIKU;
+        delete process.env.TASK_SUBAGENT_MODEL_HAIKU;
+
+        try {
+            const provider = new ModelCaptureProvider('no mapping');
+            const taskTool = withContext(new TaskTool(provider));
+            const result = await taskTool.execute({
+                description: 'Model no-op',
+                prompt: 'No model mapping expected',
+                subagent_type: SubagentType.Explore as SubagentType,
+                model: 'haiku',
+                run_in_background: false,
+            });
+
+            const resultMeta = result.metadata as TaskToolMetadata | undefined;
+
+            expect(result.success).toBe(true);
+            expect(provider.requestedModels).toHaveLength(0);
+            expect(resultMeta?.model).toBe('haiku');
+            expect(resultMeta?.model_hint).toBe('haiku');
+            expect(resultMeta?.model_resolved).toBeNull();
+            expect(resultMeta?.model_applied).toBe(false);
+        } finally {
+            if (previous !== undefined) {
+                process.env.TASK_SUBAGENT_MODEL_HAIKU = previous;
+            }
+        }
     });
 });
 
