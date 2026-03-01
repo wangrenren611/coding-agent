@@ -11,7 +11,8 @@ import path from 'path';
 import { parseFilePaths, createFileSummary, type ParsedFileInput } from './cli/utils/file';
 import type { InputContentPart } from './providers/types/api';
 
-const model = 'kimi-k2.5';
+// const model = 'wr-claude-4.6';
+const model = 'glm-5';
 dotenv.config({
     path: './.env.development',
 });
@@ -821,9 +822,9 @@ async function demo1() {
             console.log(`${COLORS.dim}◆ 已附加 ${parsedInput.contentParts.length - 1} 个文件${COLORS.reset}\n`);
         } else {
             // 使用纯文本
-            executeContent = parsedInput.text;
+            executeContent = query;
         }
-
+        console.log(executeContent);
         const response = await agent.execute(executeContent);
 
         // 兜底：刷新所有未完成的子 Agent 缓冲区
