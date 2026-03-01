@@ -209,8 +209,13 @@ export class OpenAICompatibleProvider extends LLMProvider {
             throw new LLMError('Response body is not readable', 'NO_BODY');
         }
 
-        // 直接 yield 每个 chunk，不累积
-        yield* StreamParser.parseAsync(response.body.getReader());
+        // 如果适配器提供了自定义流式解析器，则使用它
+        if (this.adapter.parseStreamAsync) {
+            yield* this.adapter.parseStreamAsync(response.body.getReader());
+        } else {
+            // 否则使用默认的 OpenAI 流式解析器
+            yield* StreamParser.parseAsync(response.body.getReader());
+        }
     }
 
     /**

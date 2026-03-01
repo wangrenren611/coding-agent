@@ -47,7 +47,7 @@ describe('ProviderRegistry', () => {
         });
 
         it('should have valid provider types', () => {
-            const validProviders = ['kimi', 'deepseek', 'glm', 'minimax', 'openai', 'qwen'];
+            const validProviders = ['anthropic', 'kimi', 'deepseek', 'glm', 'minimax', 'openai', 'qwen'];
 
             Object.values(MODEL_CONFIGS).forEach((config) => {
                 expect(validProviders).toContain(config.provider);
@@ -229,7 +229,8 @@ describe('ProviderRegistry', () => {
         });
 
         it('should return empty array for provider with no models', () => {
-            const models = ProviderRegistry.listModelsByProvider('openai');
+            // 使用类型断言测试边缘情况：传入一个不在当前配置中的 provider
+            const models = ProviderRegistry.listModelsByProvider('nonexistent-provider' as never);
 
             expect(models).toEqual([]);
         });

@@ -7,12 +7,14 @@
 /**
  * Provider 厂商类型
  */
-export type ProviderType = 'kimi' | 'deepseek' | 'glm' | 'minimax' | 'openai' | 'qwen';
+export type ProviderType = 'anthropic' | 'kimi' | 'deepseek' | 'glm' | 'minimax' | 'openai' | 'qwen';
 
 /**
  * 模型唯一标识
  */
 export type ModelId =
+    // Anthropic 系列
+    | 'claude-opus-4.6'
     // GLM 系列
     | 'glm-4.7'
     // MiniMax 系列
@@ -26,7 +28,8 @@ export type ModelId =
     // Qwen 系列
     | 'qwen3.5-plus'
     | 'qwen-kimi-k2.5'
-    | 'qwen-glm-5';
+    | 'qwen-glm-5'
+    | 'wr-claude-4.6';
 
 /**
  * 模型配置

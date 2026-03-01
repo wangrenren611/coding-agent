@@ -5,7 +5,15 @@
  * 请求/响应转换。
  */
 
-import type { InputContentPart, LLMRequest, LLMResponse, LLMRequestMessage, MessageContent, Role } from '../types';
+import type {
+    InputContentPart,
+    LLMRequest,
+    LLMResponse,
+    LLMRequestMessage,
+    MessageContent,
+    Role,
+    Chunk,
+} from '../types';
 
 export abstract class BaseAPIAdapter {
     /**
@@ -28,6 +36,13 @@ export abstract class BaseAPIAdapter {
      * 例如：'/v1/chat/completions' 或 '/api/paas/v4/chat/completions'
      */
     abstract getEndpointPath(): string;
+
+    /**
+     * 可选：解析流式响应
+     * 子类可以覆盖此方法以支持非标准流式格式
+     * 如果返回 null，则使用默认的 OpenAI 流式解析器
+     */
+    parseStreamAsync?(reader: ReadableStreamDefaultReader<Uint8Array>): AsyncGenerator<Chunk>;
 
     /**
      * 工具方法：检查清理后的消息是否应该发送

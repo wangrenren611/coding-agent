@@ -485,4 +485,210 @@ describe('Session Compaction', () => {
             expect(tokenInfo.shouldCompact).toBe(false);
         });
     });
+
+    describe('Token 估算算法', () => {
+        it('纯中文文本估算准确', async () => {
+            const provider = new MockSummaryProvider();
+            const session = new Session({
+                systemPrompt: 'system',
+                enableCompaction: true,
+                provider,
+                compactionConfig: {
+                    maxTokens: 10000,
+                    maxOutputTokens: 2000,
+                    keepMessagesNum: 10,
+                    triggerRatio: 0.9,
+                },
+            });
+
+            const compaction = session.getCompaction()!;
+
+            // 10 个中文字符，预期：10 * 1.5 = 15 tokens
+            session.addMessage({
+                messageId: 'cn-10',
+                role: 'user',
+                content: '这是一段测试文本',
+                type: 'text',
+            });
+
+            const tokenInfo1 = compaction.getTokenInfo(session.getMessages());
+            // system 消息 + user 消息，中文 8 字符 * 1.5 = 12
+            expect(tokenInfo1.estimatedTotal).toBeGreaterThan(12);
+        });
+
+        it('纯英文文本估算准确', async () => {
+            const provider = new MockSummaryProvider();
+            const session = new Session({
+                systemPrompt: 'system',
+                enableCompaction: true,
+                provider,
+                compactionConfig: {
+                    maxTokens: 10000,
+                    maxOutputTokens: 2000,
+                    keepMessagesNum: 10,
+                    triggerRatio: 0.9,
+                },
+            });
+
+            const compaction = session.getCompaction()!;
+
+            // 20 个英文字符，预期约：20 * 0.25 = 5 tokens
+            session.addMessage({
+                messageId: 'en-20',
+                role: 'user',
+                content: 'This is a test text',
+                type: 'text',
+            });
+
+            const tokenInfo = compaction.getTokenInfo(session.getMessages());
+            expect(tokenInfo.estimatedTotal).toBeGreaterThan(5);
+        });
+
+        it('中英混合文本正确估算', async () => {
+            const provider = new MockSummaryProvider();
+            const session = new Session({
+                systemPrompt: 'system',
+                enableCompaction: true,
+                provider,
+                compactionConfig: {
+                    maxTokens: 10000,
+                    maxOutputTokens: 2000,
+                    keepMessagesNum: 10,
+                    triggerRatio: 0.9,
+                },
+            });
+
+            const compaction = session.getCompaction()!;
+
+            // "Hello世界" - Hello (5 * 0.25) + 世界 (2 * 1.5) = 1.25 + 3 = 4.25 ≈ 5
+            session.addMessage({
+                messageId: 'mixed',
+                role: 'user',
+                content: 'Hello世界',
+                type: 'text',
+            });
+
+            const tokenInfo = compaction.getTokenInfo(session.getMessages());
+            expect(tokenInfo.estimatedTotal).toBeGreaterThan(4);
+        });
+
+        it('空内容估算接近 0 token', async () => {
+            const provider = new MockSummaryProvider();
+            const session = new Session({
+                systemPrompt: '', // 空系统提示词
+                enableCompaction: true,
+                provider,
+                compactionConfig: {
+                    maxTokens: 10000,
+                    maxOutputTokens: 2000,
+                    keepMessagesNum: 10,
+                    triggerRatio: 0.9,
+                },
+            });
+
+            const compaction = session.getCompaction()!;
+            const tokenInfo = compaction.getTokenInfo(session.getMessages());
+
+            // system 消息虽然 content 为空，但 JSON 序列化后仍有固定开销
+            // 估算结果应该很小（小于 20）
+            expect(tokenInfo.estimatedTotal).toBeLessThan(20);
+        });
+
+        it('中文文本 token 估算高于旧算法', async () => {
+            const provider = new MockSummaryProvider();
+            const session = new Session({
+                systemPrompt: 'system',
+                enableCompaction: true,
+                provider,
+                compactionConfig: {
+                    maxTokens: 10000,
+                    maxOutputTokens: 2000,
+                    keepMessagesNum: 10,
+                    triggerRatio: 0.9,
+                },
+            });
+
+            const compaction = session.getCompaction()!;
+
+            // 100 个中文字符
+            const chineseText = '这是一段用于测试Token估算算法的中文文本内容。'.repeat(2);
+            session.addMessage({
+                messageId: 'cn-test',
+                role: 'user',
+                content: chineseText,
+                type: 'text',
+            });
+
+            const tokenInfo = compaction.getTokenInfo(session.getMessages());
+            const chineseChars = chineseText.length; // 约 46 个字符
+
+            // 旧算法：46 / 4 = 11.5 ≈ 12
+            // 新算法：46 * 1.5 = 69
+            // 新算法应该显著高于旧算法
+            expect(tokenInfo.estimatedTotal).toBeGreaterThan(chineseChars / 4 + 10);
+        });
+
+        it('代码文本正确估算', async () => {
+            const provider = new MockSummaryProvider();
+            const session = new Session({
+                systemPrompt: 'system',
+                enableCompaction: true,
+                provider,
+                compactionConfig: {
+                    maxTokens: 10000,
+                    maxOutputTokens: 2000,
+                    keepMessagesNum: 10,
+                    triggerRatio: 0.9,
+                },
+            });
+
+            const compaction = session.getCompaction()!;
+
+            // 包含中文注释的代码
+            session.addMessage({
+                messageId: 'code',
+                role: 'user',
+                content: '// 这是用户登录函数\nfunction login() {\n  return true;\n}',
+                type: 'text',
+            });
+
+            const tokenInfo = compaction.getTokenInfo(session.getMessages());
+            // 应该正确计算中英文混合的 token
+            expect(tokenInfo.estimatedTotal).toBeGreaterThan(10);
+        });
+
+        it('长文本估算性能良好', async () => {
+            const provider = new MockSummaryProvider();
+            const session = new Session({
+                systemPrompt: 'system',
+                enableCompaction: true,
+                provider,
+                compactionConfig: {
+                    maxTokens: 100000,
+                    maxOutputTokens: 20000,
+                    keepMessagesNum: 10,
+                    triggerRatio: 0.9,
+                },
+            });
+
+            const compaction = session.getCompaction()!;
+
+            // 10000 字符的混合文本
+            const longText = '这是一段混合文本。'.repeat(300);
+            session.addMessage({
+                messageId: 'long',
+                role: 'user',
+                content: longText,
+                type: 'text',
+            });
+
+            const startTime = Date.now();
+            const tokenInfo = compaction.getTokenInfo(session.getMessages());
+            const endTime = Date.now();
+
+            // 性能应该在 100ms 以内
+            expect(endTime - startTime).toBeLessThan(100);
+            expect(tokenInfo.estimatedTotal).toBeGreaterThan(longText.length / 4);
+        });
+    });
 });
