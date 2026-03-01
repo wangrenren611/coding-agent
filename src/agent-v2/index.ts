@@ -68,3 +68,29 @@ export type {
 
 // 工具函数
 export { v4 as uuid } from 'uuid';
+
+// 日志模块
+export { Logger, ChildLogger, createLogger, getLogger, setDefaultLogger } from './logger';
+export { LogLevel, LogLevelName } from './logger/types';
+export type {
+    LoggerConfig,
+    LogRecord,
+    LogContext,
+    LogLevel as LogLevelType,
+    ITransport,
+    IFormatter,
+    LogMiddleware,
+    LogStats,
+    ConsoleTransportConfig,
+    FileTransportConfig,
+    TransportConfig,
+} from './logger/types';
+export { JsonFormatter, PrettyFormatter } from './logger/formatters';
+export { ConsoleTransport, FileTransport } from './logger/transports';
+export {
+    createContextMiddleware,
+    ContextManager,
+    getContextManager,
+    createAgentEventMapper,
+    createEventLoggerMiddleware,
+} from './logger/middleware';

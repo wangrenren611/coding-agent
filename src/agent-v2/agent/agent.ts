@@ -30,6 +30,7 @@ import { ToolRegistry } from '../tool/registry';
 import { EventBus, EventType } from '../eventbus';
 import { Message } from '../session/types';
 import { createDefaultToolRegistry, createPlanModeToolRegistry } from '../tool';
+import { createLogger, getLogger, Logger, createEventLoggerMiddleware } from '../logger';
 
 import {
     AgentAbortedError,
@@ -87,6 +88,8 @@ export class Agent {
     private readonly session: Session;
     private readonly toolRegistry: ToolRegistry;
     private readonly eventBus: EventBus;
+    private readonly logger: Logger;
+    private unsubscribeEventLogger?: () => void;
 
     // 配置
     private readonly stream: boolean;
@@ -115,6 +118,16 @@ export class Agent {
 
         this.timeProvider = config.timeProvider ?? new DefaultTimeProvider();
         this.eventBus = new EventBus();
+
+        // 初始化日志器
+        this.logger = config.logger ?? (config.loggerConfig ? createLogger(config.loggerConfig) : getLogger());
+
+        // 设置 Agent 事件日志
+        if (config.enableEventLogging !== false) {
+            this.unsubscribeEventLogger = createEventLoggerMiddleware(this.eventBus, this.logger, {
+                sessionId: config.sessionId,
+            });
+        }
         this.inputValidator = new InputValidator();
         this.errorClassifier = new ErrorClassifier();
 
@@ -277,6 +290,26 @@ export class Agent {
             source: 'agent',
             phase: 'failure',
         });
+    }
+
+    /**
+     * 关闭 Agent，释放资源
+     */
+    async close(): Promise<void> {
+        // 取消事件日志订阅
+        if (this.unsubscribeEventLogger) {
+            this.unsubscribeEventLogger();
+            this.unsubscribeEventLogger = undefined;
+        }
+        // 关闭日志器（清理定时器等资源）
+        await this.logger.close();
+    }
+
+    /**
+     * 获取日志器
+     */
+    getLogger(): Logger {
+        return this.logger;
     }
 
     // ==================== 事件订阅 ====================
