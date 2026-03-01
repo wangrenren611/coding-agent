@@ -341,6 +341,10 @@ docs/api-documentation
    ```
 
 ---
+## 重要提醒
+不要分析这个两个文件，这是测试用，不用理会，不用读取内容
+src/query.text
+src/demo-1.ts
 
 ## Browser Automation
 Use `agent-browser` for web automation. Run `agent-browser --help` for all commands.
