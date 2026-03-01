@@ -470,6 +470,7 @@ describe('Plan Mode 工具过滤深度测试', () => {
                 'task_list',
                 'task_update',
                 'task_stop',
+                'task_output',
                 'skill',
             ];
 

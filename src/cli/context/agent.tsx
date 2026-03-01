@@ -14,6 +14,7 @@ import {
     IMemoryManager,
     SubagentEventMessage,
 } from '../../agent-v2';
+import { markInterruptedTasks } from '../../agent-v2/tool/task/recovery';
 import { ProviderRegistry } from '../../providers';
 import { operatorPrompt } from '../../agent-v2/prompts/operator';
 import type { ModelId, InputContentPart, MessageContent } from '../../providers';
@@ -333,6 +334,15 @@ export const { Provider: AgentProvider, use: useAgent } = createSimpleContext<Ag
                 connectionString: memoryPath,
             });
             await memoryManagerRef.current.initialize();
+
+            try {
+                const interruptedCount = await markInterruptedTasks(memoryManagerRef.current);
+                if (interruptedCount > 0) {
+                    console.warn(`[Recovery] Marked ${interruptedCount} interrupted task(s) as failed on startup.`);
+                }
+            } catch (recoveryError) {
+                console.warn('Failed to mark interrupted tasks on startup:', recoveryError);
+            }
 
             setInitialized(true);
         } catch (error) {

@@ -31,7 +31,7 @@ export class BatchReplaceTool extends BaseTool<typeof schema> {
     description = `Replace multiple text segments in a single file call.
 
 =============================================================================
-PREFERRED TOOL FOR MULTIPLE FILE MODIFICATIONS (0% FAILURE RATE)
+PREFERRED TOOL FOR MULTIPLE FILE MODIFICATIONS
 
 WHY USE batch_replace:
 - All replacements based on SAME file snapshot (read once at start)
@@ -150,6 +150,47 @@ WORKFLOW:
                 // Multiple replacements on same line, uses original content
             }
             processedLines.add(line);
+
+            // Idempotent retry support:
+            // If oldText either does not exist OR only exists inside existing newText spans,
+            // treat it as already applied to avoid duplicate expansions on retries.
+            if (newText.length > 0 && originalLine.includes(newText)) {
+                const newRanges: Array<{ start: number; end: number }> = [];
+                let newIdx = originalLine.indexOf(newText);
+                while (newIdx !== -1) {
+                    newRanges.push({ start: newIdx, end: newIdx + newText.length });
+                    newIdx = originalLine.indexOf(newText, newIdx + 1);
+                }
+
+                const oldIndices: number[] = [];
+                let oldIdx = originalLine.indexOf(oldText);
+                while (oldIdx !== -1) {
+                    oldIndices.push(oldIdx);
+                    oldIdx = originalLine.indexOf(oldText, oldIdx + 1);
+                }
+
+                if (oldIndices.length === 0) {
+                    results.push({
+                        line,
+                        success: true,
+                        message: `Line ${line} already contains newText; treated as already applied`,
+                    });
+                    continue;
+                }
+
+                const hasOldOutsideNewSpans = oldIndices.some((idx) => {
+                    return !newRanges.some((range) => idx >= range.start && idx < range.end);
+                });
+
+                if (!hasOldOutsideNewSpans) {
+                    results.push({
+                        line,
+                        success: true,
+                        message: `Line ${line} oldText only appears inside existing newText; treated as already applied`,
+                    });
+                    continue;
+                }
+            }
 
             // === 业务错误：oldText 不匹配 ===
             if (!originalLine.includes(oldText)) {

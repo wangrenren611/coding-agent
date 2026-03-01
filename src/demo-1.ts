@@ -12,7 +12,7 @@ import { parseFilePaths, createFileSummary, type ParsedFileInput } from './cli/u
 import type { InputContentPart } from './providers/types/api';
 
 // const model = 'wr-claude-4.6';
-const model: ModelId = 'qwen-glm-5';
+const model: ModelId = 'qwen3.5-plus';
 dotenv.config({
     path: './.env.development',
 });

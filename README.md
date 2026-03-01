@@ -6,6 +6,7 @@
 [![Node.js](https://img.shields.io/badge/Node.js-20+-green.svg)](https://nodejs.org/)
 [![Vitest](https://img.shields.io/badge/Vitest-4.0+-purple.svg)](https://vitest.dev/)
 [![License](https://img.shields.io/badge/License-ISC-yellow.svg)](https://opensource.org/licenses/ISC)
+[![Tests](https://img.shields.io/badge/tests-1200+-brightgreen.svg)]()
 
 ---
 
@@ -16,11 +17,13 @@
 - [快速开始](#快速开始)
 - [安装](#安装)
 - [架构设计](#架构设计)
-- [核心概念](#核心概念)
+- [核心组件](#核心组件)
+- [ReAct 工作流程](#react-工作流程)
 - [API 文档](#api-文档)
 - [工具系统](#工具系统)
 - [会话管理](#会话管理)
 - [持久化存储](#持久化存储)
+- [日志系统](#日志系统)
 - [事件系统](#事件系统)
 - [LLM Provider](#llm-provider)
 - [CLI 使用](#cli-使用)
@@ -29,7 +32,6 @@
 - [测试](#测试)
 - [常见问题](#常见问题)
 - [贡献指南](#贡献指南)
-- [更新日志](#更新日志)
 
 ---
 
@@ -39,13 +41,24 @@ Coding Agent 是一个生产级的 AI 编码助手框架，采用**协调器模�
 
 ### 核心设计理念
 
-- **ReAct 范式**：Reasoning（思考）+ Acting（行动）交替执行，实现智能决策
-- **协调器模式**：Agent 作为协调器，委托具体工作给专业组件
-- **可插拔架构**：工具、Provider、存储均可独立扩展
-- **端口与适配器**：Memory 和 Provider 层采用六边形架构，支持多种后端
-- **事件驱动**：通过 EventBus 解耦组件间通信
-- **类型安全**：TypeScript 严格模式，完整的类型定义
-- **生产就绪**：完善的错误处理、自动重试、资源管理
+| 理念 | 说明 |
+|------|------|
+| **ReAct 范式** | Reasoning（思考）+ Acting（行动）交替执行，实现智能决策 |
+| **协调器模式** | Agent 作为协调器，委托具体工作给专业组件 |
+| **可插拔架构** | 工具、Provider、存储均可独立扩展 |
+| **端口与适配器** | Memory 和 Provider 层采用六边形架构，支持多种后端 |
+| **事件驱动** | 通过 EventBus 解耦组件间通信 |
+| **类型安全** | TypeScript 严格模式，完整的类型定义 |
+| **生产就绪** | 1200+ 单元测试，完善的错误处理、自动重试、资源管理 |
+
+### 技术栈
+
+- **TypeScript 5.3+** - 主要开发语言，严格模式
+- **Node.js 20+** - 运行环境
+- **Vitest 4.0+** - 单元测试框架（1200+ 测试用例）
+- **Zod 4.0+** - 运行时类型验证
+- **Pino** - 高性能日志系统
+- **TailwindCSS** - CLI 界面样式
 
 ---
 
@@ -60,32 +73,43 @@ Coding Agent 是一个生产级的 AI 编码助手框架，采用**协调器模�
 | **工具调用** | 16+ 内置工具，支持自定义扩展，带超时和截断控制 |
 | **流式输出** | 实时流式响应，支持 reasoning/content 分离处理 |
 | **自动重试** | 智能错误分类，指数退避，自动重试可恢复错误 |
-| **上下文压缩** | 智能压缩长对话，8 章节结构化摘要，节省 token |
+| **上下文压缩** | 8 章节结构化摘要，智能压缩长对话，节省 token 消耗 |
 | **任务中止** | 支持 abort 中断，支持空闲超时控制 |
 | **响应验证** | 实时检测模型幻觉、重复模式等异常 |
+| **流式恢复** | 智能检测流式中断，自动恢复响应 |
 
 ### 🛠️ 工具系统
 
 | 工具类别 | 工具名称 | 功能描述 |
 |----------|----------|----------|
-| **文件操作** | `ReadFile` | 读取文件内容，支持图片、PDF、Jupyter Notebook |
-| | `WriteFile` | 写入文件，自动创建目录 |
-| | `SurgicalEdit` | 精确的文本替换编辑 |
-| | `BatchReplace` | 批量文本替换 |
-| **搜索** | `Grep` | 基于正则的代码搜索 |
-| | `Glob` | 文件模式匹配 |
-| **执行** | `Bash` | Shell 命令执行，支持超时和后台运行 |
-| **Web** | `WebSearch` | 网络搜索（Tavily API） |
-| | `WebFetch` | 网页内容抓取 |
-| **代码智能** | `LSP` | 语言服务器协议支持（定义跳转、引用查找等） |
-| **任务管理** | `Task` | 子 Agent 任务委托 |
-| | `TaskCreate/Get/List/Update/Output/Stop` | 完整的任务生命周期管理 |
+| **文件操作** | `read_file` | 读取文件内容，支持图片、PDF、Jupyter Notebook |
+| | `write_file` | 写入文件，自动创建目录 |
+| | `precise_replace` | 精确的文本替换编辑 |
+| | `batch_replace` | 批量文本替换 |
+| **搜索** | `grep` | 基于正则的代码搜索 |
+| | `glob` | 文件模式匹配 |
+| **执行** | `bash` | Shell 命令执行，支持超时和后台运行 |
+| **Web** | `web_search` | 网络搜索（Tavily API） |
+| | `web_fetch` | 网页内容抓取 |
+| **代码智能** | `lsp` | 语言服务器协议支持（定义跳转、引用查找等） |
+| **任务管理** | `task` | 子 Agent 任务委托 |
+| | `task_create/get/list/update/output/stop` | 完整的任务生命周期管理 |
 
 ### 💾 存储系统
 
 - **文件持久化**：JSON 文件存储，支持多会话
 - **会话恢复**：支持通过 sessionId 恢复历史会话
 - **上下文压缩记录**：保存压缩历史，支持回溯
+- **多后端支持**：File / MongoDB / Hybrid
+
+### 📝 日志系统
+
+- **结构化日志**：JSON/Pretty 格式支持
+- **多 Transport**：控制台 + 文件同时输出
+- **中间件链**：可插拔日志处理中间件
+- **敏感字段脱敏**：自动过滤 API Key 等敏感信息
+- **异步写入**：非阻塞日志写入，高性能
+- **上下文追踪**：自动注入 sessionId、toolName 等上下文
 
 ---
 
@@ -95,12 +119,12 @@ Coding Agent 是一个生产级的 AI 编码助手框架，采用**协调器模�
 
 ```typescript
 import { Agent } from './src/agent-v2';
-import { createGLMProvider } from './src/providers';
+import { createKimiProvider } from './src/providers';
 
 // 创建 Provider
-const provider = createGLMProvider({
-  apiKey: process.env.GLM_API_KEY!,
-  model: 'glm-4-plus',
+const provider = createKimiProvider({
+  apiKey: process.env.KIMI_API_KEY!,
+  model: 'moonshot-v1-128k',
 });
 
 // 创建 Agent
@@ -132,7 +156,7 @@ const provider = createKimiProvider({
 // 创建工具注册表
 const toolRegistry = createDefaultToolRegistry({
   workingDirectory: process.cwd(),
-});
+}, provider);
 
 // 创建持久化存储
 const memoryManager = new FileMemoryManager({
@@ -156,6 +180,22 @@ const agent = new Agent({
 const result = await agent.execute(
   '请读取 package.json 文件并告诉我项目的依赖有哪些'
 );
+```
+
+### 使用 ProviderRegistry（推荐）
+
+```typescript
+import { ProviderRegistry } from './src/providers';
+
+// 从环境变量创建 Provider
+const provider = ProviderRegistry.createFromEnv('glm-4.7');
+
+const agent = new Agent({
+  provider,
+  systemPrompt: '你是一个有帮助的助手',
+});
+
+const result = await agent.execute('你好');
 ```
 
 ---
@@ -183,17 +223,17 @@ npm install
 
 ```env
 # GLM (智谱)
-GLM_API_KEY=your_glm_api_key
+GLM_API_KEY=your_api_key
 
 # Kimi (月之暗面)
-KIMI_API_KEY=your_kimi_api_key
+KIMI_API_KEY=your_api_key
 
 # MiniMax
-MINIMAX_API_KEY=your_minimax_api_key
+MINIMAX_API_KEY=your_api_key
 MINIMAX_GROUP_ID=your_group_id
 
 # Tavily (Web 搜索)
-TAVILY_API_KEY=your_tavily_api_key
+TAVILY_API_KEY=your_api_key
 ```
 
 ---
@@ -205,18 +245,16 @@ TAVILY_API_KEY=your_tavily_api_key
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                    表现层 (Presentation)                         │
-│                    - CLI (React TUI) / Web UI / API              │
+│              CLI (React TUI) / Web UI / API                      │
 ├─────────────────────────────────────────────────────────────────┤
 │                    应用层 (Application)                          │
-│                    - Agent 协调器 / Session 会话管理              │
+│              Agent 协调器 / Session 会话管理                      │
 ├─────────────────────────────────────────────────────────────────┤
 │                    领域层 (Domain)                               │
-│                    - Tool 工具系统 / Skill 技能系统               │
-│                    - Truncation 截断 / Compaction 压缩           │
+│         Tool 工具系统 / Truncation 截断 / Compaction 压缩        │
 ├─────────────────────────────────────────────────────────────────┤
 │                    基础设施层 (Infrastructure)                    │
-│                    - Memory 存储 / Provider LLM 适配             │
-│                    - EventBus 事件 / HTTP Client                 │
+│         Memory 存储 / Provider LLM 适配 / EventBus 事件          │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -275,14 +313,123 @@ TAVILY_API_KEY=your_tavily_api_key
 | 组件 | 职责 |
 |------|------|
 | **Agent** | 协调器，管理任务生命周期，协调各组件工作 |
-| **LLMCaller** | 封装 LLM 调用逻辑，处理流式响应 |
-| **ToolExecutor** | 工具执行调度，超时控制，结果处理 |
-| **Session** | 消息管理，上下文压缩，持久化触发 |
+| **LLMCaller** | 封装 LLM 调用逻辑，处理流式响应，响应验证 |
+| **ToolExecutor** | 工具执行调度，超时控制，结果处理，截断中间件 |
+| **Session** | 消息管理，上下文压缩，持久化触发，工具协议修复 |
 | **AgentState** | Agent 状态机，循环/重试计数，abort 控制 |
 | **EventBus** | 事件发布订阅，组件间解耦通信 |
 | **MemoryManager** | 持久化存储抽象，会话数据管理，多后端支持 |
+| **Logger** | 结构化日志，多 Transport，中间件链，敏感字段脱敏 |
 
-### ReAct 引擎
+### 设计模式
+
+| 设计模式 | 应用位置 | 目的 |
+|----------|----------|------|
+| **协调器模式** | Agent | 组件组合与协调 |
+| **状态机模式** | AgentState, StreamProcessor | 状态转换管理 |
+| **策略模式** | Truncation Strategies | 可替换截断策略 |
+| **工厂模式** | ProviderFactory, createMemoryManager | 对象创建封装 |
+| **适配器模式** | Provider Adapters, Memory Adapters | 接口转换 |
+| **模板方法** | BaseTool | 工具骨架定义 |
+| **发布订阅** | EventBus | 事件解耦 |
+
+---
+
+## 核心组件
+
+### Agent 协调器
+
+Agent 是系统的核心协调器，负责：
+
+1. **任务生命周期管理**：启动、执行、完成、失败
+2. **组件协调**：协调 LLMCaller、ToolExecutor、Session 等组件
+3. **错误处理**：错误分类、重试决策、失败处理
+4. **事件发射**：通过 EventBus 和 Emitter 发布事件
+
+```typescript
+const agent = new Agent({
+  provider,           // LLM Provider（必需）
+  systemPrompt,       // 系统提示词
+  toolRegistry,       // 工具注册表
+  memoryManager,      // 持久化存储
+  stream: true,       // 启用流式输出
+  maxLoops: 100,      // 最大循环次数
+  maxRetries: 5,      // 最大重试次数
+});
+```
+
+### Session 会话管理
+
+Session 管理对话上下文：
+
+```typescript
+const session = new Session({
+  systemPrompt: '你是一个助手',
+  memoryManager,      // 可选，启用持久化
+  sessionId,          // 可选，恢复已有会话
+  enableCompaction: true,
+  compactionConfig: {
+    maxTokens: 100000,
+    compactionRatio: 0.3,
+  },
+});
+```
+
+**核心功能：**
+- 消息增删改查
+- 持久化到 MemoryManager
+- 自动上下文压缩
+- 工具调用协议修复
+
+### ToolRegistry 工具注册表
+
+管理工具的注册与执行：
+
+```typescript
+const registry = new ToolRegistry({
+  workingDirectory: process.cwd(),
+  toolTimeout: 300000, // 5 分钟超时
+});
+
+// 注册工具
+registry.register([new BashTool(), new ReadFileTool()]);
+
+// 执行工具
+const results = await registry.execute(toolCalls, {
+  sessionId: 'session-123',
+  memoryManager,
+});
+```
+
+### Logger 日志系统
+
+企业级日志系统：
+
+```typescript
+import { createLogger } from './src/agent-v2/logger';
+
+const logger = createLogger({
+  level: 'info',
+  console: {
+    enabled: true,
+    format: 'pretty',
+    colorize: true,
+  },
+  file: {
+    enabled: true,
+    filepath: './logs/app.log',
+    format: 'json',
+  },
+  sensitiveFields: ['apiKey', 'password', 'token'],
+});
+
+logger.info('Agent started', { sessionId: '123' });
+logger.error('Tool failed', error, { toolName: 'bash' });
+```
+
+---
+
+## ReAct 工作流程
 
 项目实现了 **ReAct (Reasoning + Acting)** 范式：
 
@@ -317,116 +464,27 @@ TAVILY_API_KEY=your_tavily_api_key
 └─────────────────────────────────────────────────────────┘
 ```
 
-### 设计模式
-
-| 设计模式 | 应用位置 | 目的 |
-|----------|----------|------|
-| **协调器模式** | Agent | 组件组合与协调 |
-| **状态机模式** | AgentState, StreamProcessor | 状态转换管理 |
-| **策略模式** | Truncation Strategies | 可替换截断策略 |
-| **工厂模式** | ProviderFactory, createMemoryManager | 对象创建封装 |
-| **适配器模式** | Provider Adapters, Memory Adapters | 接口转换 |
-| **模板方法** | BaseTool | 工具骨架定义 |
-| **发布订阅** | EventBus | 事件解耦 |
-
-### 执行流程
-
-```
-用户输入 (execute)
-    │
-    ▼
-┌─────────────────────────────────────────────────────────┐
-│                    runLoop() 主循环                      │
-│  ┌─────────────────────────────────────────────────┐   │
-│  │ while (true) {                                   │   │
-│  │   1. 检查中止/完成/重试/循环状态                  │   │
-│  │   2. [THINKING] executeLLMCall()                │   │
-│  │   3. 处理响应：                                   │   │
-│  │      ├─ 文本响应 → 检查完成                      │   │
-│  │      └─ 工具调用 → 执行工具 → 继续循环           │   │
-│  │   4. 错误处理与重试                              │   │
-│  │ }                                                │   │
-│  └─────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────┘
-    │
-    ▼
-┌──────────────────┐
-│ 返回最终消息/结果 │
-└──────────────────┘
-```
-
----
-
-## 核心概念
-
-### Agent
-
-Agent 是系统的核心协调器，负责：
-
-1. **任务生命周期管理**：启动、执行、完成、失败
-2. **组件协调**：协调 LLMCaller、ToolExecutor、Session 等组件
-3. **错误处理**：错误分类、重试决策、失败处理
-4. **事件发射**：通过 EventBus 和 Emitter 发布事件
+### 主循环伪代码
 
 ```typescript
-const agent = new Agent({
-  provider,           // LLM Provider（必需）
-  systemPrompt,       // 系统提示词
-  toolRegistry,       // 工具注册表
-  memoryManager,      // 持久化存储
-  stream: true,       // 启用流式输出
-  maxLoops: 100,      // 最大循环次数
-  maxRetries: 5,      // 最大重试次数
-});
-```
-
-### Session
-
-Session 管理对话上下文：
-
-```typescript
-// Session 自动由 Agent 创建，也可以手动管理
-const session = new Session({
-  systemPrompt: '你是一个助手',
-  memoryManager,      // 可选，启用持久化
-  sessionId,          // 可选，恢复已有会话
-  enableCompaction: true,
-  compactionConfig: {
-    maxTokens: 100000,
-    compactionRatio: 0.3,
-  },
-});
-```
-
-### Tool
-
-工具是 Agent 与外部世界交互的桥梁：
-
-```typescript
-// 使用默认工具集
-const toolRegistry = createDefaultToolRegistry({
-  workingDirectory: process.cwd(),
-});
-
-// 自定义工具
-class MyCustomTool extends BaseTool {
-  name = 'my_custom_tool';
-  description = '我的自定义工具';
+while (task not complete) {
+  // 1. 思考阶段
+  response = LLM(messages, tools)
   
-  schema = z.object({
-    input: z.string().describe('输入参数'),
-  });
-
-  async execute(params: { input: string }): Promise<ToolResult> {
-    return {
-      success: true,
-      output: `处理结果: ${params.input}`,
-    };
+  if (response.tool_calls) {
+    // 2. 行动阶段：执行工具
+    results = executeTools(response.tool_calls)
+    addObservation(results)
+  } else {
+    // 3. 完成：返回最终答案
+    return response.content
+  }
+  
+  // 4. 错误处理与重试
+  if (error and retryable) {
+    retryWithBackoff()
   }
 }
-
-// 注册自定义工具
-toolRegistry.register(new MyCustomTool());
 ```
 
 ---
@@ -461,6 +519,8 @@ constructor(config: AgentOptions)
 | `compactionConfig` | `Partial<CompactionConfig>` | ❌ | - | 压缩配置 |
 | `thinking` | `boolean` | ❌ | `false` | 启用 thinking 模式 |
 | `maxBufferSize` | `number` | ❌ | `100000` | 流式缓冲区大小 |
+| `logger` | `Logger` | ❌ | 默认日志器 | 日志器实例 |
+| `enableEventLogging` | `boolean` | ❌ | `true` | 启用事件日志 |
 
 #### 方法
 
@@ -474,13 +534,6 @@ async execute(
   options?: LLMGenerateOptions
 ): Promise<Message>
 ```
-
-**参数：**
-- `query`: 用户输入，可以是字符串或结构化内容
-- `options`: 可选的 LLM 生成选项
-
-**返回：**
-- 最终的助手消息
 
 **示例：**
 
@@ -518,18 +571,6 @@ interface AgentExecutionResult {
 }
 ```
 
-**示例：**
-
-```typescript
-const result = await agent.executeWithResult('分析代码');
-
-if (result.status === 'completed') {
-  console.log('成功:', result.finalMessage?.content);
-} else if (result.status === 'failed') {
-  console.log('失败:', result.failure?.userMessage);
-}
-```
-
 ##### abort()
 
 中止正在执行的任务。
@@ -538,13 +579,12 @@ if (result.status === 'completed') {
 abort(): void
 ```
 
-##### on() / off()
+##### close()
 
-订阅/取消订阅事件。
+关闭 Agent，释放资源。
 
 ```typescript
-on(type: EventType, listener: (data: unknown) => void): void
-off(type: EventType, listener: (data: unknown) => void): void
+async close(): Promise<void>
 ```
 
 ##### 状态查询方法
@@ -555,6 +595,7 @@ getMessages(): Message[]        // 获取所有消息
 getSessionId(): string          // 获取会话 ID
 getLoopCount(): number          // 获取循环次数
 getRetryCount(): number         // 获取重试次数
+getTokenInfo()                  // 获取 Token 使用情况
 ```
 
 ### AgentStatus 枚举
@@ -582,7 +623,7 @@ enum AgentStatus {
 执行 Shell 命令。
 
 ```typescript
-// 工具名称: bash
+// 工具名称：bash
 // 参数:
 {
   command: string;      // 要执行的命令
@@ -596,7 +637,7 @@ enum AgentStatus {
 读取文件内容。
 
 ```typescript
-// 工具名称: read_file
+// 工具名称：read_file
 // 参数:
 {
   filePath: string;     // 文件路径
@@ -610,7 +651,7 @@ enum AgentStatus {
 写入文件。
 
 ```typescript
-// 工具名称: write_file
+// 工具名称：write_file
 // 参数:
 {
   filePath: string;     // 文件路径
@@ -623,7 +664,7 @@ enum AgentStatus {
 精确的文本替换编辑。
 
 ```typescript
-// 工具名称: precise_replace
+// 工具名称：precise_replace
 // 参数:
 {
   filePath: string;     // 文件路径
@@ -638,7 +679,7 @@ enum AgentStatus {
 批量文本替换。
 
 ```typescript
-// 工具名称: batch_replace
+// 工具名称：batch_replace
 // 参数:
 {
   filePath: string;
@@ -655,7 +696,7 @@ enum AgentStatus {
 基于正则的代码搜索。
 
 ```typescript
-// 工具名称: grep
+// 工具名称：grep
 // 参数:
 {
   pattern: string;      // 正则模式
@@ -671,7 +712,7 @@ enum AgentStatus {
 文件模式匹配。
 
 ```typescript
-// 工具名称: glob
+// 工具名称：glob
 // 参数:
 {
   pattern: string;      // Glob 模式
@@ -684,7 +725,7 @@ enum AgentStatus {
 网络搜索。
 
 ```typescript
-// 工具名称: web_search
+// 工具名称：web_search
 // 参数:
 {
   query: string;        // 搜索查询
@@ -697,7 +738,7 @@ enum AgentStatus {
 网页内容抓取。
 
 ```typescript
-// 工具名称: web_fetch
+// 工具名称：web_fetch
 // 参数:
 {
   url: string;          // 网页 URL
@@ -711,7 +752,7 @@ enum AgentStatus {
 语言服务器协议支持。
 
 ```typescript
-// 工具名称: lsp
+// 工具名称：lsp
 // 参数:
 {
   operation: 'goToDefinition' | 'findReferences' | 'hover' | 
@@ -758,7 +799,6 @@ class DatabaseQueryTool extends BaseTool<typeof MySchema> {
 
   async execute(params: { sql: string; limit?: number }): Promise<ToolResult> {
     try {
-      // 执行查询逻辑
       const results = await this.runQuery(params.sql, params.limit);
       
       return {
@@ -803,6 +843,7 @@ const session = new Session({
   compactionConfig: {
     maxTokens: 100000,     // 触发压缩的 token 阈值
     compactionRatio: 0.3,  // 压缩后保留的比例
+    llmProvider: provider, // 用于压缩的 LLM
   },
 });
 
@@ -838,7 +879,6 @@ const session = new Session({
 });
 
 // 压缩会在 LLM 调用前自动触发
-// 你也可以手动触发
 await session.compactBeforeLLMCall();
 ```
 
@@ -925,12 +965,86 @@ interface IMemoryManager {
   loadSession(sessionId: string): Promise<SessionData | null>;
   deleteSession(sessionId: string): Promise<void>;
   listSessions(filter?: SessionFilter): Promise<SessionData[]>;
-  // ... 更多方法
 }
 
 class RedisMemoryManager implements IMemoryManager {
   // 实现接口方法
 }
+```
+
+---
+
+## 日志系统
+
+### 创建日志器
+
+```typescript
+import { createLogger, getLogger } from './src/agent-v2/logger';
+
+// 获取默认日志器
+const logger = getLogger();
+
+// 创建自定义日志器
+const customLogger = createLogger({
+  level: 'info',
+  console: {
+    enabled: true,
+    format: 'pretty',
+    colorize: true,
+    timestamp: true,
+  },
+  file: {
+    enabled: true,
+    filepath: './logs/app.log',
+    format: 'json',
+    rotation: {
+      maxSize: '10MB',
+      maxFiles: 5,
+    },
+  },
+  sensitiveFields: ['apiKey', 'password', 'token', 'secret'],
+  defaultContext: {
+    app: 'coding-agent',
+    version: '2.0.0',
+  },
+});
+```
+
+### 日志级别
+
+```typescript
+logger.trace('详细追踪信息');
+logger.debug('调试信息', { sessionId: '123' });
+logger.info('普通信息', { toolName: 'bash' }, { duration: 100 });
+logger.warn('警告信息');
+logger.error('错误信息', error, { toolName: 'bash' });
+logger.fatal('致命错误', error);
+```
+
+### 子日志器
+
+```typescript
+const agentLogger = logger.child('agent');
+agentLogger.info('Agent started');
+
+const toolLogger = agentLogger.child('tools');
+toolLogger.debug('Tool executing');
+```
+
+### 中间件
+
+```typescript
+// 添加自定义中间件
+logger.use((record, next) => {
+  // 添加请求 ID
+  record.context.requestId = generateRequestId();
+  next();
+});
+
+// 敏感字段脱敏（内置）
+const logger = createLogger({
+  sensitiveFields: ['apiKey', 'password'],
+});
 ```
 
 ---
@@ -952,7 +1066,7 @@ agent.on(EventType.TASK_START, (data) => {
 });
 
 agent.on(EventType.TASK_PROGRESS, (data) => {
-  console.log(`进度: 循环 ${data.loopCount}`);
+  console.log(`进度：循环 ${data.loopCount}`);
 });
 
 agent.on(EventType.TASK_SUCCESS, (data) => {
@@ -1022,19 +1136,19 @@ const agent = new Agent({
         process.stderr.write(`[思考] ${msg.content}`);
         break;
       case 'tool-call-created':
-        console.log(`\n调用工具: ${msg.toolCalls.map(t => t.name).join(', ')}`);
+        console.log(`\n调用工具：${msg.toolCalls.map(t => t.name).join(', ')}`);
         break;
       case 'tool-call-result':
-        console.log(`工具结果: ${msg.status}`);
+        console.log(`工具结果：${msg.status}`);
         break;
       case 'usage':
-        console.log(`Token 使用: ${msg.usage.total_tokens}`);
+        console.log(`Token 使用：${msg.usage.total_tokens}`);
         break;
       case 'status':
-        console.log(`状态: ${msg.status} - ${msg.message}`);
+        console.log(`状态：${msg.status} - ${msg.message}`);
         break;
       case 'error':
-        console.error(`错误: ${msg.message}`);
+        console.error(`错误：${msg.message}`);
         break;
     }
   },
@@ -1051,11 +1165,11 @@ const agent = new Agent({
 
 | Provider | 模型示例 | 特性 |
 |----------|----------|------|
-| GLM (智谱) | glm-4.7, glm-5 | 支持工具调用，长上下文 |
-| Kimi (月之暗面) | kimi-k2.5 | 长上下文，thinking 模式 |
-| MiniMax | minimax-2.5 | 支持工具调用 |
-| DeepSeek | deepseek-chat | 高性价比 |
-| Qwen (通义千问) | qwen3.5-plus | 支持工具调用 |
+| GLM (智谱) | glm-4.7, glm-5 | 支持工具调用，长上下文，高性价比 |
+| Kimi (月之暗面) | kimi-k2.5, moonshot-v1 | 超长上下文 (128K+), thinking 模式 |
+| MiniMax | minimax-2.5, abab6.5 | 支持工具调用，多模态理解 |
+| DeepSeek | deepseek-chat, deepseek-coder | 代码能力优秀，极低价格 |
+| Qwen (通义千问) | qwen3.5-plus, qwen-max | 支持工具调用，多语言支持 |
 
 ### 使用 ProviderRegistry（推荐）
 
@@ -1086,7 +1200,7 @@ import {
 const glmProvider = createGLMProvider({
   apiKey: process.env.GLM_API_KEY!,
   model: 'glm-4-plus',
-  timeout: 60000,         // 请求超时
+  timeout: 60000,
   baseURL: 'https://open.bigmodel.cn/api/paas/v4',
 });
 
@@ -1103,32 +1217,6 @@ const miniMaxProvider = createMiniMaxProvider({
   groupId: process.env.MINIMAX_GROUP_ID!,
   model: 'abab6.5s-chat',
 });
-```
-
-### Provider 接口
-
-```typescript
-interface LLMProvider {
-  // 获取模型信息
-  getModel(): string;
-  
-  // 获取超时设置
-  getTimeTimeout(): number;
-  
-  // 生成响应
-  generate(
-    messages: Message[],
-    tools?: ToolDefinition[],
-    options?: LLMGenerateOptions
-  ): Promise<LLMResponse>;
-  
-  // 流式生成
-  generateStream?(
-    messages: Message[],
-    tools?: ToolDefinition[],
-    options?: LLMGenerateOptions
-  ): AsyncIterable<LLMStreamChunk>;
-}
 ```
 
 ### 自定义 Provider
@@ -1158,7 +1246,6 @@ class MyCustomProvider implements LLMProvider {
     tools?: ToolDefinition[],
     options?: LLMGenerateOptions
   ): Promise<LLMResponse> {
-    // 实现 API 调用
     const response = await fetch('https://api.example.com/v1/chat', {
       method: 'POST',
       headers: {
@@ -1202,6 +1289,7 @@ bun run src/cli/run.tsx
 - **流式输出**：实时显示 Agent 响应
 - **工具调用展示**：显示工具调用过程和结果
 - **会话管理**：支持新建/恢复会话
+- **React TUI**：美观的终端用户界面
 
 ---
 
@@ -1255,6 +1343,7 @@ const agent = new Agent({
   maxRetries: 5,
   retryDelayMs: 3000,
   requestTimeout: 60000,
+  idleTimeout: 180000,
   
   // 流式配置
   stream: true,
@@ -1268,6 +1357,9 @@ const agent = new Agent({
     maxTokens: 100000,
     compactionRatio: 0.3,
   },
+  
+  // 日志配置
+  enableEventLogging: true,
   
   // 特殊模式
   thinking: true,  // Kimi 的 thinking 模式
@@ -1297,13 +1389,16 @@ coding-agent/
 │   │   ├── session/        # 会话管理
 │   │   ├── memory/         # 持久化存储
 │   │   ├── tool/           # 工具系统
+│   │   ├── logger/         # 日志系统
 │   │   ├── eventbus/       # 事件总线
-│   │   ├── prompts/        # 提示词模板
+│   │   ├── truncation/     # 截断模块
 │   │   └── util/           # 工具函数
 │   ├── providers/          # LLM Provider 层
+│   │   ├── adapters/       # Provider 适配器
+│   │   ├── http/           # HTTP 客户端
+│   │   └── registry/       # Provider 注册表
 │   ├── agent-chat-react/   # React Hooks
 │   └── cli/                # CLI 应用
-├── apps/                   # Monorepo 应用
 ├── data/                   # 运行时数据
 ├── test-agent/            # 测试适配器
 └── typescript/            # TypeScript 练习
@@ -1333,6 +1428,18 @@ pnpm lint
 # 代码检查并修复
 pnpm lint:fix
 
+# 格式检查
+pnpm format:check
+
+# 格式修复
+pnpm format
+
+# 类型检查
+pnpm typecheck
+
+# 完整 CI 检查
+pnpm ci:check
+
 # 运行 CLI
 pnpm cli
 ```
@@ -1343,7 +1450,8 @@ pnpm cli
 
 - **TypeScript 严格模式**：启用所有严格类型检查
 - **ESLint**：代码规范检查
-- **Vitest**：单元测试
+- **Prettier**：代码格式化
+- **Vitest**：单元测试（1200+ 测试用例）
 
 ### 添加新工具
 
@@ -1399,8 +1507,9 @@ src/agent-v2/
 ├── agent/
 │   ├── agent.core-logic.test.ts    # 核心逻辑测试
 │   ├── agent.deep.test.ts          # 深度测试
-│   ├── stream-processor.test.ts    # 流式处理测试
-│   └── ...
+│   ├── agent.errors.test.ts        # 错误处理测试
+│   ├── agent.retry.test.ts         # 重试机制测试
+│   └── stream-processor.test.ts    # 流式处理测试
 ├── session/
 │   ├── session.compaction.test.ts  # 压缩测试
 │   ├── session.persistence.test.ts # 持久化测试
@@ -1502,6 +1611,31 @@ const agent = new Agent({
 });
 ```
 
+### Q: 如何查看 Token 使用情况？
+
+A: 使用 getTokenInfo 方法：
+
+```typescript
+const tokenInfo = agent.getTokenInfo();
+console.log('Estimated tokens:', tokenInfo.estimatedTotal);
+```
+
+### Q: 如何配置日志输出？
+
+A: 创建自定义日志器并传递给 Agent：
+
+```typescript
+const logger = createLogger({
+  level: 'debug',
+  file: { enabled: true, filepath: './logs/agent.log' },
+});
+
+const agent = new Agent({
+  provider,
+  logger,
+});
+```
+
 ---
 
 ## 贡献指南
@@ -1518,7 +1652,7 @@ const agent = new Agent({
 
 1. Fork 本仓库
 2. 创建特性分支 (`git checkout -b feature/amazing-feature`)
-3. 提交更改 (`git commit -m 'Add amazing feature'`)
+3. 提交更改 (`git commit -m 'feat: add amazing feature'`)
 4. 推送到分支 (`git push origin feature/amazing-feature`)
 5. 创建 Pull Request
 
@@ -1527,42 +1661,79 @@ const agent = new Agent({
 - 遵循 ESLint 规则
 - 为新功能添加测试
 - 更新相关文档
+- 运行完整 CI 检查：`pnpm ci:check`
+
+### Commit Message 规范
+
+使用 [Conventional Commits](https://www.conventionalcommits.org/) 格式：
+
+```
+<type>(<scope>): <subject>
+
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+```
+
+**Type 类型：**
+- `feat` - 新功能
+- `fix` - Bug 修复
+- `docs` - 文档更新
+- `style` - 代码格式
+- `refactor` - 代码重构
+- `test` - 测试相关
+- `chore` - 构建/工具相关
 
 ---
 
 ## 更新日志
 
-### v1.0.0 (当前版本)
+### v2.0.0 (当前版本)
+
+**新增功能**
+- ✅ 企业级日志系统：结构化日志、多 Transport、中间件链、敏感字段脱敏
+- ✅ 流式响应智能恢复：检测流式中断，自动恢复响应
+- ✅ 多 Agent 协同分析：子 Agent 任务委托，事件冒泡机制
+- ✅ Plan 模式只读工具白名单：安全的规划模式
+
+**核心改进**
+- ✅ ReAct 引擎优化：Reasoning + Acting 循环，智能决策
+- ✅ 工具协议修复：自动修复中断的工具调用
+- ✅ 上下文压缩增强：8 章节结构化摘要
+- ✅ 错误处理统一：智能错误分类，指数退避重试
+
+**测试覆盖**
+- ✅ 1200+ 单元测试
+- ✅ 核心逻辑全面覆盖
+- ✅ 边界条件测试
+
+### v1.0.0
 
 **核心架构**
-- ✅ ReAct 引擎：Reasoning + Acting 循环，智能决策与执行
-- ✅ 协调器模式：Agent 作为协调器，委托给专业组件
-- ✅ 分层架构：表现层 → 应用层 → 领域层 → 基础设施层
-- ✅ 端口与适配器：Memory 和 Provider 层六边形架构
+- ✅ ReAct 引擎
+- ✅ 协调器模式
+- ✅ 分层架构
+- ✅ 六边形架构
 
 **Agent 核心**
-- ✅ 状态机管理：IDLE → RUNNING → COMPLETED 状态流转
-- ✅ 流式处理：reasoning/content 分离处理
-- ✅ 响应验证：实时检测模型幻觉、重复模式
-- ✅ 自动重试：智能错误分类，指数退避
-- ✅ 上下文压缩：8 章节结构化摘要
+- ✅ 状态机管理
+- ✅ 流式处理
+- ✅ 响应验证
+- ✅ 自动重试
+- ✅ 上下文压缩
 
 **工具系统**
-- ✅ 16+ 内置工具：文件、搜索、执行、Web、LSP、任务管理
-- ✅ 模板方法模式：BaseTool 工具骨架
+- ✅ 16+ 内置工具
+- ✅ 模板方法模式
 - ✅ 超时控制 + 截断中间件
-- ✅ Plan 模式只读工具白名单
 
 **Provider 层**
-- ✅ 多 LLM 支持：GLM、Kimi、MiniMax、DeepSeek、Qwen
-- ✅ 适配器模式：StandardAdapter、KimiAdapter
+- ✅ 多 LLM 支持
+- ✅ 适配器模式
 - ✅ 流式 SSE 解析
-- ✅ 多层超时控制
 
 **存储系统**
-- ✅ 多后端支持：File、MongoDB、Hybrid
-- ✅ 会话恢复：通过 sessionId 恢复历史会话
-- ✅ 压缩记录：保存压缩历史，支持回溯
+- ✅ 多后端支持
+- ✅ 会话恢复
+- ✅ 压缩记录
 
 ---
 
@@ -1576,8 +1747,8 @@ const agent = new Agent({
 
 如有问题或建议，请通过以下方式联系：
 
-- 提交 GitHub Issue
-- 发送邮件至项目维护者
+- 提交 [GitHub Issue](https://github.com/wangrenren611/coding-agent/issues)
+- 查看 [项目仓库](https://github.com/wangrenren611/coding-agent)
 
 ---
 

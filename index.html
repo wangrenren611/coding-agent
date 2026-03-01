@@ -4,12 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Coding Agent - 企业级 AI 编码助手框架</title>
-  <meta name="description" content="基于 TypeScript 构建的多模态 LLM Agent 系统，提供 16+ 内置工具、流式输出、智能重试等企业级功能">
+  <meta name="description" content="基于 TypeScript 构建的多模态 LLM Agent 系统，采用协调器模式和 ReAct 范式，提供 16+ 内置工具、流式输出、智能重试等企业级功能">
+  <meta name="keywords" content="AI, Agent, LLM, TypeScript, 编码助手，ReAct, 协调器模式">
 
   <!-- Google Fonts - Inter -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 
   <!-- Font Awesome -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
@@ -22,6 +23,7 @@
         extend: {
           fontFamily: {
             sans: ['Inter', 'system-ui', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
           },
           colors: {
             dark: {
@@ -34,8 +36,24 @@
               300: '#666666',
               200: '#888888',
               100: '#aaaaaa',
+            },
+            accent: {
+              blue: '#3b82f6',
+              purple: '#8b5cf6',
+              green: '#10b981',
+              orange: '#f59e0b',
             }
           },
+          animation: {
+            'float': 'float 6s ease-in-out infinite',
+            'pulse-slow': 'pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+          },
+          keyframes: {
+            float: {
+              '0%, 100%': { transform: 'translateY(0)' },
+              '50%': { transform: 'translateY(-20px)' },
+            }
+          }
         }
       }
     }
@@ -59,9 +77,29 @@
       border: 1px solid rgba(255, 255, 255, 0.08);
     }
 
+    .glass-strong {
+      background: rgba(255, 255, 255, 0.08);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+    }
+
     /* 渐变文字 */
     .gradient-text {
       background: linear-gradient(135deg, #ffffff 0%, #a5a5a5 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .gradient-text-blue {
+      background: linear-gradient(135deg, #60a5fa 0%, #a78bfa 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .gradient-text-purple {
+      background: linear-gradient(135deg, #c084fc 0%, #6366f1 100%);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       background-clip: text;
@@ -77,6 +115,7 @@
     .btn-primary:hover {
       background: #e5e5e5;
       transform: translateY(-2px);
+      box-shadow: 0 10px 40px rgba(255, 255, 255, 0.2);
     }
 
     /* 代码窗口样式 */
@@ -109,6 +148,14 @@
     .window-dot.yellow { background: #ffbd2e; }
     .window-dot.green { background: #27ca40; }
 
+    /* 语法高亮 */
+    .token-keyword { color: #c678dd; }
+    .token-function { color: #61afef; }
+    .token-string { color: #98c379; }
+    .token-comment { color: #5c6370; }
+    .token-variable { color: #e5c07b; }
+    .token-number { color: #d19a66; }
+
     /* 响应式 */
     @media (max-width: 768px) {
       .hero-title {
@@ -137,6 +184,44 @@
     .delay-200 { animation-delay: 0.2s; }
     .delay-300 { animation-delay: 0.3s; }
     .delay-400 { animation-delay: 0.4s; }
+    .delay-500 { animation-delay: 0.5s; }
+
+    /* 特性卡片悬停效果 */
+    .feature-card {
+      transition: all 0.3s ease;
+    }
+
+    .feature-card:hover {
+      transform: translateY(-8px);
+      border-color: rgba(255, 255, 255, 0.2);
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+    }
+
+    /* 流程图样式 */
+    .flow-step {
+      position: relative;
+      padding: 20px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      text-align: center;
+      transition: all 0.3s ease;
+    }
+
+    .flow-step:hover {
+      background: rgba(255, 255, 255, 0.06);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    .flow-arrow {
+      color: rgba(255, 255, 255, 0.3);
+      font-size: 24px;
+    }
+
+    /* 统计数字动画 */
+    .stat-number {
+      font-variant-numeric: tabular-nums;
+    }
   </style>
 </head>
 <body class="bg-dark-900 text-white overflow-x-hidden">
@@ -145,7 +230,7 @@
   <div class="bg-dark-800 border-b border-dark-700">
     <div class="container mx-auto px-6 py-2">
       <p class="text-center text-sm text-dark-200">
-        🎉 全新发布 v2.0 - 支持多模态理解与处理，擅长解决更复杂的编码问题
+         v2.0 全新发布 - 企业级日志系统、流式响应智能恢复、多 Agent 协同分析
       </p>
     </div>
   </div>
@@ -156,8 +241,8 @@
       <div class="flex items-center justify-between">
         <!-- Logo -->
         <div class="flex items-center space-x-3">
-          <div class="w-9 h-9 bg-white rounded-lg flex items-center justify-center">
-            <i class="fas fa-code text-dark-900 text-lg"></i>
+          <div class="w-9 h-9 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
+            <i class="fas fa-code text-white text-lg"></i>
           </div>
           <span class="text-lg font-semibold">Coding Agent</span>
         </div>
@@ -166,16 +251,17 @@
         <div class="hidden md:flex items-center space-x-8">
           <a href="#features" class="text-dark-200 hover:text-white transition-colors text-sm">功能特性</a>
           <a href="#architecture" class="text-dark-200 hover:text-white transition-colors text-sm">技术架构</a>
+          <a href="#workflow" class="text-dark-200 hover:text-white transition-colors text-sm">工作流程</a>
           <a href="#tools" class="text-dark-200 hover:text-white transition-colors text-sm">工具系统</a>
           <a href="#docs" class="text-dark-200 hover:text-white transition-colors text-sm">文档</a>
-          <a href="https://github.com" target="_blank" class="text-dark-200 hover:text-white transition-colors">
+          <a href="https://github.com/wangrenren611/coding-agent" target="_blank" class="text-dark-200 hover:text-white transition-colors">
             <i class="fab fa-github text-lg"></i>
           </a>
         </div>
 
         <!-- CTA 按钮 -->
         <div class="hidden md:block">
-          <a href="#get-started" class="bg-white text-dark-900 px-5 py-2 rounded-lg text-sm font-medium transition-all hover:bg-gray-200">
+          <a href="#get-started" class="btn-primary px-5 py-2 rounded-lg text-sm font-medium transition-all">
             开始使用
           </a>
         </div>
@@ -191,20 +277,22 @@
         <div class="flex flex-col space-y-4">
           <a href="#features" class="text-dark-200 hover:text-white transition-colors text-sm">功能特性</a>
           <a href="#architecture" class="text-dark-200 hover:text-white transition-colors text-sm">技术架构</a>
+          <a href="#workflow" class="text-dark-200 hover:text-white transition-colors text-sm">工作流程</a>
           <a href="#tools" class="text-dark-200 hover:text-white transition-colors text-sm">工具系统</a>
           <a href="#docs" class="text-dark-200 hover:text-white transition-colors text-sm">文档</a>
-          <a href="https://github.com" target="_blank" class="text-dark-200 hover:text-white transition-colors">GitHub</a>
+          <a href="https://github.com/wangrenren611/coding-agent" target="_blank" class="text-dark-200 hover:text-white transition-colors">GitHub</a>
         </div>
       </div>
     </div>
   </nav>
 
   <!-- ==================== Hero Section ==================== -->
-  <section class="relative min-h-screen flex items-center pt-16">
+  <section class="relative min-h-screen flex items-center pt-16 overflow-hidden">
     <!-- 背景装饰 -->
     <div class="absolute inset-0 overflow-hidden">
-      <div class="absolute top-1/4 left-1/4 w-[600px] h-[600px] bg-white/5 rounded-full blur-3xl"></div>
-      <div class="absolute bottom-1/4 right-1/4 w-[400px] h-[400px] bg-white/5 rounded-full blur-3xl"></div>
+      <div class="absolute top-1/4 left-1/4 w-[600px] h-[600px] bg-blue-500/10 rounded-full blur-3xl animate-pulse-slow"></div>
+      <div class="absolute bottom-1/4 right-1/4 w-[400px] h-[400px] bg-purple-500/10 rounded-full blur-3xl animate-pulse-slow" style="animation-delay: 2s;"></div>
+      <div class="absolute top-1/2 left-1/2 w-[300px] h-[300px] bg-green-500/5 rounded-full blur-3xl animate-pulse-slow" style="animation-delay: 4s;"></div>
     </div>
 
     <div class="relative z-10 container mx-auto px-6">
@@ -214,38 +302,47 @@
           <!-- 标签 -->
           <div class="inline-flex items-center space-x-2 glass rounded-full px-4 py-2 mb-8 fade-in">
             <span class="w-2 h-2 bg-green-400 rounded-full animate-pulse"></span>
-            <span class="text-sm text-dark-200">Coding Agent 大模型编码平台</span>
+            <span class="text-sm text-dark-200">Coding Agent 大模型编码平台 v2.0</span>
           </div>
 
           <!-- 主标题 -->
           <h1 class="hero-title text-5xl md:text-6xl lg:text-7xl font-bold mb-6 leading-tight fade-in delay-100">
             <span class="gradient-text">模型即服务</span><br>
-            <span class="gradient-text">创新快人一步</span>
+            <span class="gradient-text-blue">创新快人一步</span>
           </h1>
 
           <!-- 副标题 -->
           <p class="text-xl text-dark-200 mb-10 max-w-xl fade-in delay-200">
-            基于 <span class="text-white font-medium">TypeScript</span> 构建的企业级 AI 编码助手框架，
-            采用<span class="text-white font-medium">协调器模式</span>设计，提供 16+ 内置工具与生产级 AI 编码能力
+            基于 <span class="text-white font-medium">TypeScript 5.3+</span> 构建的企业级 AI 编码助手框架，
+            采用<span class="text-white font-medium">协调器模式</span>和 <span class="text-white font-medium">ReAct 范式</span>设计，
+            提供生产级的 AI 编码能力
           </p>
 
           <!-- 核心特性标签 -->
           <div class="flex flex-wrap gap-3 mb-10 fade-in delay-300">
             <div class="glass rounded-lg px-4 py-2 flex items-center space-x-2">
-              <i class="fas fa-comments text-white/60"></i>
+              <i class="fas fa-comments text-blue-400"></i>
               <span class="text-sm text-dark-200">多轮对话</span>
             </div>
             <div class="glass rounded-lg px-4 py-2 flex items-center space-x-2">
-              <i class="fas fa-toolbox text-white/60"></i>
+              <i class="fas fa-toolbox text-green-400"></i>
               <span class="text-sm text-dark-200">16+ 工具</span>
             </div>
             <div class="glass rounded-lg px-4 py-2 flex items-center space-x-2">
-              <i class="fas fa-bolt text-white/60"></i>
+              <i class="fas fa-bolt text-yellow-400"></i>
               <span class="text-sm text-dark-200">流式输出</span>
             </div>
             <div class="glass rounded-lg px-4 py-2 flex items-center space-x-2">
-              <i class="fas fa-rotate text-white/60"></i>
+              <i class="fas fa-rotate text-purple-400"></i>
               <span class="text-sm text-dark-200">智能重试</span>
+            </div>
+            <div class="glass rounded-lg px-4 py-2 flex items-center space-x-2">
+              <i class="fas fa-compress text-orange-400"></i>
+              <span class="text-sm text-dark-200">上下文压缩</span>
+            </div>
+            <div class="glass rounded-lg px-4 py-2 flex items-center space-x-2">
+              <i class="fas fa-shield text-red-400"></i>
+              <span class="text-sm text-dark-200">企业级日志</span>
             </div>
           </div>
 
@@ -255,23 +352,39 @@
               <span>开始构造</span>
               <i class="fas fa-arrow-right"></i>
             </a>
-            <a href="https://github.com" target="_blank" class="glass hover:border-white/30 px-8 py-4 rounded-lg font-semibold text-lg flex items-center justify-center space-x-2 transition-all">
+            <a href="https://github.com/wangrenren611/coding-agent" target="_blank" class="glass hover:border-white/30 px-8 py-4 rounded-lg font-semibold text-lg flex items-center justify-center space-x-2 transition-all">
               <i class="fab fa-github"></i>
               <span>查看源码</span>
             </a>
           </div>
 
+          <!-- 统计数据 -->
+          <div class="grid grid-cols-3 gap-6 mt-16 pt-8 border-t border-dark-700 fade-in delay-500">
+            <div>
+              <div class="text-3xl font-bold gradient-text stat-number">1200+</div>
+              <div class="text-dark-300 text-sm mt-1">单元测试</div>
+            </div>
+            <div>
+              <div class="text-3xl font-bold gradient-text stat-number">16+</div>
+              <div class="text-dark-300 text-sm mt-1">内置工具</div>
+            </div>
+            <div>
+              <div class="text-3xl font-bold gradient-text stat-number">5+</div>
+              <div class="text-dark-300 text-sm mt-1">LLM Provider</div>
+            </div>
+          </div>
+
           <!-- 信任背书 -->
-          <div class="mt-16 pt-8 border-t border-dark-700 fade-in delay-400">
-            <p class="text-dark-300 text-sm mb-6">深受数百万专业开发者信赖</p>
-            <div class="flex flex-wrap items-center gap-8 opacity-60">
+          <div class="mt-12 pt-8 fade-in delay-500">
+            <p class="text-dark-300 text-sm mb-4">技术栈</p>
+            <div class="flex flex-wrap items-center gap-6 opacity-70">
               <div class="flex items-center space-x-2 text-dark-200">
                 <i class="fab fa-node-js text-2xl text-green-500"></i>
-                <span class="font-medium">Node.js</span>
+                <span class="font-medium">Node.js 20+</span>
               </div>
               <div class="flex items-center space-x-2 text-dark-200">
                 <i class="fab fa-js text-2xl text-yellow-400"></i>
-                <span class="font-medium">TypeScript</span>
+                <span class="font-medium">TypeScript 5.3+</span>
               </div>
               <div class="flex items-center space-x-2 text-dark-200">
                 <i class="fas fa-vial text-2xl text-purple-400"></i>
@@ -281,13 +394,17 @@
                 <i class="fas fa-shield-halved text-2xl text-blue-400"></i>
                 <span class="font-medium">Zod</span>
               </div>
+              <div class="flex items-center space-x-2 text-dark-200">
+                <i class="fas fa-file-code text-2xl text-pink-400"></i>
+                <span class="font-medium">Pino</span>
+              </div>
             </div>
           </div>
         </div>
 
         <!-- 右侧代码窗口展示 -->
         <div class="hidden lg:block fade-in delay-200">
-          <div class="code-window">
+          <div class="code-window animate-float">
             <!-- 窗口头部 -->
             <div class="code-window-header">
               <div class="window-dots mr-4">
@@ -295,51 +412,60 @@
                 <div class="window-dot yellow"></div>
                 <div class="window-dot green"></div>
               </div>
-              <span class="text-dark-300 text-sm font-mono">agent.ts</span>
+              <span class="text-dark-300 text-sm font-mono">agent.ts - Agent 核心</span>
             </div>
             <!-- 代码内容 -->
-            <div class="p-6 font-mono text-sm">
-              <pre class="text-dark-200 overflow-x-auto"><code><span class="text-purple-400">const</span> <span class="text-blue-400">agent</span> = <span class="text-purple-400">new</span> <span class="text-yellow-400">Agent</span>({
-  provider: <span class="text-green-400">'kimi'</span>,
-  memoryManager: <span class="text-blue-400">memoryManager</span>,
+            <div class="p-6 font-mono text-sm overflow-x-auto">
+              <pre><code><span class="token-keyword">const</span> <span class="token-variable">agent</span> = <span class="token-keyword">new</span> <span class="token-function">Agent</span>({
+  <span class="token-keyword">provider</span>: <span class="token-function">createKimiProvider</span>({
+    apiKey: process.env.KIMI_API_KEY,
+    model: <span class="token-string">'moonshot-v1-128k'</span>,
+  }),
+  <span class="token-keyword">memoryManager</span>: <span class="token-variable">memoryManager</span>,
+  <span class="token-keyword">stream</span>: <span class="token-keyword">true</span>,
+  <span class="token-keyword">enableCompaction</span>: <span class="token-keyword">true</span>,
 });
 
-<span class="text-purple-400">await</span> <span class="text-blue-400">agent</span>.<span class="text-yellow-400">run</span>({
-  messages: [{
-    role: <span class="text-green-400">'user'</span>,
-    content: <span class="text-green-400">'帮我重构这个模块'</span>
-  }]
-});
+<span class="token-comment">// 执行任务</span>
+<span class="token-keyword">await</span> <span class="token-variable">agent</span>.<span class="token-function">execute</span>(<span class="token-string">'帮我重构这个模块'</span>);
 
-<span class="text-dark-300">// 多轮对话支持</span>
-<span class="text-dark-300">// 16+ 内置工具：read_file, write_file, bash, grep...</span>
-<span class="text-dark-300">// 智能上下文压缩</span>
-<span class="text-dark-300">// 流式实时输出</span></code></pre>
+<span class="token-comment">// 1200+ 测试覆盖 · 生产就绪</span></code></pre>
             </div>
           </div>
 
           <!-- 工具调用展示 -->
           <div class="code-window mt-6">
             <div class="code-window-header">
-              <span class="text-dark-300 text-sm font-mono">Tool Calls</span>
+              <span class="text-dark-300 text-sm font-mono"><i class="fas fa-terminal text-green-400 mr-2"></i>Tool Calls</span>
             </div>
             <div class="p-4 space-y-2">
               <div class="flex items-center justify-between text-sm">
                 <span class="text-dark-200"><i class="fas fa-check-circle text-green-400 mr-2"></i>read_file</span>
-                <span class="text-dark-300">src/agent/index.ts</span>
+                <span class="text-dark-300 font-mono text-xs">src/agent/index.ts</span>
               </div>
               <div class="flex items-center justify-between text-sm">
                 <span class="text-dark-200"><i class="fas fa-check-circle text-green-400 mr-2"></i>grep</span>
-                <span class="text-dark-300">pattern: "class Agent"</span>
+                <span class="text-dark-300 font-mono text-xs">pattern: "class Agent"</span>
               </div>
               <div class="flex items-center justify-between text-sm">
                 <span class="text-dark-200"><i class="fas fa-check-circle text-green-400 mr-2"></i>bash</span>
-                <span class="text-dark-300">pnpm test</span>
+                <span class="text-dark-300 font-mono text-xs">pnpm test</span>
               </div>
               <div class="flex items-center justify-between text-sm">
                 <span class="text-dark-200"><i class="fas fa-spinner text-blue-400 mr-2 animate-spin"></i>write_file</span>
-                <span class="text-dark-300">processing...</span>
+                <span class="text-dark-300 font-mono text-xs">processing...</span>
               </div>
+            </div>
+          </div>
+
+          <!-- 实时状态 -->
+          <div class="glass rounded-xl p-4 mt-6">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center space-x-3">
+                <div class="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+                <span class="text-sm text-dark-200">系统状态：正常运行</span>
+              </div>
+              <span class="text-xs text-dark-300 font-mono">v2.0.0</span>
             </div>
           </div>
         </div>
@@ -356,82 +482,118 @@
           <span class="gradient-text">强大功能 · 无限可能</span>
         </h2>
         <p class="text-xl text-dark-200 max-w-2xl mx-auto">
-          提供企业级 AI 编码所需的全部能力，让开发更高效
+          提供企业级 AI 编码所需的全部能力，让开发更高效、更可靠
         </p>
       </div>
 
       <!-- 功能网格 -->
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         <!-- 特性 1 -->
-        <div class="glass rounded-xl p-6 hover:border-white/20 transition-all group">
-          <div class="w-12 h-12 bg-white/10 rounded-lg flex items-center justify-center mb-4 group-hover:bg-white/20 transition-all">
-            <i class="fas fa-comments text-white text-xl"></i>
+        <div class="glass feature-card rounded-xl p-6">
+          <div class="w-12 h-12 bg-blue-500/20 rounded-lg flex items-center justify-center mb-4">
+            <i class="fas fa-brain text-blue-400 text-xl"></i>
           </div>
-          <h3 class="text-lg font-semibold mb-2">多轮对话支持</h3>
-          <p class="text-dark-200 text-sm">完整的对话上下文管理，支持复杂的交互式编码任务</p>
+          <h3 class="text-lg font-semibold mb-2">ReAct 推理引擎</h3>
+          <p class="text-dark-200 text-sm">Reasoning + Acting 循环执行，实现智能决策与自主行动，让 Agent 像人类一样思考和工作</p>
         </div>
 
         <!-- 特性 2 -->
-        <div class="glass rounded-xl p-6 hover:border-white/20 transition-all group">
-          <div class="w-12 h-12 bg-white/10 rounded-lg flex items-center justify-center mb-4 group-hover:bg-white/20 transition-all">
-            <i class="fas fa-toolbox text-white text-xl"></i>
+        <div class="glass feature-card rounded-xl p-6">
+          <div class="w-12 h-12 bg-green-500/20 rounded-lg flex items-center justify-center mb-4">
+            <i class="fas fa-comments text-green-400 text-xl"></i>
           </div>
-          <h3 class="text-lg font-semibold mb-2">16+ 内置工具</h3>
-          <p class="text-dark-200 text-sm">文件操作、搜索、执行、Web 工具等，覆盖开发全流程</p>
+          <h3 class="text-lg font-semibold mb-2">多轮对话支持</h3>
+          <p class="text-dark-200 text-sm">完整的对话上下文管理，支持工具调用协议修复，保持长期对话的连贯性和准确性</p>
         </div>
 
         <!-- 特性 3 -->
-        <div class="glass rounded-xl p-6 hover:border-white/20 transition-all group">
-          <div class="w-12 h-12 bg-white/10 rounded-lg flex items-center justify-center mb-4 group-hover:bg-white/20 transition-all">
-            <i class="fas fa-bolt text-white text-xl"></i>
+        <div class="glass feature-card rounded-xl p-6">
+          <div class="w-12 h-12 bg-purple-500/20 rounded-lg flex items-center justify-center mb-4">
+            <i class="fas fa-toolbox text-purple-400 text-xl"></i>
           </div>
-          <h3 class="text-lg font-semibold mb-2">流式实时输出</h3>
-          <p class="text-dark-200 text-sm">实时流式响应，即时查看 AI 思考和执行过程</p>
+          <h3 class="text-lg font-semibold mb-2">16+ 内置工具</h3>
+          <p class="text-dark-200 text-sm">文件操作、搜索、执行、Web 工具、LSP 代码智能等，覆盖开发全流程</p>
         </div>
 
         <!-- 特性 4 -->
-        <div class="glass rounded-xl p-6 hover:border-white/20 transition-all group">
-          <div class="w-12 h-12 bg-white/10 rounded-lg flex items-center justify-center mb-4 group-hover:bg-white/20 transition-all">
-            <i class="fas fa-rotate text-white text-xl"></i>
+        <div class="glass feature-card rounded-xl p-6">
+          <div class="w-12 h-12 bg-yellow-500/20 rounded-lg flex items-center justify-center mb-4">
+            <i class="fas fa-bolt text-yellow-400 text-xl"></i>
           </div>
-          <h3 class="text-lg font-semibold mb-2">智能自动重试</h3>
-          <p class="text-dark-200 text-sm">智能错误分类，自动重试可恢复错误，提高成功率</p>
+          <h3 class="text-lg font-semibold mb-2">流式实时输出</h3>
+          <p class="text-dark-200 text-sm">实时流式响应，支持 reasoning/content 分离处理，即时查看 AI 思考过程</p>
         </div>
 
         <!-- 特性 5 -->
-        <div class="glass rounded-xl p-6 hover:border-white/20 transition-all group">
-          <div class="w-12 h-12 bg-white/10 rounded-lg flex items-center justify-center mb-4 group-hover:bg-white/20 transition-all">
-            <i class="fas fa-compress text-white text-xl"></i>
+        <div class="glass feature-card rounded-xl p-6">
+          <div class="w-12 h-12 bg-orange-500/20 rounded-lg flex items-center justify-center mb-4">
+            <i class="fas fa-rotate text-orange-400 text-xl"></i>
           </div>
-          <h3 class="text-lg font-semibold mb-2">上下文压缩</h3>
-          <p class="text-dark-200 text-sm">智能压缩长对话，节省 token 消耗，支持更长上下文</p>
+          <h3 class="text-lg font-semibold mb-2">智能自动重试</h3>
+          <p class="text-dark-200 text-sm">智能错误分类，指数退避策略，自动重试可恢复错误，提高任务成功率</p>
         </div>
 
         <!-- 特性 6 -->
-        <div class="glass rounded-xl p-6 hover:border-white/20 transition-all group">
-          <div class="w-12 h-12 bg-white/10 rounded-lg flex items-center justify-center mb-4 group-hover:bg-white/20 transition-all">
-            <i class="fas fa-stop text-white text-xl"></i>
+        <div class="glass feature-card rounded-xl p-6">
+          <div class="w-12 h-12 bg-red-500/20 rounded-lg flex items-center justify-center mb-4">
+            <i class="fas fa-compress text-red-400 text-xl"></i>
           </div>
-          <h3 class="text-lg font-semibold mb-2">任务中止控制</h3>
-          <p class="text-dark-200 text-sm">随时中止正在执行的任务，灵活控制 Agent 行为</p>
+          <h3 class="text-lg font-semibold mb-2">上下文压缩</h3>
+          <p class="text-dark-200 text-sm">8 章节结构化摘要，智能压缩长对话，节省 token 消耗，支持更长上下文</p>
         </div>
 
         <!-- 特性 7 -->
-        <div class="glass rounded-xl p-6 hover:border-white/20 transition-all group">
-          <div class="w-12 h-12 bg-white/10 rounded-lg flex items-center justify-center mb-4 group-hover:bg-white/20 transition-all">
-            <i class="fas fa-plug text-white text-xl"></i>
+        <div class="glass feature-card rounded-xl p-6">
+          <div class="w-12 h-12 bg-cyan-500/20 rounded-lg flex items-center justify-center mb-4">
+            <i class="fas fa-stop text-cyan-400 text-xl"></i>
           </div>
-          <h3 class="text-lg font-semibold mb-2">多 Provider 支持</h3>
-          <p class="text-dark-200 text-sm">GLM、Kimi、MiniMax 等，灵活切换不同 LLM 服务</p>
+          <h3 class="text-lg font-semibold mb-2">任务中止控制</h3>
+          <p class="text-dark-200 text-sm">支持 abort 中断和空闲超时控制，灵活控制 Agent 行为，避免资源浪费</p>
         </div>
 
         <!-- 特性 8 -->
-        <div class="glass rounded-xl p-6 hover:border-white/20 transition-all group">
-          <div class="w-12 h-12 bg-white/10 rounded-lg flex items-center justify-center mb-4 group-hover:bg-white/20 transition-all">
-            <i class="fas fa-floppy-disk text-white text-xl"></i>
+        <div class="glass feature-card rounded-xl p-6">
+          <div class="w-12 h-12 bg-pink-500/20 rounded-lg flex items-center justify-center mb-4">
+            <i class="fas fa-plug text-pink-400 text-xl"></i>
+          </div>
+          <h3 class="text-lg font-semibold mb-2">多 Provider 支持</h3>
+          <p class="text-dark-200 text-sm">GLM、Kimi、MiniMax、DeepSeek、Qwen 等，灵活切换不同 LLM 服务</p>
+        </div>
+
+        <!-- 特性 9 -->
+        <div class="glass feature-card rounded-xl p-6">
+          <div class="w-12 h-12 bg-indigo-500/20 rounded-lg flex items-center justify-center mb-4">
+            <i class="fas fa-floppy-disk text-indigo-400 text-xl"></i>
           </div>
           <h3 class="text-lg font-semibold mb-2">持久化存储</h3>
-          <p class="text-dark-200 text-sm">会话数据持久化，支持恢复历史对话和任务状态</p>
+          <p class="text-dark-200 text-sm">会话数据持久化，支持恢复历史对话，多后端支持（File/MongoDB/Hybrid）</p>
+        </div>
+
+        <!-- 特性 10 -->
+        <div class="glass feature-card rounded-xl p-6">
+          <div class="w-12 h-12 bg-emerald-500/20 rounded-lg flex items-center justify-center mb-4">
+            <i class="fas fa-file-waveform text-emerald-400 text-xl"></i>
+          </div>
+          <h3 class="text-lg font-semibold mb-2">企业级日志</h3>
+          <p class="text-dark-200 text-sm">结构化日志、多 Transport、中间件链、敏感字段脱敏、异步写入</p>
+        </div>
+
+        <!-- 特性 11 -->
+        <div class="glass feature-card rounded-xl p-6">
+          <div class="w-12 h-12 bg-amber-500/20 rounded-lg flex items-center justify-center mb-4">
+            <i class="fas fa-heart-pulse text-amber-400 text-xl"></i>
+          </div>
+          <h3 class="text-lg font-semibold mb-2">流式响应恢复</h3>
+          <p class="text-dark-200 text-sm">智能检测流式中断，自动恢复响应，确保任务连续性</p>
+        </div>
+
+        <!-- 特性 12 -->
+        <div class="glass feature-card rounded-xl p-6">
+          <div class="w-12 h-12 bg-violet-500/20 rounded-lg flex items-center justify-center mb-4">
+            <i class="fas fa-users-gear text-violet-400 text-xl"></i>
+          </div>
+          <h3 class="text-lg font-semibold mb-2">多 Agent 协同</h3>
+          <p class="text-dark-200 text-sm">子 Agent 任务委托，事件冒泡机制，支持复杂任务的分工协作</p>
         </div>
       </div>
     </div>
@@ -443,7 +605,7 @@
       <!-- 章节标题 -->
       <div class="text-center mb-16">
         <h2 class="text-4xl md:text-5xl font-bold mb-4">
-          <span class="gradient-text">核心技术架构</span>
+          <span class="gradient-text-purple">核心技术架构</span>
         </h2>
         <p class="text-xl text-dark-200 max-w-2xl mx-auto">
           采用分层架构设计，将复杂的 Agent 逻辑分解为独立的可插拔组件
@@ -454,12 +616,12 @@
       <div class="max-w-4xl mx-auto mb-16">
         <div class="space-y-3">
           <!-- 应用层 -->
-          <div class="glass rounded-xl p-5 text-center border-white/10">
+          <div class="glass rounded-xl p-5 text-center border-white/10 hover:border-green-500/30 transition-all">
             <div class="flex items-center justify-center space-x-3 mb-1">
               <i class="fas fa-desktop text-green-400"></i>
-              <h3 class="text-base font-semibold text-white">应用层</h3>
+              <h3 class="text-base font-semibold text-white">应用层 (Presentation)</h3>
             </div>
-            <p class="text-dark-200 text-sm">CLI / Web UI / API</p>
+            <p class="text-dark-200 text-sm">CLI (React TUI) / Web UI / API / React Hooks</p>
           </div>
 
           <div class="flex justify-center">
@@ -467,12 +629,12 @@
           </div>
 
           <!-- Agent 层 -->
-          <div class="glass rounded-xl p-5 text-center border-white/10">
+          <div class="glass rounded-xl p-5 text-center border-white/10 hover:border-blue-500/30 transition-all">
             <div class="flex items-center justify-center space-x-3 mb-1">
               <i class="fas fa-brain text-blue-400"></i>
-              <h3 class="text-base font-semibold text-white">Agent 层</h3>
+              <h3 class="text-base font-semibold text-white">Agent 层 (Coordination)</h3>
             </div>
-            <p class="text-dark-200 text-sm">协调器 · ReAct 引擎 · 工具注册表</p>
+            <p class="text-dark-200 text-sm">协调器 · ReAct 引擎 · 工具注册表 · 事件总线</p>
           </div>
 
           <div class="flex justify-center">
@@ -480,12 +642,12 @@
           </div>
 
           <!-- Provider 层 -->
-          <div class="glass rounded-xl p-5 text-center border-white/10">
+          <div class="glass rounded-xl p-5 text-center border-white/10 hover:border-purple-500/30 transition-all">
             <div class="flex items-center justify-center space-x-3 mb-1">
               <i class="fas fa-plug text-purple-400"></i>
-              <h3 class="text-base font-semibold text-white">Provider 层</h3>
+              <h3 class="text-base font-semibold text-white">Provider 层 (Adapter)</h3>
             </div>
-            <p class="text-dark-200 text-sm">Provider 注册表 · HTTP 客户端 · 适配器</p>
+            <p class="text-dark-200 text-sm">Provider 注册表 · HTTP 客户端 · 适配器 · 流式解析</p>
           </div>
 
           <div class="flex justify-center">
@@ -493,71 +655,228 @@
           </div>
 
           <!-- LLM 服务层 -->
-          <div class="glass rounded-xl p-5 text-center border-white/10">
+          <div class="glass rounded-xl p-5 text-center border-white/10 hover:border-orange-500/30 transition-all">
             <div class="flex items-center justify-center space-x-3 mb-1">
               <i class="fas fa-cloud text-orange-400"></i>
-              <h3 class="text-base font-semibold text-white">LLM 服务层</h3>
+              <h3 class="text-base font-semibold text-white">LLM 服务层 (Infrastructure)</h3>
             </div>
-            <p class="text-dark-200 text-sm">GLM · Kimi · MiniMax</p>
+            <p class="text-dark-200 text-sm">GLM · Kimi · MiniMax · DeepSeek · Qwen</p>
           </div>
         </div>
       </div>
 
       <!-- 核心组件 -->
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        <div class="glass rounded-xl p-6 hover:border-white/20 transition-all">
+        <div class="glass rounded-xl p-6 hover:border-blue-500/30 transition-all">
           <div class="w-10 h-10 bg-blue-500/20 rounded-lg flex items-center justify-center mb-4">
             <i class="fas fa-conductor text-blue-400"></i>
           </div>
           <h3 class="text-lg font-semibold mb-2">Agent 协调器</h3>
-          <p class="text-dark-200 text-sm">管理任务生命周期，协调各组件工作，实现 ReAct 推理引擎</p>
+          <p class="text-dark-200 text-sm">管理任务生命周期，协调各组件工作，实现 ReAct 推理引擎，状态机管理</p>
         </div>
 
-        <div class="glass rounded-xl p-6 hover:border-white/20 transition-all">
+        <div class="glass rounded-xl p-6 hover:border-green-500/30 transition-all">
           <div class="w-10 h-10 bg-green-500/20 rounded-lg flex items-center justify-center mb-4">
             <i class="fas fa-phone-volume text-green-400"></i>
           </div>
           <h3 class="text-lg font-semibold mb-2">LLMCaller</h3>
-          <p class="text-dark-200 text-sm">封装 LLM 调用逻辑，处理流式响应，支持多 Provider 适配</p>
+          <p class="text-dark-200 text-sm">封装 LLM 调用逻辑，处理流式响应，支持多 Provider 适配，响应验证</p>
         </div>
 
-        <div class="glass rounded-xl p-6 hover:border-white/20 transition-all">
+        <div class="glass rounded-xl p-6 hover:border-purple-500/30 transition-all">
           <div class="w-10 h-10 bg-purple-500/20 rounded-lg flex items-center justify-center mb-4">
             <i class="fas fa-screwdriver-wrench text-purple-400"></i>
           </div>
           <h3 class="text-lg font-semibold mb-2">ToolExecutor</h3>
-          <p class="text-dark-200 text-sm">工具执行调度，超时控制，结果处理，支持 16+ 内置工具</p>
+          <p class="text-dark-200 text-sm">工具执行调度，超时控制，结果处理，支持 16+ 内置工具，截断中间件</p>
         </div>
 
-        <div class="glass rounded-xl p-6 hover:border-white/20 transition-all">
+        <div class="glass rounded-xl p-6 hover:border-orange-500/30 transition-all">
           <div class="w-10 h-10 bg-orange-500/20 rounded-lg flex items-center justify-center mb-4">
             <i class="fas fa-comments text-orange-400"></i>
           </div>
           <h3 class="text-lg font-semibold mb-2">Session 会话管理</h3>
-          <p class="text-dark-200 text-sm">消息管理，上下文压缩，持久化触发，支持长对话处理</p>
+          <p class="text-dark-200 text-sm">消息管理，上下文压缩，持久化触发，工具协议修复，长对话处理</p>
         </div>
 
-        <div class="glass rounded-xl p-6 hover:border-white/20 transition-all">
+        <div class="glass rounded-xl p-6 hover:border-pink-500/30 transition-all">
           <div class="w-10 h-10 bg-pink-500/20 rounded-lg flex items-center justify-center mb-4">
             <i class="fas fa-broadcast-tower text-pink-400"></i>
           </div>
           <h3 class="text-lg font-semibold mb-2">EventBus 事件总线</h3>
-          <p class="text-dark-200 text-sm">组件间解耦通信，发布订阅模式，支持多种事件类型</p>
+          <p class="text-dark-200 text-sm">组件间解耦通信，发布订阅模式，支持多种事件类型，事件日志</p>
         </div>
 
-        <div class="glass rounded-xl p-6 hover:border-white/20 transition-all">
+        <div class="glass rounded-xl p-6 hover:border-cyan-500/30 transition-all">
           <div class="w-10 h-10 bg-cyan-500/20 rounded-lg flex items-center justify-center mb-4">
             <i class="fas fa-database text-cyan-400"></i>
           </div>
           <h3 class="text-lg font-semibold mb-2">MemoryManager</h3>
-          <p class="text-dark-200 text-sm">持久化存储抽象，会话数据管理，支持文件存储后端</p>
+          <p class="text-dark-200 text-sm">持久化存储抽象，会话数据管理，支持 File/MongoDB/Hybrid 后端</p>
+        </div>
+
+        <div class="glass rounded-xl p-6 hover:border-red-500/30 transition-all">
+          <div class="w-10 h-10 bg-red-500/20 rounded-lg flex items-center justify-center mb-4">
+            <i class="fas fa-file-waveform text-red-400"></i>
+          </div>
+          <h3 class="text-lg font-semibold mb-2">Logger 日志系统</h3>
+          <p class="text-dark-200 text-sm">结构化日志，多 Transport，中间件链，敏感字段脱敏，异步写入</p>
+        </div>
+
+        <div class="glass rounded-xl p-6 hover:border-yellow-500/30 transition-all">
+          <div class="w-10 h-10 bg-yellow-500/20 rounded-lg flex items-center justify-center mb-4">
+            <i class="fas fa-shield-halved text-yellow-400"></i>
+          </div>
+          <h3 class="text-lg font-semibold mb-2">Truncation 截断</h3>
+          <p class="text-dark-200 text-sm">工具输出截断，多种截断策略，防止 token 超限，保护上下文窗口</p>
+        </div>
+
+        <div class="glass rounded-xl p-6 hover:border-indigo-500/30 transition-all">
+          <div class="w-10 h-10 bg-indigo-500/20 rounded-lg flex items-center justify-center mb-4">
+            <i class="fas fa-compass text-indigo-400"></i>
+          </div>
+          <h3 class="text-lg font-semibold mb-2">Compaction 压缩</h3>
+          <p class="text-dark-200 text-sm">8 章节结构化摘要，LLM 辅助压缩，保留关键上下文，节省 token</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== 工作流程 ==================== -->
+  <section id="workflow" class="py-24 bg-dark-800 border-t border-dark-700">
+    <div class="container mx-auto px-6">
+      <!-- 章节标题 -->
+      <div class="text-center mb-16">
+        <h2 class="text-4xl md:text-5xl font-bold mb-4">
+          <span class="gradient-text-blue">ReAct 工作流程</span>
+        </h2>
+        <p class="text-xl text-dark-200 max-w-2xl mx-auto">
+          Reasoning（思考）+ Acting（行动）交替执行，实现智能决策
+        </p>
+      </div>
+
+      <!-- 流程图 -->
+      <div class="max-w-5xl mx-auto">
+        <div class="flex flex-col md:flex-row items-center justify-between gap-4 mb-8">
+          <div class="flow-step flex-1">
+            <div class="w-16 h-16 bg-blue-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+              <i class="fas fa-user text-blue-400 text-2xl"></i>
+            </div>
+            <h4 class="font-semibold mb-2">用户输入</h4>
+            <p class="text-dark-200 text-sm">提出问题或任务</p>
+          </div>
+
+          <div class="flow-arrow hidden md:block">
+            <i class="fas fa-arrow-right"></i>
+          </div>
+          <div class="flow-arrow md:hidden">
+            <i class="fas fa-arrow-down"></i>
+          </div>
+
+          <div class="flow-step flex-1">
+            <div class="w-16 h-16 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+              <i class="fas fa-brain text-green-400 text-2xl"></i>
+            </div>
+            <h4 class="font-semibold mb-2">思考 (Think)</h4>
+            <p class="text-dark-200 text-sm">LLM 分析并决策</p>
+          </div>
+
+          <div class="flow-arrow hidden md:block">
+            <i class="fas fa-arrow-right"></i>
+          </div>
+          <div class="flow-arrow md:hidden">
+            <i class="fas fa-arrow-down"></i>
+          </div>
+
+          <div class="flow-step flex-1">
+            <div class="w-16 h-16 bg-purple-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+              <i class="fas fa-toolbox text-purple-400 text-2xl"></i>
+            </div>
+            <h4 class="font-semibold mb-2">行动 (Act)</h4>
+            <p class="text-dark-200 text-sm">调用工具执行</p>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-center gap-4 mb-8">
+          <div class="flow-arrow">
+            <i class="fas fa-arrow-down"></i>
+          </div>
+        </div>
+
+        <div class="flex flex-col md:flex-row items-center justify-between gap-4">
+          <div class="flow-step flex-1">
+            <div class="w-16 h-16 bg-orange-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+              <i class="fas fa-eye text-orange-400 text-2xl"></i>
+            </div>
+            <h4 class="font-semibold mb-2">观察 (Observe)</h4>
+            <p class="text-dark-200 text-sm">获取工具执行结果</p>
+          </div>
+
+          <div class="flow-arrow hidden md:block">
+            <i class="fas fa-arrow-right"></i>
+          </div>
+          <div class="flow-arrow md:hidden">
+            <i class="fas fa-arrow-down"></i>
+          </div>
+
+          <div class="flow-step flex-1">
+            <div class="w-16 h-16 bg-pink-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+              <i class="fas fa-rotate text-pink-400 text-2xl"></i>
+            </div>
+            <h4 class="font-semibold mb-2">循环 (Loop)</h4>
+            <p class="text-dark-200 text-sm">继续思考或完成</p>
+          </div>
+
+          <div class="flow-arrow hidden md:block">
+            <i class="fas fa-arrow-right"></i>
+          </div>
+          <div class="flow-arrow md:hidden">
+            <i class="fas fa-arrow-down"></i>
+          </div>
+
+          <div class="flow-step flex-1">
+            <div class="w-16 h-16 bg-cyan-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+              <i class="fas fa-check-circle text-cyan-400 text-2xl"></i>
+            </div>
+            <h4 class="font-semibold mb-2">完成 (Done)</h4>
+            <p class="text-dark-200 text-sm">返回最终结果</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- 主循环伪代码 -->
+      <div class="max-w-3xl mx-auto mt-16">
+        <div class="code-window">
+          <div class="code-window-header">
+            <span class="text-dark-300 text-sm font-mono">ReAct 主循环伪代码</span>
+          </div>
+          <div class="p-6 font-mono text-sm overflow-x-auto">
+            <pre><code><span class="token-keyword">while</span> (task <span class="token-keyword">not</span> complete) {
+  <span class="token-comment">// 1. 思考阶段</span>
+  response = <span class="token-function">LLM</span>(messages, tools)
+  
+  <span class="token-keyword">if</span> (response.<span class="token-variable">tool_calls</span>) {
+    <span class="token-comment">// 2. 行动阶段：执行工具</span>
+    results = <span class="token-function">executeTools</span>(response.<span class="token-variable">tool_calls</span>)
+    <span class="token-function">addObservation</span>(results)
+  } <span class="token-keyword">else</span> {
+    <span class="token-comment">// 3. 完成：返回最终答案</span>
+    <span class="token-keyword">return</span> response.<span class="token-variable">content</span>
+  }
+  
+  <span class="token-comment">// 4. 错误处理与重试</span>
+  <span class="token-keyword">if</span> (error <span class="token-keyword">and</span> retryable) {
+    <span class="token-function">retryWithBackoff</span>()
+  }
+}</code></pre>
+          </div>
         </div>
       </div>
     </div>
   </section>
 
   <!-- ==================== 工具系统 ==================== -->
-  <section id="tools" class="py-24 bg-dark-800 border-t border-dark-700">
+  <section id="tools" class="py-24 bg-dark-900 border-t border-dark-700">
     <div class="container mx-auto px-6">
       <!-- 章节标题 -->
       <div class="text-center mb-16">
@@ -578,19 +897,19 @@
           </div>
           <div class="space-y-2">
             <div class="flex items-center space-x-2 text-dark-200 text-sm">
-              <code class="bg-dark-700 px-2 py-1 rounded text-xs">read_file</code>
+              <code class="bg-dark-700 px-2 py-1 rounded text-xs font-mono">read_file</code>
               <span>- 读取文件内容</span>
             </div>
             <div class="flex items-center space-x-2 text-dark-200 text-sm">
-              <code class="bg-dark-700 px-2 py-1 rounded text-xs">write_file</code>
+              <code class="bg-dark-700 px-2 py-1 rounded text-xs font-mono">write_file</code>
               <span>- 写入文件</span>
             </div>
             <div class="flex items-center space-x-2 text-dark-200 text-sm">
-              <code class="bg-dark-700 px-2 py-1 rounded text-xs">precise_replace</code>
+              <code class="bg-dark-700 px-2 py-1 rounded text-xs font-mono">precise_replace</code>
               <span>- 精确文本替换</span>
             </div>
             <div class="flex items-center space-x-2 text-dark-200 text-sm">
-              <code class="bg-dark-700 px-2 py-1 rounded text-xs">batch_replace</code>
+              <code class="bg-dark-700 px-2 py-1 rounded text-xs font-mono">batch_replace</code>
               <span>- 批量文本替换</span>
             </div>
           </div>
@@ -606,11 +925,11 @@
           </div>
           <div class="space-y-2">
             <div class="flex items-center space-x-2 text-dark-200 text-sm">
-              <code class="bg-dark-700 px-2 py-1 rounded text-xs">grep</code>
+              <code class="bg-dark-700 px-2 py-1 rounded text-xs font-mono">grep</code>
               <span>- 正则代码搜索</span>
             </div>
             <div class="flex items-center space-x-2 text-dark-200 text-sm">
-              <code class="bg-dark-700 px-2 py-1 rounded text-xs">glob</code>
+              <code class="bg-dark-700 px-2 py-1 rounded text-xs font-mono">glob</code>
               <span>- 文件模式匹配</span>
             </div>
           </div>
@@ -626,11 +945,11 @@
           </div>
           <div class="space-y-2">
             <div class="flex items-center space-x-2 text-dark-200 text-sm">
-              <code class="bg-dark-700 px-2 py-1 rounded text-xs">bash</code>
+              <code class="bg-dark-700 px-2 py-1 rounded text-xs font-mono">bash</code>
               <span>- Shell 命令执行</span>
             </div>
             <div class="flex items-center space-x-2 text-dark-200 text-sm">
-              <code class="bg-dark-700 px-2 py-1 rounded text-xs">task</code>
+              <code class="bg-dark-700 px-2 py-1 rounded text-xs font-mono">task</code>
               <span>- 子 Agent 任务</span>
             </div>
           </div>
@@ -646,11 +965,11 @@
           </div>
           <div class="space-y-2">
             <div class="flex items-center space-x-2 text-dark-200 text-sm">
-              <code class="bg-dark-700 px-2 py-1 rounded text-xs">web_search</code>
-              <span>- 网络搜索</span>
+              <code class="bg-dark-700 px-2 py-1 rounded text-xs font-mono">web_search</code>
+              <span>- 网络搜索 (Tavily)</span>
             </div>
             <div class="flex items-center space-x-2 text-dark-200 text-sm">
-              <code class="bg-dark-700 px-2 py-1 rounded text-xs">web_fetch</code>
+              <code class="bg-dark-700 px-2 py-1 rounded text-xs font-mono">web_fetch</code>
               <span>- 网页内容抓取</span>
             </div>
           </div>
@@ -666,8 +985,11 @@
           </div>
           <div class="space-y-2">
             <div class="flex items-center space-x-2 text-dark-200 text-sm">
-              <code class="bg-dark-700 px-2 py-1 rounded text-xs">lsp</code>
+              <code class="bg-dark-700 px-2 py-1 rounded text-xs font-mono">lsp</code>
               <span>- 语言服务器协议</span>
+            </div>
+            <div class="flex items-center space-x-2 text-dark-200 text-xs text-dark-300 pl-12">
+              <span>定义跳转 / 引用查找 / 悬停信息</span>
             </div>
           </div>
         </div>
@@ -682,17 +1004,208 @@
           </div>
           <div class="space-y-2">
             <div class="flex items-center space-x-2 text-dark-200 text-sm">
-              <code class="bg-dark-700 px-2 py-1 rounded text-xs">task_create</code>
+              <code class="bg-dark-700 px-2 py-1 rounded text-xs font-mono">task_create</code>
               <span>- 创建任务</span>
             </div>
             <div class="flex items-center space-x-2 text-dark-200 text-sm">
-              <code class="bg-dark-700 px-2 py-1 rounded text-xs">task_list</code>
+              <code class="bg-dark-700 px-2 py-1 rounded text-xs font-mono">task_list</code>
               <span>- 任务列表</span>
             </div>
             <div class="flex items-center space-x-2 text-dark-200 text-sm">
-              <code class="bg-dark-700 px-2 py-1 rounded text-xs">task_update</code>
+              <code class="bg-dark-700 px-2 py-1 rounded text-xs font-mono">task_update</code>
               <span>- 更新任务</span>
             </div>
+            <div class="flex items-center space-x-2 text-dark-200 text-sm">
+              <code class="bg-dark-700 px-2 py-1 rounded text-xs font-mono">task_output</code>
+              <span>- 获取输出</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 自定义工具 -->
+      <div class="mt-16 max-w-3xl mx-auto">
+        <div class="glass rounded-xl p-8 text-center">
+          <h3 class="text-2xl font-bold mb-4 gradient-text">自定义工具扩展</h3>
+          <p class="text-dark-200 mb-6">继承 BaseTool 类，轻松创建自定义工具</p>
+          <div class="code-window text-left">
+            <div class="p-6 font-mono text-sm overflow-x-auto">
+              <pre><code><span class="token-keyword">class</span> <span class="token-function">MyCustomTool</span> <span class="token-keyword">extends</span> <span class="token-function">BaseTool</span> {
+  name = <span class="token-string">'my_tool'</span>;
+  description = <span class="token-string">'我的自定义工具'</span>;
+  
+  schema = z.<span class="token-function">object</span>({
+    input: z.<span class="token-function">string</span>().<span class="token-function">describe</span>(<span class="token-string">'输入参数'</span>),
+  });
+
+  <span class="token-keyword">async</span> <span class="token-function">execute</span>(params) {
+    <span class="token-keyword">return</span> {
+      success: <span class="token-keyword">true</span>,
+      output: <span class="token-string">`处理结果：${params.input}`</span>,
+    };
+  }
+}</code></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== Provider 支持 ==================== -->
+  <section class="py-24 bg-dark-800 border-t border-dark-700">
+    <div class="container mx-auto px-6">
+      <!-- 章节标题 -->
+      <div class="text-center mb-16">
+        <h2 class="text-4xl md:text-5xl font-bold mb-4">
+          <span class="gradient-text-purple">多 LLM Provider 支持</span>
+        </h2>
+        <p class="text-xl text-dark-200 max-w-2xl mx-auto">
+          支持主流 LLM 服务，灵活切换，适配不同场景需求
+        </p>
+      </div>
+
+      <!-- Provider 卡片 -->
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-5xl mx-auto">
+        <!-- GLM -->
+        <div class="glass rounded-xl p-6 hover:border-green-500/30 transition-all">
+          <div class="flex items-center justify-between mb-4">
+            <h4 class="text-lg font-semibold">GLM (智谱)</h4>
+            <span class="text-xs bg-green-500/20 text-green-400 px-2 py-1 rounded">推荐</span>
+          </div>
+          <p class="text-dark-200 text-sm mb-4">glm-4.7, glm-5</p>
+          <div class="space-y-2 text-sm text-dark-300">
+            <div class="flex items-center space-x-2">
+              <i class="fas fa-check text-green-400 text-xs"></i>
+              <span>支持工具调用</span>
+            </div>
+            <div class="flex items-center space-x-2">
+              <i class="fas fa-check text-green-400 text-xs"></i>
+              <span>长上下文支持</span>
+            </div>
+            <div class="flex items-center space-x-2">
+              <i class="fas fa-check text-green-400 text-xs"></i>
+              <span>高性价比</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Kimi -->
+        <div class="glass rounded-xl p-6 hover:border-blue-500/30 transition-all">
+          <div class="flex items-center justify-between mb-4">
+            <h4 class="text-lg font-semibold">Kimi (月之暗面)</h4>
+            <span class="text-xs bg-blue-500/20 text-blue-400 px-2 py-1 rounded">长文本</span>
+          </div>
+          <p class="text-dark-200 text-sm mb-4">kimi-k2.5, moonshot-v1</p>
+          <div class="space-y-2 text-sm text-dark-300">
+            <div class="flex items-center space-x-2">
+              <i class="fas fa-check text-blue-400 text-xs"></i>
+              <span>超长上下文 (128K+)</span>
+            </div>
+            <div class="flex items-center space-x-2">
+              <i class="fas fa-check text-blue-400 text-xs"></i>
+              <span>Thinking 模式</span>
+            </div>
+            <div class="flex items-center space-x-2">
+              <i class="fas fa-check text-blue-400 text-xs"></i>
+              <span>优秀推理能力</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- MiniMax -->
+        <div class="glass rounded-xl p-6 hover:border-purple-500/30 transition-all">
+          <div class="flex items-center justify-between mb-4">
+            <h4 class="text-lg font-semibold">MiniMax</h4>
+          </div>
+          <p class="text-dark-200 text-sm mb-4">minimax-2.5, abab6.5</p>
+          <div class="space-y-2 text-sm text-dark-300">
+            <div class="flex items-center space-x-2">
+              <i class="fas fa-check text-purple-400 text-xs"></i>
+              <span>支持工具调用</span>
+            </div>
+            <div class="flex items-center space-x-2">
+              <i class="fas fa-check text-purple-400 text-xs"></i>
+              <span>多模态理解</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- DeepSeek -->
+        <div class="glass rounded-xl p-6 hover:border-orange-500/30 transition-all">
+          <div class="flex items-center justify-between mb-4">
+            <h4 class="text-lg font-semibold">DeepSeek</h4>
+            <span class="text-xs bg-orange-500/20 text-orange-400 px-2 py-1 rounded">性价比</span>
+          </div>
+          <p class="text-dark-200 text-sm mb-4">deepseek-chat, deepseek-coder</p>
+          <div class="space-y-2 text-sm text-dark-300">
+            <div class="flex items-center space-x-2">
+              <i class="fas fa-check text-orange-400 text-xs"></i>
+              <span>代码能力优秀</span>
+            </div>
+            <div class="flex items-center space-x-2">
+              <i class="fas fa-check text-orange-400 text-xs"></i>
+              <span>极低价格</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Qwen -->
+        <div class="glass rounded-xl p-6 hover:border-pink-500/30 transition-all">
+          <div class="flex items-center justify-between mb-4">
+            <h4 class="text-lg font-semibold">Qwen (通义千问)</h4>
+          </div>
+          <p class="text-dark-200 text-sm mb-4">qwen3.5-plus, qwen-max</p>
+          <div class="space-y-2 text-sm text-dark-300">
+            <div class="flex items-center space-x-2">
+              <i class="fas fa-check text-pink-400 text-xs"></i>
+              <span>支持工具调用</span>
+            </div>
+            <div class="flex items-center space-x-2">
+              <i class="fas fa-check text-pink-400 text-xs"></i>
+              <span>多语言支持</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- OpenAI Compatible -->
+        <div class="glass rounded-xl p-6 hover:border-cyan-500/30 transition-all">
+          <div class="flex items-center justify-between mb-4">
+            <h4 class="text-lg font-semibold">OpenAI 兼容</h4>
+            <span class="text-xs bg-cyan-500/20 text-cyan-400 px-2 py-1 rounded">通用</span>
+          </div>
+          <p class="text-dark-200 text-sm mb-4">任意 OpenAI API 兼容服务</p>
+          <div class="space-y-2 text-sm text-dark-300">
+            <div class="flex items-center space-x-2">
+              <i class="fas fa-check text-cyan-400 text-xs"></i>
+              <span>StandardAdapter</span>
+            </div>
+            <div class="flex items-center space-x-2">
+              <i class="fas fa-check text-cyan-400 text-xs"></i>
+              <span>快速接入</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 使用示例 -->
+      <div class="mt-16 max-w-3xl mx-auto">
+        <div class="code-window">
+          <div class="code-window-header">
+            <span class="text-dark-300 text-sm font-mono">ProviderRegistry 统一创建</span>
+          </div>
+          <div class="p-6 font-mono text-sm overflow-x-auto">
+            <pre><code><span class="token-keyword">import</span> { ProviderRegistry } <span class="token-keyword">from</span> <span class="token-string">'./src/providers'</span>;
+
+<span class="token-comment">// 从环境变量创建（推荐）</span>
+<span class="token-keyword">const</span> provider = <span class="token-function">ProviderRegistry</span>.<span class="token-function">createFromEnv</span>(<span class="token-string">'glm-4.7'</span>);
+
+<span class="token-comment">// 或手动创建</span>
+<span class="token-keyword">const</span> kimiProvider = <span class="token-function">createKimiProvider</span>({
+  apiKey: process.env.KIMI_API_KEY,
+  model: <span class="token-string">'moonshot-v1-128k'</span>,
+  timeout: <span class="token-number">120000</span>,
+});</code></pre>
           </div>
         </div>
       </div>
@@ -710,27 +1223,105 @@
           立即体验 Coding Agent，让 AI 成为你的编程伙伴
         </p>
 
-        <!-- 安装命令 -->
-        <div class="glass rounded-xl p-6 mb-10 text-left">
-          <div class="flex items-center justify-between mb-4">
-            <span class="text-dark-200 text-sm">安装 Coding Agent</span>
-            <button class="text-dark-300 hover:text-white transition-colors" onclick="copyCommand()">
-              <i class="fas fa-copy"></i>
-            </button>
+        <!-- 安装步骤 -->
+        <div class="space-y-6 mb-12">
+          <!-- 步骤 1 -->
+          <div class="glass rounded-xl p-6 text-left">
+            <div class="flex items-center space-x-3 mb-4">
+              <div class="w-8 h-8 bg-blue-500/20 rounded-full flex items-center justify-center">
+                <span class="text-blue-400 font-bold text-sm">1</span>
+              </div>
+              <h3 class="font-semibold">克隆仓库</h3>
+            </div>
+            <div class="code-window">
+              <div class="p-4 font-mono text-sm overflow-x-auto">
+                <code class="text-green-400">git clone https://github.com/wangrenren611/coding-agent.git</code>
+              </div>
+            </div>
           </div>
-          <code class="text-green-400 font-mono text-sm" id="install-command">
-            git clone https://github.com/your-org/coding-agent.git && cd coding-agent && pnpm install
-          </code>
+
+          <!-- 步骤 2 -->
+          <div class="glass rounded-xl p-6 text-left">
+            <div class="flex items-center space-x-3 mb-4">
+              <div class="w-8 h-8 bg-green-500/20 rounded-full flex items-center justify-center">
+                <span class="text-green-400 font-bold text-sm">2</span>
+              </div>
+              <h3 class="font-semibold">安装依赖</h3>
+            </div>
+            <div class="code-window">
+              <div class="p-4 font-mono text-sm overflow-x-auto">
+                <code class="text-green-400">cd coding-agent && pnpm install</code>
+              </div>
+            </div>
+          </div>
+
+          <!-- 步骤 3 -->
+          <div class="glass rounded-xl p-6 text-left">
+            <div class="flex items-center space-x-3 mb-4">
+              <div class="w-8 h-8 bg-purple-500/20 rounded-full flex items-center justify-center">
+                <span class="text-purple-400 font-bold text-sm">3</span>
+              </div>
+              <h3 class="font-semibold">配置环境变量</h3>
+            </div>
+            <div class="code-window">
+              <div class="p-4 font-mono text-sm overflow-x-auto">
+                <pre><code class="text-dark-200"><span class="token-comment"># .env.development</span>
+GLM_API_KEY=<span class="token-variable">your_api_key</span>
+KIMI_API_KEY=<span class="token-variable">your_api_key</span>
+MINIMAX_API_KEY=<span class="token-variable">your_api_key</span>
+MINIMAX_GROUP_ID=<span class="token-variable">your_group_id</span>
+TAVILY_API_KEY=<span class="token-variable">your_api_key</span></code></pre>
+              </div>
+            </div>
+          </div>
+
+          <!-- 步骤 4 -->
+          <div class="glass rounded-xl p-6 text-left">
+            <div class="flex items-center space-x-3 mb-4">
+              <div class="w-8 h-8 bg-orange-500/20 rounded-full flex items-center justify-center">
+                <span class="text-orange-400 font-bold text-sm">4</span>
+              </div>
+              <h3 class="font-semibold">运行 CLI</h3>
+            </div>
+            <div class="code-window">
+              <div class="p-4 font-mono text-sm overflow-x-auto">
+                <code class="text-green-400">pnpm dev:cli</code>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 常用命令 -->
+        <div class="glass rounded-xl p-6 mb-10">
+          <h3 class="font-semibold mb-4 text-left">常用开发命令</h3>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-left">
+            <div class="flex items-center space-x-3">
+              <code class="bg-dark-700 px-3 py-2 rounded text-xs font-mono text-green-400">pnpm dev</code>
+              <span class="text-dark-300 text-sm">开发模式</span>
+            </div>
+            <div class="flex items-center space-x-3">
+              <code class="bg-dark-700 px-3 py-2 rounded text-xs font-mono text-green-400">pnpm build</code>
+              <span class="text-dark-300 text-sm">构建项目</span>
+            </div>
+            <div class="flex items-center space-x-3">
+              <code class="bg-dark-700 px-3 py-2 rounded text-xs font-mono text-green-400">pnpm test</code>
+              <span class="text-dark-300 text-sm">运行测试</span>
+            </div>
+            <div class="flex items-center space-x-3">
+              <code class="bg-dark-700 px-3 py-2 rounded text-xs font-mono text-green-400">pnpm ci:check</code>
+              <span class="text-dark-300 text-sm">完整 CI 检查</span>
+            </div>
+          </div>
         </div>
 
         <div class="flex flex-col sm:flex-row gap-4 justify-center">
-          <a href="https://github.com" target="_blank" class="btn-primary px-8 py-4 rounded-lg font-semibold text-lg flex items-center justify-center space-x-2">
+          <a href="https://github.com/wangrenren611/coding-agent" target="_blank" class="btn-primary px-8 py-4 rounded-lg font-semibold text-lg flex items-center justify-center space-x-2">
             <i class="fab fa-github"></i>
             <span>在 GitHub 上查看</span>
           </a>
-          <a href="#docs" class="glass hover:border-white/30 px-8 py-4 rounded-lg font-semibold text-lg flex items-center justify-center space-x-2 transition-all">
+          <a href="README.md" class="glass hover:border-white/30 px-8 py-4 rounded-lg font-semibold text-lg flex items-center justify-center space-x-2 transition-all">
             <i class="fas fa-book"></i>
-            <span>阅读文档</span>
+            <span>阅读完整文档</span>
           </a>
         </div>
       </div>
@@ -744,14 +1335,14 @@
         <!-- 品牌信息 -->
         <div class="md:col-span-2">
           <div class="flex items-center space-x-3 mb-4">
-            <div class="w-9 h-9 bg-white rounded-lg flex items-center justify-center">
-              <i class="fas fa-code text-dark-900 text-lg"></i>
+            <div class="w-9 h-9 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
+              <i class="fas fa-code text-white text-lg"></i>
             </div>
             <span class="text-lg font-semibold">Coding Agent</span>
           </div>
           <p class="text-dark-200 text-sm max-w-md">
-            基于 TypeScript 构建的多模态 LLM Agent 系统，采用协调器模式设计，
-            提供生产级的 AI 编码能力。
+            基于 TypeScript 构建的多模态 LLM Agent 系统，采用协调器模式和 ReAct 范式设计，
+            提供生产级的 AI 编码能力。1200+ 单元测试，企业级日志系统，流式响应智能恢复。
           </p>
         </div>
 
@@ -761,8 +1352,9 @@
           <ul class="space-y-2 text-dark-200 text-sm">
             <li><a href="#features" class="hover:text-white transition-colors">功能特性</a></li>
             <li><a href="#architecture" class="hover:text-white transition-colors">技术架构</a></li>
+            <li><a href="#workflow" class="hover:text-white transition-colors">工作流程</a></li>
             <li><a href="#tools" class="hover:text-white transition-colors">工具系统</a></li>
-            <li><a href="#docs" class="hover:text-white transition-colors">文档</a></li>
+            <li><a href="README.md" class="hover:text-white transition-colors">完整文档</a></li>
           </ul>
         </div>
 
@@ -772,30 +1364,28 @@
           <ul class="space-y-2 text-dark-200 text-sm">
             <li>TypeScript 5.3+</li>
             <li>Node.js 20+</li>
-            <li>Vitest</li>
-            <li>Zod</li>
+            <li>Vitest 4.0+</li>
+            <li>Zod 4.0+</li>
+            <li>Pino</li>
           </ul>
         </div>
       </div>
 
       <!-- 合作伙伴 -->
-      <div class="border-t border-dark-700 pt-8 mb-8">
+      <!-- <div class="border-t border-dark-700 pt-8 mb-8">
         <p class="text-dark-300 text-sm text-center mb-6">强大的生态合作伙伴</p>
         <div class="flex flex-wrap justify-center items-center gap-8 opacity-60">
-          <span class="text-dark-200 font-medium">OpenRouter</span>
-          <span class="text-dark-200 font-medium">Windsurf</span>
-          <span class="text-dark-200 font-medium">youware</span>
-          <span class="text-dark-200 font-medium">flowith</span>
-          <span class="text-dark-200 font-medium">Genspark</span>
+     
         </div>
-      </div>
+      </div> -->
 
       <div class="border-t border-dark-700 pt-8 flex flex-col md:flex-row items-center justify-between">
         <p class="text-dark-300 text-sm">
           &copy; 2026 Coding Agent. Built with TypeScript & TailwindCSS.
+          <span class="ml-4">License: ISC</span>
         </p>
         <div class="flex items-center space-x-4 mt-4 md:mt-0">
-          <a href="https://github.com" target="_blank" class="text-dark-300 hover:text-white transition-colors">
+          <a href="https://github.com/wangrenren611/coding-agent" target="_blank" class="text-dark-300 hover:text-white transition-colors">
             <i class="fab fa-github text-xl"></i>
           </a>
         </div>
@@ -820,14 +1410,6 @@
       });
     });
 
-    // 复制安装命令
-    function copyCommand() {
-      const command = document.getElementById('install-command').textContent;
-      navigator.clipboard.writeText(command).then(() => {
-        alert('命令已复制到剪贴板！');
-      });
-    }
-
     // 平滑滚动
     document.querySelectorAll('a[href^="#"]').forEach(anchor => {
       anchor.addEventListener('click', function (e) {
@@ -840,6 +1422,22 @@
           });
         }
       });
+    });
+
+    // 滚动时导航栏效果
+    let lastScroll = 0;
+    const nav = document.querySelector('nav');
+
+    window.addEventListener('scroll', () => {
+      const currentScroll = window.pageYOffset;
+      
+      if (currentScroll > 100) {
+        nav.classList.add('shadow-lg');
+      } else {
+        nav.classList.remove('shadow-lg');
+      }
+      
+      lastScroll = currentScroll;
     });
   </script>
 </body>

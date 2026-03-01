@@ -36,6 +36,7 @@ describe('Plan Mode', () => {
             expect(READ_ONLY_TOOLS.has('task_list')).toBe(true);
             expect(READ_ONLY_TOOLS.has('task_update')).toBe(true);
             expect(READ_ONLY_TOOLS.has('task_stop')).toBe(true);
+            expect(READ_ONLY_TOOLS.has('task_output')).toBe(true);
         });
 
         it('应该包含 Skill 工具', () => {
@@ -86,6 +87,7 @@ describe('Plan Mode', () => {
             expect(isToolAllowedInPlanMode('task_list')).toBe(true);
             expect(isToolAllowedInPlanMode('task_update')).toBe(true);
             expect(isToolAllowedInPlanMode('task_stop')).toBe(true);
+            expect(isToolAllowedInPlanMode('task_output')).toBe(true);
         });
 
         it('应该允许 Skill 工具', () => {
