@@ -12,6 +12,7 @@
   "scripts": {
     "dev": "cross-env NODE_ENV=development tsx src/demo-1.ts",
     "dev:plan": "cross-env NODE_ENV=development tsx src/demo-plan.ts",
+    "dev:multi-agent-analysis": "cross-env NODE_ENV=development tsx src/demo-multi-agent-analysis.ts",
     "build": "tsup",
     "build:watch": "tsup --watch",
     "test": "vitest",

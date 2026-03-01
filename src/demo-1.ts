@@ -1,6 +1,6 @@
 import dotenv from 'dotenv';
 import { Agent } from './agent-v2/agent/agent';
-import { ProviderRegistry } from './providers';
+import { ModelId, ProviderRegistry } from './providers';
 
 import fs from 'fs';
 import { AgentMessage, AgentMessageType, BaseAgentEvent, SubagentEventMessage } from './agent-v2/agent/stream-types';
@@ -12,7 +12,7 @@ import { parseFilePaths, createFileSummary, type ParsedFileInput } from './cli/u
 import type { InputContentPart } from './providers/types/api';
 
 // const model = 'wr-claude-4.6';
-const model = 'glm-5';
+const model: ModelId = 'qwen-glm-5';
 dotenv.config({
     path: './.env.development',
 });
