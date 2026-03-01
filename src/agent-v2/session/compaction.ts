@@ -2,6 +2,7 @@ import { v4 as uuid } from 'uuid';
 import { Message } from './types';
 import { InputContentPart, LLMProvider, LLMResponse } from '../../providers';
 import { IMemoryManager, CompactionRecord } from '../memory/types';
+import { getLogger, type Logger } from '../logger';
 
 type ToolCallLike = { id?: string };
 
@@ -35,6 +36,8 @@ export interface CompactionConfig {
     keepMessagesNum?: number;
     /** 触发压缩的阈值比例（默认 0.90） */
     triggerRatio?: number;
+    /** 日志器（可选，不提供则使用默认日志器） */
+    logger?: Logger;
 }
 
 export interface TokenInfo {
@@ -96,6 +99,7 @@ export class Compaction {
     private readonly triggerRatio: number;
     private readonly keepMessagesNum: number;
     private readonly llmProvider: LLMProvider;
+    private readonly logger: Logger;
 
     constructor(config: CompactionConfig) {
         this.maxTokens = config.maxTokens;
@@ -104,6 +108,7 @@ export class Compaction {
         this.llmProvider = config.llmProvider;
         this.keepMessagesNum = config.keepMessagesNum ?? 40;
         this.triggerRatio = config.triggerRatio ?? 0.9;
+        this.logger = config.logger ?? getLogger();
     }
 
     /**
@@ -147,7 +152,9 @@ export class Compaction {
             return { isCompacted: false, summaryMessage: null, messages };
         }
 
-        console.log(`[Compaction] 触发压缩。Token: ${tokenInfo.totalUsed}, 阈值: ${Math.floor(tokenInfo.threshold)}`);
+        this.logger.info(
+            `[Compaction] Triggered. tokens=${tokenInfo.totalUsed}, threshold=${Math.floor(tokenInfo.threshold)}`
+        );
 
         // 分离消息区域
         const { systemMessage, pending, active } = this.splitMessages(messages);
@@ -181,7 +188,7 @@ export class Compaction {
             });
         }
 
-        console.log(`[Compaction] 完成。消息数: ${messages.length} -> ${newMessages.length}`);
+        this.logger.info(`[Compaction] Completed. messages=${messages.length}->${newMessages.length}`);
 
         return {
             isCompacted: true,
@@ -347,7 +354,7 @@ export class Compaction {
             return previousSummary || 'No messages to summarize.';
         }
 
-        console.log('[Compaction] 正在生成摘要...');
+        this.logger.debug('[Compaction] Generating summary...');
 
         const historyText = this.serializeMessages(messages);
         const userContent = previousSummary
@@ -360,7 +367,7 @@ export class Compaction {
             summaryAbortSignal ? { abortSignal: summaryAbortSignal } : undefined
         );
 
-        console.log('[Compaction] 摘要生成完成');
+        this.logger.debug('[Compaction] Summary generated');
 
         if (!response || typeof response !== 'object' || !('choices' in response)) {
             return previousSummary || 'Summary generation failed.';

@@ -35,6 +35,7 @@ import {
 } from './response-validator';
 import { ResponseRecovery, RecoveryContext, createResponseRecovery } from './core/response-recovery';
 import { LLMContextCompressionError } from './errors';
+import { getLogger, type Logger } from '../logger';
 
 /**
  * 内部处理器状态（细粒度状态追踪）
@@ -115,6 +116,8 @@ export interface StreamProcessorOptions {
 
     /** 重置空闲超时回调（每次收到 chunk 时调用） */
     onResetIdleTimeout?: () => void;
+    /** 日志器（可选） */
+    logger?: Logger;
 }
 
 // ==================== 主类 ====================
@@ -144,12 +147,14 @@ export class StreamProcessor {
 
     // 已处理的字符总数（用于恢复上下文）
     private processedChars = 0;
+    private readonly logger: Logger;
 
     constructor(options: StreamProcessorOptions) {
         this.options = options;
         this.maxBufferSize = options.maxBufferSize;
         this.validator = createResponseValidator(options.validatorOptions);
         this.recovery = createResponseRecovery();
+        this.logger = options.logger ?? getLogger();
     }
 
     // ==================== 公共 API ====================
@@ -592,7 +597,10 @@ export class StreamProcessor {
             this.buffers.toolCalls = new Map(partialResponse.toolCalls.map((tc, index) => [index, tc]));
         }
 
-        console.log(`[StreamProcessor] Applied partial recovery: ${reason}`);
+        this.logger.warn(`[StreamProcessor] Applied partial recovery: ${reason}`, {
+            phase: 'stream-validation-recovery',
+            messageId: this.currentMessageId,
+        });
     }
 
     /**
