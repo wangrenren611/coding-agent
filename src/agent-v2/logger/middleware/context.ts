@@ -2,6 +2,7 @@
  * 上下文中间件
  */
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import type { LogRecord, LogContext, LogMiddleware } from '../types';
 
 /**
@@ -10,7 +11,6 @@ import type { LogRecord, LogContext, LogMiddleware } from '../types';
  */
 export function createContextMiddleware(defaultContext: LogContext): LogMiddleware {
     return (record: LogRecord, next: () => void) => {
-        // 合并上下文
         record.context = {
             ...defaultContext,
             ...record.context,
@@ -21,12 +21,13 @@ export function createContextMiddleware(defaultContext: LogContext): LogMiddlewa
 
 /**
  * 上下文管理器
- * 用于在异步调用链中传递上下文
+ * 使用 AsyncLocalStorage 在异步调用链中隔离上下文，避免并发串写。
  */
 export class ContextManager {
     private static instance: ContextManager;
     private storage: Map<string, LogContext> = new Map();
-    private currentContext: LogContext = {};
+    private readonly asyncStorage = new AsyncLocalStorage<LogContext>();
+    private fallbackContext: LogContext = {};
 
     private constructor() {}
 
@@ -41,57 +42,56 @@ export class ContextManager {
      * 设置当前上下文
      */
     setContext(context: LogContext): void {
-        this.currentContext = { ...context };
+        const next = { ...context };
+        this.fallbackContext = next;
+        this.asyncStorage.enterWith(next);
     }
 
     /**
      * 获取当前上下文
      */
     getContext(): LogContext {
-        return { ...this.currentContext };
+        const active = this.asyncStorage.getStore();
+        if (active) {
+            return { ...active };
+        }
+        return { ...this.fallbackContext };
     }
 
     /**
      * 更新当前上下文
      */
     updateContext(context: Partial<LogContext>): void {
-        this.currentContext = {
-            ...this.currentContext,
+        const next = {
+            ...this.getContext(),
             ...context,
         };
+        this.fallbackContext = next;
+        this.asyncStorage.enterWith(next);
     }
 
     /**
      * 清除当前上下文
      */
     clearContext(): void {
-        this.currentContext = {};
+        this.fallbackContext = {};
+        this.asyncStorage.enterWith({});
     }
 
     /**
      * 在指定上下文中执行函数
      */
     withContext<T>(context: LogContext, fn: () => T): T {
-        const previousContext = this.currentContext;
-        this.currentContext = { ...previousContext, ...context };
-        try {
-            return fn();
-        } finally {
-            this.currentContext = previousContext;
-        }
+        const merged = { ...this.getContext(), ...context };
+        return this.asyncStorage.run(merged, fn);
     }
 
     /**
      * 异步版本：在指定上下文中执行异步函数
      */
     async withContextAsync<T>(context: LogContext, fn: () => Promise<T>): Promise<T> {
-        const previousContext = this.currentContext;
-        this.currentContext = { ...previousContext, ...context };
-        try {
-            return await fn();
-        } finally {
-            this.currentContext = previousContext;
-        }
+        const merged = { ...this.getContext(), ...context };
+        return this.asyncStorage.run(merged, fn);
     }
 
     /**

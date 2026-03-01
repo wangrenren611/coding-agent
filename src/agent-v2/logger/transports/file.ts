@@ -21,6 +21,8 @@ export class FileTransport extends BaseTransport {
     private buffer: string[] = [];
     private flushTimer: ReturnType<typeof setInterval> | null = null;
     private writeLock: boolean = false;
+    private writeUnlockWaiters: Array<() => void> = [];
+    private nextRotateAt?: number;
 
     constructor(config: FileTransportConfig, formatter: IFormatter) {
         super(formatter);
@@ -72,6 +74,16 @@ export class FileTransport extends BaseTransport {
         this.currentStream.on('error', (err) => {
             console.error(`[FileTransport] Stream error: ${err.message}`);
         });
+
+        // 初始化时间轮转时间点
+        if (
+            this.config.rotation?.enabled &&
+            (this.config.rotation.strategy === 'time' || this.config.rotation.strategy === 'both') &&
+            this.config.rotation.interval &&
+            this.config.rotation.interval > 0
+        ) {
+            this.nextRotateAt = Date.now() + this.config.rotation.interval;
+        }
     }
 
     /**
@@ -87,7 +99,7 @@ export class FileTransport extends BaseTransport {
         } else {
             this.buffer.push(formatted);
             if (this.buffer.length >= (this.config.bufferSize || 1000)) {
-                this.flush();
+                void this.flush();
             }
         }
     }
@@ -108,26 +120,34 @@ export class FileTransport extends BaseTransport {
     /**
      * 刷新缓冲区
      */
-    flush(): void {
-        if (this.writeLock || this.buffer.length === 0 || !this.currentStream) {
-            return;
-        }
+    async flush(): Promise<void> {
+        if (this.config.sync) return;
 
-        this.writeLock = true;
-        const content = this.buffer.join('');
-        this.buffer = [];
-
-        this.currentStream.write(content, 'utf8', (err) => {
-            if (err) {
-                console.error(`[FileTransport] Write error: ${err.message}`);
-                // 将内容放回缓冲区
-                this.buffer.unshift(content);
-            } else {
-                this.currentSize += Buffer.byteLength(content, 'utf8');
-                this.checkRotation();
+        while (true) {
+            await this.waitForWriteUnlock();
+            if (this.buffer.length === 0 || !this.currentStream) {
+                return;
             }
-            this.writeLock = false;
-        });
+
+            this.writeLock = true;
+            const content = this.buffer.join('');
+            this.buffer = [];
+
+            await new Promise<void>((resolve) => {
+                this.currentStream!.write(content, 'utf8', (err) => {
+                    if (err) {
+                        console.error(`[FileTransport] Write error: ${err.message}`);
+                        // 将内容放回缓冲区（前置，保留时序）
+                        this.buffer.unshift(content);
+                    } else {
+                        this.currentSize += Buffer.byteLength(content, 'utf8');
+                        this.checkRotation();
+                    }
+                    this.releaseWriteLock();
+                    resolve();
+                });
+            });
+        }
     }
 
     /**
@@ -136,12 +156,17 @@ export class FileTransport extends BaseTransport {
     private checkRotation(): void {
         if (!this.config.rotation?.enabled) return;
 
-        const { maxSize, strategy } = this.config.rotation;
+        const { maxSize, strategy, interval } = this.config.rotation;
+        const shouldRotateBySize = (strategy === 'size' || strategy === 'both') && this.currentSize >= maxSize;
+        const shouldRotateByTime =
+            (strategy === 'time' || strategy === 'both') &&
+            !!interval &&
+            interval > 0 &&
+            !!this.nextRotateAt &&
+            Date.now() >= this.nextRotateAt;
 
-        if (strategy === 'size' || strategy === 'both') {
-            if (this.currentSize >= maxSize) {
-                this.rotate();
-            }
+        if (shouldRotateBySize || shouldRotateByTime) {
+            this.rotate();
         }
     }
 
@@ -195,7 +220,7 @@ export class FileTransport extends BaseTransport {
         if (this.config.sync) return;
 
         this.flushTimer = setInterval(() => {
-            this.flush();
+            void this.flush();
         }, this.config.flushInterval || 1000);
 
         // 使用 unref() 防止定时器阻止进程退出
@@ -207,17 +232,37 @@ export class FileTransport extends BaseTransport {
     /**
      * 关闭 Transport
      */
-    close(): void {
+    async close(): Promise<void> {
         if (this.flushTimer) {
             clearInterval(this.flushTimer);
             this.flushTimer = null;
         }
 
-        this.flush();
+        await this.flush();
+        await this.waitForWriteUnlock();
 
         if (this.currentStream) {
-            this.currentStream.end();
+            await new Promise<void>((resolve) => {
+                this.currentStream!.end(() => resolve());
+            });
             this.currentStream = null;
+        }
+    }
+
+    private waitForWriteUnlock(): Promise<void> {
+        if (!this.writeLock) {
+            return Promise.resolve();
+        }
+        return new Promise((resolve) => {
+            this.writeUnlockWaiters.push(resolve);
+        });
+    }
+
+    private releaseWriteLock(): void {
+        this.writeLock = false;
+        const waiters = this.writeUnlockWaiters.splice(0);
+        for (const waiter of waiters) {
+            waiter();
         }
     }
 }

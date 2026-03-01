@@ -158,7 +158,16 @@ export class PrettyFormatter extends BaseFormatter {
             .filter(([, value]) => value !== undefined)
             .slice(0, 5) // 最多显示5个
             .map(([key, value]) => {
-                const strValue = typeof value === 'object' ? JSON.stringify(value) : String(value);
+                let strValue: string;
+                if (typeof value === 'object' && value !== null) {
+                    try {
+                        strValue = JSON.stringify(value);
+                    } catch {
+                        strValue = '[non-serializable]';
+                    }
+                } else {
+                    strValue = String(value);
+                }
                 const truncated = strValue.length > 30 ? strValue.substring(0, 30) + '...' : strValue;
                 return `${key}=${truncated}`;
             });

@@ -89,6 +89,7 @@ export class Agent {
     private readonly toolRegistry: ToolRegistry;
     private readonly eventBus: EventBus;
     private readonly logger: Logger;
+    private readonly ownsLogger: boolean;
     private unsubscribeEventLogger?: () => void;
 
     // 配置
@@ -119,8 +120,17 @@ export class Agent {
         this.timeProvider = config.timeProvider ?? new DefaultTimeProvider();
         this.eventBus = new EventBus();
 
-        // 初始化日志器
-        this.logger = config.logger ?? (config.loggerConfig ? createLogger(config.loggerConfig) : getLogger());
+        // 初始化日志器（仅关闭内部创建的实例，避免误关闭共享默认 logger）
+        if (config.logger) {
+            this.logger = config.logger;
+            this.ownsLogger = false;
+        } else if (config.loggerConfig) {
+            this.logger = createLogger(config.loggerConfig);
+            this.ownsLogger = true;
+        } else {
+            this.logger = getLogger();
+            this.ownsLogger = false;
+        }
 
         // 设置 Agent 事件日志
         if (config.enableEventLogging !== false) {
@@ -141,6 +151,7 @@ export class Agent {
             enableCompaction: config.enableCompaction,
             compactionConfig: config.compactionConfig,
             provider: this.provider,
+            logger: this.logger,
         });
 
         // 根据 planMode 选择不同的工具注册表
@@ -302,7 +313,9 @@ export class Agent {
             this.unsubscribeEventLogger = undefined;
         }
         // 关闭日志器（清理定时器等资源）
-        await this.logger.close();
+        if (this.ownsLogger) {
+            await this.logger.close();
+        }
     }
 
     /**
@@ -480,7 +493,10 @@ export class Agent {
                 await this.session.compactBeforeLLMCall();
             } catch (compactError) {
                 // 压缩失败不影响重试流程，仅记录日志
-                console.error('[Agent] Context compaction failed:', compactError);
+                this.logger.warn('[Agent] Context compaction failed', {
+                    phase: 'compaction',
+                    error: compactError instanceof Error ? compactError.message : String(compactError),
+                });
             }
         }
 

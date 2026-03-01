@@ -26,6 +26,8 @@ export class Logger {
         errors: 0,
         bufferSize: 0,
     };
+    private pendingWrites = new Set<Promise<void>>();
+    private closed = false;
 
     constructor(config?: Partial<LoggerConfig>) {
         this.config = mergeConfig(config);
@@ -96,8 +98,13 @@ export class Logger {
     /**
      * 脱敏对象中的敏感字段
      */
-    private sanitizeObject(obj: Record<string, unknown>): Record<string, unknown> {
+    private sanitizeObject(
+        obj: Record<string, unknown>,
+        seen: WeakSet<object> = new WeakSet()
+    ): Record<string, unknown> {
         if (!obj || typeof obj !== 'object') return obj;
+        if (seen.has(obj)) return { circular: '[Circular]' };
+        seen.add(obj);
 
         const result: Record<string, unknown> = {};
         const sensitiveFields = this.config.sensitiveFields || [];
@@ -105,11 +112,25 @@ export class Logger {
         for (const [key, value] of Object.entries(obj)) {
             if (sensitiveFields.some((f) => key.toLowerCase().includes(f.toLowerCase()))) {
                 result[key] = '[REDACTED]';
-            } else if (typeof value === 'object' && value !== null) {
-                result[key] = this.sanitizeObject(value as Record<string, unknown>);
-            } else {
-                result[key] = value;
+                continue;
             }
+
+            if (Array.isArray(value)) {
+                result[key] = value.map((item) => {
+                    if (item && typeof item === 'object') {
+                        return this.sanitizeObject(item as Record<string, unknown>, seen);
+                    }
+                    return item;
+                });
+                continue;
+            }
+
+            if (typeof value === 'object' && value !== null) {
+                result[key] = this.sanitizeObject(value as Record<string, unknown>, seen);
+                continue;
+            }
+
+            result[key] = value;
         }
 
         return result;
@@ -141,7 +162,6 @@ export class Logger {
         error?: Error,
         data?: Record<string, unknown>
     ): LogRecord {
-        // 合并全局上下文
         const globalContext = getContextManager().getContext();
         const mergedContext: LogContext = {
             ...globalContext,
@@ -175,21 +195,24 @@ export class Logger {
         const middlewares = [...this.middlewares];
 
         const executeChain = async (index: number): Promise<void> => {
-            if (index >= middlewares.length) {
-                return;
-            }
+            if (index >= middlewares.length) return;
 
             const middleware = middlewares[index];
-            await new Promise<void>((resolve) => {
-                const result = middleware(record, () => {
-                    resolve();
-                });
-                if (result instanceof Promise) {
-                    result.then(resolve);
-                }
-            });
+            let nextCalled = false;
 
-            await executeChain(index + 1);
+            await Promise.resolve(
+                middleware(record, () => {
+                    nextCalled = true;
+                })
+            );
+
+            if (!nextCalled) {
+                // 防御性兜底：即使中间件漏调 next，也继续执行后续中间件
+                nextCalled = true;
+            }
+            if (nextCalled) {
+                await executeChain(index + 1);
+            }
         };
 
         await executeChain(0);
@@ -198,22 +221,20 @@ export class Logger {
     /**
      * 写入日志到所有 Transport
      */
-    private writeToTransports(record: LogRecord): void {
-        // 检查日志级别
+    private async writeToTransports(record: LogRecord): Promise<void> {
         if (record.level < this.config.level) {
             return;
         }
 
         for (const transport of this.transports) {
             try {
-                transport.write(record);
+                await Promise.resolve(transport.write(record));
             } catch (err) {
                 // 防止日志写入错误影响主流程
                 console.error(`[Logger] Transport write error: ${(err as Error).message}`);
             }
         }
 
-        // 更新统计
         this.stats.total++;
         this.stats.byLevel[record.levelName] = (this.stats.byLevel[record.levelName] || 0) + 1;
         if (record.level >= Lvl.ERROR) {
@@ -222,13 +243,27 @@ export class Logger {
         this.stats.lastRecordTime = record.timestamp;
     }
 
+    private trackPendingWrite(task: Promise<void>): void {
+        this.pendingWrites.add(task);
+        void task.finally(() => {
+            this.pendingWrites.delete(task);
+        });
+    }
+
     /**
      * 内部日志方法
      */
     log(record: LogRecord): void {
-        this.executeMiddlewares(record).then(() => {
-            this.writeToTransports(record);
+        if (this.closed) return;
+
+        const task = (async () => {
+            await this.executeMiddlewares(record);
+            await this.writeToTransports(record);
+        })().catch((error) => {
+            console.error(`[Logger] Async log pipeline error: ${(error as Error).message}`);
         });
+
+        this.trackPendingWrite(task);
     }
 
     /**
@@ -241,51 +276,70 @@ export class Logger {
         error?: Error,
         data?: Record<string, unknown>
     ): Promise<void> {
-        const record = this.createRecord(level, message, context, error, data);
-        await this.executeMiddlewares(record);
-        this.writeToTransports(record);
+        if (this.closed) return;
+
+        const task = (async () => {
+            const record = this.createRecord(level, message, context, error, data);
+            await this.executeMiddlewares(record);
+            await this.writeToTransports(record);
+        })();
+
+        this.trackPendingWrite(task);
+        await task;
     }
 
     /**
      * TRACE 级别日志
      */
     trace(message: string, context?: LogContext): void {
-        this.logWithLevel(Lvl.TRACE, message, context);
+        void this.logWithLevel(Lvl.TRACE, message, context).catch((error) => {
+            console.error(`[Logger] TRACE log failed: ${(error as Error).message}`);
+        });
     }
 
     /**
      * DEBUG 级别日志
      */
     debug(message: string, context?: LogContext, data?: Record<string, unknown>): void {
-        this.logWithLevel(Lvl.DEBUG, message, context, undefined, data);
+        void this.logWithLevel(Lvl.DEBUG, message, context, undefined, data).catch((error) => {
+            console.error(`[Logger] DEBUG log failed: ${(error as Error).message}`);
+        });
     }
 
     /**
      * INFO 级别日志
      */
     info(message: string, context?: LogContext, data?: Record<string, unknown>): void {
-        this.logWithLevel(Lvl.INFO, message, context, undefined, data);
+        void this.logWithLevel(Lvl.INFO, message, context, undefined, data).catch((error) => {
+            console.error(`[Logger] INFO log failed: ${(error as Error).message}`);
+        });
     }
 
     /**
      * WARN 级别日志
      */
     warn(message: string, context?: LogContext, data?: Record<string, unknown>): void {
-        this.logWithLevel(Lvl.WARN, message, context, undefined, data);
+        void this.logWithLevel(Lvl.WARN, message, context, undefined, data).catch((error) => {
+            console.error(`[Logger] WARN log failed: ${(error as Error).message}`);
+        });
     }
 
     /**
      * ERROR 级别日志
      */
     error(message: string, error?: Error, context?: LogContext): void {
-        this.logWithLevel(Lvl.ERROR, message, context, error);
+        void this.logWithLevel(Lvl.ERROR, message, context, error).catch((err) => {
+            console.error(`[Logger] ERROR log failed: ${(err as Error).message}`);
+        });
     }
 
     /**
      * FATAL 级别日志
      */
     fatal(message: string, error?: Error, context?: LogContext): void {
-        this.logWithLevel(Lvl.FATAL, message, context, error);
+        void this.logWithLevel(Lvl.FATAL, message, context, error).catch((err) => {
+            console.error(`[Logger] FATAL log failed: ${(err as Error).message}`);
+        });
     }
 
     /**
@@ -306,9 +360,11 @@ export class Logger {
      * 刷新所有 Transport
      */
     async flush(): Promise<void> {
+        await Promise.allSettled([...this.pendingWrites]);
+
         for (const transport of this.transports) {
             if (transport.flush) {
-                await transport.flush();
+                await Promise.resolve(transport.flush());
             }
         }
     }
@@ -317,10 +373,13 @@ export class Logger {
      * 关闭日志器
      */
     async close(): Promise<void> {
+        if (this.closed) return;
+        this.closed = true;
+
         await this.flush();
         for (const transport of this.transports) {
             if (transport.close) {
-                await transport.close();
+                await Promise.resolve(transport.close());
             }
         }
         this.transports = [];

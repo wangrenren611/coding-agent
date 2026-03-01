@@ -7,7 +7,7 @@
 import type { EventBus } from '../../eventbus/eventbus';
 import { EventType, type EventMap, type BaseEventData, type EventListener } from '../../eventbus/types';
 import type { LogRecord, LogLevel } from '../types';
-import { LogLevel as Lvl } from '../types';
+import { LogLevel as Lvl, LogLevelName } from '../types';
 
 /**
  * Agent 事件映射器函数类型
@@ -140,7 +140,7 @@ export function createAgentEventMapper(sessionId?: string): AgentEventMapper {
         return {
             timestamp: new Date(data.timestamp).toISOString(),
             level,
-            levelName: Lvl[level],
+            levelName: LogLevelName[level],
             message,
             context,
             error,
@@ -173,13 +173,20 @@ export function createEventLoggerMiddleware(
     logger: { log: (record: LogRecord) => void },
     config: EventLoggerConfig = {}
 ): () => void {
-    const { excludeEvents = [], customMapper, sessionId } = config;
+    const { excludeEvents = [], customMapper, sessionId, logAllEvents = true } = config;
     const defaultMapper = createAgentEventMapper(sessionId);
 
     const listeners: Map<EventType, EventListener<BaseEventData>> = new Map();
 
-    // 订阅所有事件类型
-    const eventTypes = Object.values(EventType) as EventType[];
+    // 默认聚合模式仅记录核心事件，减少噪音
+    const coreEventTypes: EventType[] = [
+        EventType.TASK_START,
+        EventType.TASK_SUCCESS,
+        EventType.TASK_FAILED,
+        EventType.TASK_RETRY,
+        EventType.TOOL_FAILED,
+    ];
+    const eventTypes: EventType[] = logAllEvents ? (Object.values(EventType) as EventType[]) : coreEventTypes;
 
     for (const eventType of eventTypes) {
         if (excludeEvents.includes(eventType)) {
