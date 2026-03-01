@@ -9,6 +9,8 @@
  */
 
 import type { AgentFailureCode } from './types';
+import type { StreamToolCall } from './core-types';
+import { LLMRetryableError as ProviderLLMRetryableError } from '../../providers';
 
 // ==================== 错误码常量 ====================
 
@@ -254,6 +256,41 @@ export class LLMRetryableError extends Error {
     }
 }
 
+/**
+ * LLM 上下文压缩错误
+ *
+ * 当流式响应验证失败，建议通过压缩上下文后重试来恢复时抛出。
+ * 这是一个可重试错误，Agent 应该先压缩上下文再重试。
+ *
+ * 继承 ProviderLLMRetryableError，使其自动被识别为可重试错误。
+ */
+export class LLMContextCompressionError extends ProviderLLMRetryableError {
+    /** 部分恢复的响应（如果有） */
+    public readonly partialResponse?: {
+        content: string;
+        toolCalls: StreamToolCall[];
+    };
+    /** 额外上下文信息 */
+    public readonly context?: Record<string, unknown>;
+
+    constructor(
+        message: string,
+        options?: {
+            cause?: unknown;
+            context?: Record<string, unknown>;
+            partialResponse?: { content: string; toolCalls: StreamToolCall[] };
+        }
+    ) {
+        super(message, undefined, 'CONTEXT_COMPRESSION_NEEDED');
+        this.name = 'LLMContextCompressionError';
+        this.context = options?.context;
+        this.partialResponse = options?.partialResponse;
+        if (options?.cause) {
+            (this as Error & { cause?: unknown }).cause = options.cause;
+        }
+    }
+}
+
 // ==================== 类型守卫 ====================
 
 export function isAgentError(error: unknown): error is AgentError {
@@ -298,6 +335,10 @@ export function isToolError(error: unknown): error is ToolError {
 
 export function isLLMRetryableError(error: unknown): error is LLMRetryableError {
     return error instanceof LLMRetryableError;
+}
+
+export function isLLMContextCompressionError(error: unknown): error is LLMContextCompressionError {
+    return error instanceof LLMContextCompressionError;
 }
 
 /**

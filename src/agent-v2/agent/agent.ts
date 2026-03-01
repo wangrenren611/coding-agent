@@ -40,6 +40,7 @@ import {
     AgentValidationError,
     LLMRequestError,
     LLMResponseInvalidError,
+    isLLMContextCompressionError,
 } from './errors';
 import { AgentExecutionResult, AgentOptions, AgentStatus, StreamCallback } from './types';
 import { AgentState } from './core/agent-state';
@@ -429,28 +430,38 @@ export class Agent {
                 await this.executeLLMCall(options);
                 this.agentState.recordSuccess();
             } catch (error) {
-                this.handleLoopError(error);
+                await this.handleLoopError(error);
             }
         }
     }
 
-    private handleLoopError(error: unknown): never | void {
-        // 可重试错误
-        if (isRetryableError(error)) {
-            const delay = this.resolveRetryDelay(error);
-            this.agentState.recordRetryableError(delay);
-            this.pendingRetryReason = this.formatRetryReason(error);
-            const stats = this.agentState.getStats();
-            this.eventBus.emit(EventType.TASK_RETRY, {
-                timestamp: this.timeProvider.getCurrentTime(),
-                retryCount: stats.retries,
-                maxRetries: stats.maxRetries,
-                reason: this.pendingRetryReason,
-            });
-            return;
+    private async handleLoopError(error: unknown): Promise<void> {
+        // 检查是否为可重试错误
+        if (!isRetryableError(error)) {
+            throw error;
         }
 
-        throw error;
+        // 特殊处理：LLMContextCompressionError 需要先压缩上下文
+        if (isLLMContextCompressionError(error)) {
+            try {
+                await this.session.compactBeforeLLMCall();
+            } catch (compactError) {
+                // 压缩失败不影响重试流程，仅记录日志
+                console.error('[Agent] Context compaction failed:', compactError);
+            }
+        }
+
+        // 记录重试
+        const delay = this.resolveRetryDelay(error);
+        this.agentState.recordRetryableError(delay);
+        this.pendingRetryReason = this.formatRetryReason(error);
+        const stats = this.agentState.getStats();
+        this.eventBus.emit(EventType.TASK_RETRY, {
+            timestamp: this.timeProvider.getCurrentTime(),
+            retryCount: stats.retries,
+            maxRetries: stats.maxRetries,
+            reason: this.pendingRetryReason,
+        });
     }
 
     private async handleRetry(): Promise<void> {
