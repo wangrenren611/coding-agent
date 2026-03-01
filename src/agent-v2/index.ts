@@ -94,3 +94,58 @@ export {
     createAgentEventMapper,
     createEventLoggerMiddleware,
 } from './logger/middleware';
+
+// 多智能体编排内核
+export {
+    InMemoryEventStream,
+    InMemoryStateStore,
+    DefaultPolicyEngine,
+    GatewayRouter,
+    AgentRuntimeService,
+    OrchestratorKernel,
+    AgentSendMessageTool,
+    AgentReceiveMessagesTool,
+    AgentAckMessagesTool,
+    AgentNackMessageTool,
+    AgentListDeadLettersTool,
+    AgentRequeueDeadLetterTool,
+} from './orchestration';
+export type { AgentRuntimeServiceOptions } from './orchestration';
+export type {
+    AgentRuntime,
+    AgentProfile,
+    RunRecord,
+    RunHandle,
+    ExecuteCommand,
+    RuntimeRunStatus,
+    RuntimeEvent,
+    EventFilter,
+    RouteBinding,
+    RouteRequest,
+    RouteDecision,
+    InterAgentMessage,
+    SpawnCommand,
+    RunGraphNode,
+    BudgetPolicy,
+    PolicyDecision,
+    ExecutionPolicyContext,
+    SpawnPolicyContext,
+    MessageRuntimeConfig,
+    ReceiveMessageOptions,
+    NackMessageOptions,
+    NackMessageResult,
+    MessagingRule,
+    MessagingPolicy,
+    MessagingPolicyContext,
+    EventStream,
+    StateStore,
+    PolicyEngine,
+} from './orchestration';
+export type {
+    AgentConfig,
+    AutoDispatchConfig,
+    AutoDispatchTrigger,
+    OrchestratorKernelOptions,
+    OrchestratorKernelRuntimeOptions,
+    OrchestratorKernelBootstrapOptions,
+} from './orchestration';

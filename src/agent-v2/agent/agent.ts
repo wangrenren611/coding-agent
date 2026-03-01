@@ -99,6 +99,7 @@ export class Agent {
     private readonly requestTimeoutMs?: number;
     private pendingRetryReason: string | null = null;
     private readonly idleTimeoutMs: number;
+    private readonly loopBoundaryHook?: AgentOptions['loopBoundaryHook'];
 
     // 内部组件
     private readonly agentState: AgentState;
@@ -116,6 +117,7 @@ export class Agent {
         this.thinking = config.thinking;
         this.requestTimeoutMs = this.normalizeMs(config.requestTimeout);
         this.idleTimeoutMs = this.normalizeMs(config.idleTimeout) ?? AGENT_DEFAULTS.IDLE_TIMEOUT_MS;
+        this.loopBoundaryHook = config.loopBoundaryHook;
 
         this.timeProvider = config.timeProvider ?? new DefaultTimeProvider();
         this.eventBus = new EventBus();
@@ -463,6 +465,8 @@ export class Agent {
                 }
             }
 
+            await this.handleLoopBoundary();
+
             this.agentState.incrementLoop();
             this.agentState.setStatus(AgentStatus.RUNNING);
             this.eventBus.emit(EventType.TASK_PROGRESS, {
@@ -478,6 +482,32 @@ export class Agent {
             } catch (error) {
                 await this.handleLoopError(error);
             }
+        }
+    }
+
+    private async handleLoopBoundary(): Promise<void> {
+        if (!this.loopBoundaryHook) {
+            return;
+        }
+
+        try {
+            await this.loopBoundaryHook({
+                loopCount: this.agentState.loopCount + 1,
+                sessionId: this.session.getSessionId(),
+                appendUserMessage: (content: MessageContent) => {
+                    if (!hasContent(content)) return;
+                    this.session.addMessage({
+                        messageId: uuid(),
+                        role: 'user',
+                        content,
+                    });
+                },
+            });
+        } catch (error) {
+            this.logger.warn('[Agent] Loop boundary hook failed', {
+                phase: 'loop-boundary',
+                error: error instanceof Error ? error.message : String(error),
+            });
         }
     }
 

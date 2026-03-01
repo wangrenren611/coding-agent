@@ -137,6 +137,10 @@ export class ToolRegistry {
         });
     }
 
+    hasTool(name: string): boolean {
+        return this.tools.has(name);
+    }
+
     /**
      * 验证 tool_calls 的基础结构
      */

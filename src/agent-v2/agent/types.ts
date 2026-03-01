@@ -2,7 +2,7 @@
  * Agent 核心类型定义
  */
 
-import type { LLMProvider } from '../../providers';
+import type { LLMProvider, MessageContent } from '../../providers';
 import type { ToolRegistry } from '../tool/registry';
 import { AgentMessage } from './stream-types';
 import type { ITimeProvider } from './types-internal';
@@ -23,6 +23,12 @@ export enum AgentStatus {
 }
 
 export type StreamCallback = <T extends AgentMessage>(message: T) => void;
+
+export interface LoopBoundaryContext {
+    loopCount: number;
+    sessionId: string;
+    appendUserMessage: (content: MessageContent) => void;
+}
 
 export type AgentFailureCode =
     // Agent 状态错误
@@ -140,4 +146,6 @@ export interface AgentOptions {
     loggerConfig?: Partial<LoggerConfig>;
     /** 是否启用 Agent 事件日志（默认 true） */
     enableEventLogging?: boolean;
+    /** 每轮循环边界回调（在每次 LLM 调用前触发） */
+    loopBoundaryHook?: (context: LoopBoundaryContext) => Promise<void> | void;
 }
