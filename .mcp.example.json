@@ -1,0 +1,33 @@
+{
+  "$schema": "https://github.com/modelcontextprotocol/spec/blob/main/schema/schema.json",
+  "mcpServers": [
+    {
+      "name": "filesystem",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "${WORKING_DIR:-.}"],
+      "disabled": true,
+      "description": "文件系统访问工具（需要配置允许访问的目录）"
+    },
+    {
+      "name": "memory",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"],
+      "disabled": true,
+      "description": "知识图谱内存工具（用于存储和检索信息）"
+    },
+    {
+      "name": "fetch",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-fetch"],
+      "disabled": true,
+      "description": "网页抓取工具（用于获取网页内容）"
+    },
+    {
+      "name": "sqlite",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-sqlite", "--db-path", "${SQLITE_DB_PATH:-./data.db}"],
+      "disabled": true,
+      "description": "SQLite 数据库工具"
+    }
+  ]
+}
