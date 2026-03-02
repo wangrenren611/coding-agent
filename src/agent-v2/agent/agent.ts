@@ -47,6 +47,7 @@ import { AgentExecutionResult, AgentOptions, AgentStatus, StreamCallback } from 
 import { AgentState } from './core/agent-state';
 import { LLMCaller } from './core/llm-caller';
 import { ToolExecutor } from './core/tool-executor';
+import { checkComplete as evaluateCompletion } from './core/completion-checker';
 import { DefaultTimeProvider } from './time-provider';
 import { InputValidator } from './input-validator';
 import { ErrorClassifier } from './error-classifier';
@@ -443,7 +444,23 @@ export class Agent {
                 break;
             }
 
-            if (this.checkComplete()) {
+            const completion = await evaluateCompletion({
+                lastMessage: this.session.getLastMessage(),
+                sessionId: this.session.getSessionId(),
+                memoryManager: this.session.getMemoryManager(),
+            });
+            if (completion.blockedByTasks) {
+                this.emitter.emitStatus(
+                    AgentStatus.RUNNING,
+                    `Task list still has unfinished items (in_progress: ${completion.blockedByTasks.inProgressCount}, pending: ${completion.blockedByTasks.pendingCount}), continuing...`,
+                    undefined,
+                    {
+                        source: 'agent',
+                        phase: 'lifecycle',
+                    }
+                );
+            }
+            if (completion.done) {
                 break;
             }
 
@@ -588,56 +605,6 @@ export class Agent {
     }
 
     // ==================== 内部方法：完成检测 ====================
-
-    private checkComplete(): boolean {
-        const lastMessage = this.session.getLastMessage();
-        if (!lastMessage) return false;
-
-        switch (lastMessage.role) {
-            case 'user':
-                return false;
-            case 'tool':
-                return false;
-            case 'assistant':
-                return this.checkAssistantComplete(lastMessage);
-            default:
-                return false;
-        }
-    }
-
-    private checkAssistantComplete(message: Message): boolean {
-        if (message.finish_reason) {
-            switch (message.finish_reason) {
-                case 'abort':
-                    return false;
-                case 'length': {
-                    // finish_reason=length 时，检查是否有未完成的内容或工具调用
-                    const hasTools = Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
-                    return this.hasAssistantOutput(message) && !hasTools;
-                }
-                case 'tool_calls':
-                    return false;
-            }
-
-            if (Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
-                return false;
-            }
-
-            if (this.isEmptyResponse(message)) {
-                return false;
-            }
-
-            return true;
-        }
-
-        const hasToolCalls = Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
-        return message.type === 'text' && this.hasAssistantOutput(message) && !hasToolCalls;
-    }
-
-    private isEmptyResponse(message: Message): boolean {
-        const hasToolCalls = Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
-        return message.role === 'assistant' && !hasToolCalls && !this.hasAssistantOutput(message);
-    }
 
     private hasReasoningOutput(reasoning: unknown): reasoning is string {
         return typeof reasoning === 'string' && reasoning.trim().length > 0;

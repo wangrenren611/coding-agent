@@ -535,6 +535,35 @@ describe('Agent completed and exception scenarios', () => {
         expect(retryingMessages).toHaveLength(0);
     });
 
+    it('reasoning-only response should keep empty content without fallback copy', async () => {
+        const provider = new SequenceProvider([
+            createReasoningOnlyResponse('第一轮仅推理'),
+            createTextResponse('第二轮最终答案'),
+        ]);
+        const memoryManager = await createReadyMemoryManager('reasoning-no-fallback');
+
+        const agent = new Agent({
+            provider: provider as unknown as LLMProvider,
+            systemPrompt: 'test',
+            stream: false,
+            thinking: true,
+            memoryManager,
+            maxLoops: 5,
+        });
+
+        const result = await agent.executeWithResult('继续');
+
+        expect(result.status).toBe('completed');
+        expect(result.finalMessage?.content).toBe('第二轮最终答案');
+        expect(provider.callCount).toBe(2);
+
+        const assistantMessages = agent.getMessages().filter((message) => message.role === 'assistant');
+        const reasoningOnlyMessage = assistantMessages.find((message) => message.reasoning_content === '第一轮仅推理');
+
+        expect(reasoningOnlyMessage).toBeDefined();
+        expect(reasoningOnlyMessage?.content).toBe('');
+    });
+
     it('reasoning-only response should not trigger compensation retry and should complete', async () => {
         const provider = new SequenceProvider([createReasoningOnlyResponse('这是推理输出')]);
         const memoryManager = await createReadyMemoryManager('reasoning-only');

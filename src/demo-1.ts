@@ -12,7 +12,7 @@ import { parseFilePaths, createFileSummary, type ParsedFileInput } from './cli/u
 import type { InputContentPart } from './providers/types/api';
 
 // const model = 'wr-claude-4.6';
-const model: ModelId = 'glm-5';
+const model: ModelId = 'qwen3.5-plus';
 dotenv.config({
     path: './.env.development',
 });
@@ -26,7 +26,7 @@ const COLORS = {
     dim: '\x1b[2m',
     italic: '\x1b[3m',
 
-    // 前景色
+    // 前景色 - 优化配色方案
     black: '\x1b[30m',
     red: '\x1b[31m',
     green: '\x1b[32m',
@@ -42,6 +42,15 @@ const COLORS = {
     brightBlue: '\x1b[94m',
     brightMagenta: '\x1b[95m',
     brightCyan: '\x1b[96m',
+
+    // 语义化颜色
+    primary: '\x1b[38;5;75m', // 主色调 - 亮蓝色
+    secondary: '\x1b[38;5;141m', // 次要色 - 紫色
+    success: '\x1b[38;5;78m', // 成功 - 绿色
+    warning: '\x1b[38;5;221m', // 警告 - 黄色
+    error: '\x1b[38;5;204m', // 错误 - 红色
+    info: '\x1b[38;5;117m', // 信息 - 青色
+    muted: '\x1b[38;5;245m', // 弱化 - 灰色
 
     // 背景色
     bgBlack: '\x1b[40m',
@@ -63,6 +72,17 @@ const SUBAGENT_COLORS = [
     '\x1b[38;5;223m', // 亮粉色
     '\x1b[38;5;180m', // 亮黄色
 ];
+
+// 工具图标映射
+const TOOL_ICONS: Record<string, string> = {
+    bash: '⚡',
+    write_file: '📝',
+    read_file: '📖',
+    list_directory: '📁',
+    search: '🔍',
+    task: '🎯',
+    default: '🔧',
+};
 
 function parseRequestTimeoutMs(envValue: string | undefined): number {
     const parsed = Number(envValue);
@@ -129,18 +149,58 @@ function formatTime(ms: number): string {
 }
 
 /**
- * 绘制分隔线
- */
-function drawDivider(char: string = '─', width: number = 60): string {
-    return char.repeat(width);
-}
-
-/**
  * 移除 ANSI 颜色码（用于计算长度）
  */
 function stripAnsi(str: string): string {
     // eslint-disable-next-line no-control-regex
     return str.replace(/\x1b\[[0-9;]*m/g, '');
+}
+
+/**
+ * 获取工具图标
+ */
+function getToolIcon(toolName: string): string {
+    return TOOL_ICONS[toolName] || TOOL_ICONS.default;
+}
+
+/**
+ * 格式化工具参数（智能截断和美化）
+ */
+function formatToolArgs(args: string, maxLength: number = 80): string {
+    try {
+        const parsed = JSON.parse(args);
+
+        // 如果是简单的对象，格式化为单行
+        if (typeof parsed === 'object' && parsed !== null) {
+            const keys = Object.keys(parsed);
+            if (keys.length === 0) return '{}';
+
+            if (keys.length === 1) {
+                const key = keys[0];
+                const value = parsed[key];
+                const valueStr = typeof value === 'string' ? value : JSON.stringify(value);
+                const result = `${key}: ${valueStr}`;
+                return result.length > maxLength ? result.slice(0, maxLength) + '...' : result;
+            }
+
+            // 多个参数，显示关键信息
+            const preview = keys
+                .slice(0, 2)
+                .map((k) => {
+                    const v = parsed[k];
+                    const vStr = typeof v === 'string' ? v : JSON.stringify(v);
+                    return `${k}: ${vStr.slice(0, 20)}`;
+                })
+                .join(', ');
+
+            const more = keys.length > 2 ? ` +${keys.length - 2} more` : '';
+            return (preview + more).slice(0, maxLength);
+        }
+
+        return args.slice(0, maxLength);
+    } catch {
+        return args.slice(0, maxLength);
+    }
 }
 
 /**
@@ -155,23 +215,17 @@ function formatMessageWithIndent(message: BaseAgentEvent, indent: string, color:
     switch (msgType) {
         case AgentMessageType.REASONING_START:
         case 'reasoning-start':
-            lines.push(`${indent}${color}◆ ${COLORS.dim}思考中...${COLORS.reset}`);
+            lines.push(`${indent}${COLORS.muted}⏳ 思考中...${COLORS.reset}`);
             break;
 
         case AgentMessageType.REASONING_DELTA:
         case 'reasoning-delta':
-            if (payload.content) {
-                // 处理多行内容
-                const content = payload.content as string;
-                const contentLines = content.split('\n');
-                for (const cline of contentLines) {
-                    lines.push(`${indent}${color}${COLORS.dim}${cline}${COLORS.reset}`);
-                }
-            }
+            // 子 Agent 的思考内容不输出，保持简洁
             break;
 
         case AgentMessageType.REASONING_COMPLETE:
         case 'reasoning-complete':
+            lines.push(`${indent}${COLORS.success}✓${COLORS.reset} ${COLORS.muted}思考完成${COLORS.reset}`);
             break;
 
         case AgentMessageType.TEXT_START:
@@ -184,7 +238,9 @@ function formatMessageWithIndent(message: BaseAgentEvent, indent: string, color:
                 const content = payload.content as string;
                 const contentLines = content.split('\n');
                 for (const cline of contentLines) {
-                    lines.push(`${indent}${cline}`);
+                    if (cline.trim()) {
+                        lines.push(`${indent}${cline}`);
+                    }
                 }
             }
             break;
@@ -197,74 +253,67 @@ function formatMessageWithIndent(message: BaseAgentEvent, indent: string, color:
         case 'tool_call_created': {
             const toolCalls = (payload.tool_calls || []) as Array<{ toolName: string; args: string }>;
             for (const call of toolCalls) {
-                const toolName = call.toolName;
-                const argsPreview = (call.args || '').slice(0, 60);
-                const more = (call.args || '').length > 60 ? '...' : '';
-                lines.push(
-                    `${indent}${COLORS.yellow}▸ ${toolName}${COLORS.reset} ${COLORS.dim}${argsPreview}${more}${COLORS.reset}`
-                );
+                const icon = getToolIcon(call.toolName);
+                const argsFormatted = formatToolArgs(call.args, 50);
+                lines.push(`${indent}${icon} ${color}${call.toolName}${COLORS.reset}`);
+                if (argsFormatted) {
+                    lines.push(`${indent}  ${COLORS.muted}${argsFormatted}${COLORS.reset}`);
+                }
             }
             break;
         }
 
         case AgentMessageType.TOOL_CALL_RESULT:
         case 'tool_call_result': {
-            const status = payload.status === 'success' ? `${COLORS.green}✓` : `${COLORS.red}✗`;
+            const status = payload.status === 'success' ? `${COLORS.success}✓` : `${COLORS.error}✗`;
             const result = payload.result;
             let resultPreview: string;
             if (typeof result === 'string') {
-                resultPreview = result.slice(0, 80);
+                resultPreview = result.slice(0, 60).replace(/\n/g, ' ');
             } else {
-                resultPreview = JSON.stringify(result || {}).slice(0, 80);
+                resultPreview = JSON.stringify(result || {}).slice(0, 60);
             }
             const more =
-                (typeof result === 'string' ? result.length : JSON.stringify(result || {}).length) > 80 ? '...' : '';
-            lines.push(`${indent}  ${status}${COLORS.reset} ${COLORS.dim}${resultPreview}${more}${COLORS.reset}`);
+                (typeof result === 'string' ? result.length : JSON.stringify(result || {}).length) > 60 ? '...' : '';
+
+            if (resultPreview.trim()) {
+                lines.push(`${indent}${status}${COLORS.reset} ${COLORS.muted}${resultPreview}${more}${COLORS.reset}`);
+            } else {
+                lines.push(`${indent}${status}${COLORS.reset}`);
+            }
             break;
         }
 
         case AgentMessageType.STATUS:
         case 'status': {
             const state = payload.state as string | undefined;
-            const statusIcons: Record<string, string> = {
-                idle: '⏸',
-                thinking: '●',
-                running: '●',
-                completed: `${COLORS.green}✓${COLORS.reset}`,
-                failed: `${COLORS.red}✗${COLORS.reset}`,
-                aborted: '🛑',
-                retrying: '🔄',
-            };
-            const icon = (state && statusIcons[state]) || '•';
-            const msg = payload.message ? ` - ${payload.message}` : '';
-            lines.push(`${indent}${icon} ${state || 'unknown'}${msg}`);
+            // 只显示重要状态
+            if (state && ['completed', 'failed', 'aborted'].includes(state)) {
+                const statusIcons: Record<string, string> = {
+                    completed: `${COLORS.success}✓${COLORS.reset}`,
+                    failed: `${COLORS.error}✗${COLORS.reset}`,
+                    aborted: '🛑',
+                };
+                const icon = statusIcons[state] || '•';
+                lines.push(`${indent}${icon} ${COLORS.muted}${state}${COLORS.reset}`);
+            }
             break;
         }
 
         case AgentMessageType.USAGE_UPDATE:
         case 'usage_update': {
-            const usage = payload.usage as
-                | { total_tokens: number; prompt_tokens: number; completion_tokens: number }
-                | undefined;
-            if (usage) {
-                lines.push(
-                    `${indent}${COLORS.dim}Tokens: ${usage.total_tokens} (↑${usage.prompt_tokens} ↓${usage.completion_tokens})${COLORS.reset}`
-                );
-            }
+            // 子 Agent 的 token 使用量不显示，避免信息过载
             break;
         }
 
         case AgentMessageType.ERROR:
         case 'error':
-            lines.push(`${indent}${COLORS.red}✗ ${payload.error}${COLORS.reset}`);
-            if (payload.phase) {
-                lines.push(`${indent}  阶段: ${payload.phase}`);
-            }
+            lines.push(`${indent}${COLORS.error}✗ ${payload.error}${COLORS.reset}`);
             break;
 
         case AgentMessageType.CODE_PATCH:
         case 'code_patch':
-            lines.push(`${indent}${COLORS.magenta}📝 ${payload.path}${COLORS.reset}`);
+            lines.push(`${indent}${COLORS.secondary}📝 ${payload.path}${COLORS.reset}`);
             break;
 
         default:
@@ -317,7 +366,10 @@ function bufferSubagentEvent(message: SubagentEventMessage, parentDepth: number 
 
         // 显示简洁的启动提示（单行，会被完成后覆盖）
         const taskNum = activeTaskIds.length;
-        process.stdout.write(`\r${COLORS.dim}⏳ 子任务 #${taskNum} [${subagent_type}] 启动中...${COLORS.reset}`);
+        const color = getSubagentColor(buffer.colorIndex);
+        process.stdout.write(
+            `\r${COLORS.muted}⏳ 子任务 #${taskNum}${COLORS.reset} ${color}${subagent_type}${COLORS.reset} ${COLORS.muted}启动中...${COLORS.reset}`
+        );
     }
 
     const color = getSubagentColor(buffer.colorIndex);
@@ -365,16 +417,18 @@ function printSubagentReport(buffer: SubagentBuffer) {
     const elapsed = formatTime(Date.now() - buffer.startTime);
 
     const statusIcon =
-        buffer.status === 'completed' ? `${COLORS.green}✓` : buffer.status === 'failed' ? `${COLORS.red}✗` : '🛑';
+        buffer.status === 'completed' ? `${COLORS.success}✓` : buffer.status === 'failed' ? `${COLORS.error}✗` : '🛑';
 
-    // 头部
+    // 头部 - 更简洁的设计
     console.log('');
     console.log(
-        `${COLORS.dim}[子任务 #${taskNum}]${COLORS.reset} ${color}${buffer.subagentType}${COLORS.reset} ${statusIcon}${COLORS.reset} ${COLORS.dim}(${elapsed})${COLORS.reset}`
+        `${COLORS.muted}┌─ 子任务 #${taskNum}${COLORS.reset} ${color}${buffer.subagentType}${COLORS.reset} ${statusIcon}${COLORS.reset} ${COLORS.muted}${elapsed}${COLORS.reset}`
     );
 
     // 输出缓冲的内容（过滤掉空行和重复的状态行）
     const seenStatusLines = new Set<string>();
+    let hasContent = false;
+
     for (const line of buffer.lines) {
         // 跳过空行
         if (!line.trim()) continue;
@@ -387,8 +441,15 @@ function printSubagentReport(buffer: SubagentBuffer) {
             seenStatusLines.add(key);
         }
 
-        process.stdout.write(`${line}`);
+        if (!hasContent) {
+            hasContent = true;
+        }
+
+        console.log(`${COLORS.muted}│${COLORS.reset} ${line}`);
     }
+
+    // 底部
+    console.log(`${COLORS.muted}└─${COLORS.reset}`);
 }
 
 /**
@@ -418,22 +479,24 @@ function handleSingleMessage(message: BaseAgentEvent, indent: string = '') {
     switch (message.type) {
         // ==================== 推理/思考内容 (thinking 模式) ====================
         case AgentMessageType.REASONING_START:
-            process.stdout.write(`\r${indent}${COLORS.green}* ${COLORS.reset}`);
+            isInReasoningBlock = true;
+            console.log(`\n${indent}${COLORS.muted}💭 思考中...${COLORS.reset}\n`);
             break;
 
         case AgentMessageType.REASONING_DELTA:
-            // 思考内容通过 loading 动画显示，不需要额外输出
-            process.stdout.write(message.payload.content);
+            // 输出思考内容，使用弱化的颜色
+            process.stdout.write(`${COLORS.dim}${message.payload.content}${COLORS.reset}`);
             break;
 
         case AgentMessageType.REASONING_COMPLETE:
-            process.stdout.write('\n');
+            isInReasoningBlock = false;
+            console.log(`\n${indent}${COLORS.success}✓${COLORS.reset} ${COLORS.muted}思考完成${COLORS.reset}\n`);
             break;
 
         // ==================== 正式文本回复 ====================
         case AgentMessageType.TEXT_START:
             if (!isInTextBlock) {
-                process.stdout.write(`${indent}${COLORS.green}● ${COLORS.reset}`);
+                console.log(`\n${indent}${COLORS.primary}━━━ 回复 ━━━${COLORS.reset}\n`);
                 isInTextBlock = true;
             }
             break;
@@ -458,23 +521,26 @@ function handleSingleMessage(message: BaseAgentEvent, indent: string = '') {
                 }
             }
 
-            console.log(`${indent}${COLORS.yellow}▸ 工具调用${COLORS.reset}`);
+            console.log(`\n${indent}${COLORS.primary}━━━ 工具调用 ━━━${COLORS.reset}\n`);
 
             for (const call of tools) {
-                const argsPreview = call.args.slice(0, 60);
-                const more = call.args.length > 60 ? '...' : '';
-                console.log(
-                    `${indent}  ${COLORS.bold}${call.toolName}${COLORS.reset} ${COLORS.dim}${argsPreview}${more}${COLORS.reset}`
-                );
+                const icon = getToolIcon(call.toolName);
+                const argsFormatted = formatToolArgs(call.args, 60);
+
+                console.log(`${indent}${icon} ${COLORS.bold}${COLORS.info}${call.toolName}${COLORS.reset}`);
+                if (argsFormatted) {
+                    console.log(`${indent}  ${COLORS.muted}${argsFormatted}${COLORS.reset}`);
+                }
             }
+            console.log('');
             break;
         }
 
         case AgentMessageType.TOOL_CALL_RESULT: {
             const status =
                 message.payload.status === 'success'
-                    ? `${COLORS.green}✓${COLORS.reset}`
-                    : `${COLORS.red}✗${COLORS.reset}`;
+                    ? `${COLORS.success}✓${COLORS.reset}`
+                    : `${COLORS.error}✗${COLORS.reset}`;
             const result = message.payload.result;
             let resultPreview: string;
 
@@ -486,8 +552,11 @@ function handleSingleMessage(message: BaseAgentEvent, indent: string = '') {
             const more =
                 (typeof result === 'string' ? result.length : JSON.stringify(result || {}).length) > 100 ? '...' : '';
 
-            console.log(`${indent}  ${status} ${COLORS.dim}[${message.payload.callId.slice(0, 8)}]${COLORS.reset}`);
-            console.log(`${indent}  ${COLORS.dim}${resultPreview}${more}${COLORS.reset}`);
+            console.log(`${indent}${status} ${COLORS.muted}结果${COLORS.reset}`);
+            if (resultPreview.trim()) {
+                console.log(`${indent}  ${COLORS.muted}${resultPreview}${more}${COLORS.reset}`);
+            }
+            console.log('');
             break;
         }
 
@@ -508,15 +577,18 @@ function handleSingleMessage(message: BaseAgentEvent, indent: string = '') {
                 idle: '⏸',
                 thinking: '●',
                 running: '●',
-                completed: `${COLORS.green}✓${COLORS.reset}`,
-                failed: `${COLORS.red}✗${COLORS.reset}`,
+                completed: `${COLORS.success}✓${COLORS.reset}`,
+                failed: `${COLORS.error}✗${COLORS.reset}`,
                 aborted: '🛑',
                 retrying: '🔄',
             };
             const icon = statusIcons[state] || '•';
             const msg = message.payload.message ? ` ${message.payload.message}` : '';
 
-            console.log(`${indent}${icon} ${COLORS.dim}${state}${msg}${COLORS.reset}`);
+            // 只在重要状态时输出
+            if (['completed', 'failed', 'aborted', 'retrying'].includes(state)) {
+                console.log(`${indent}${icon} ${COLORS.muted}${state}${msg}${COLORS.reset}`);
+            }
             break;
         }
 
@@ -525,10 +597,12 @@ function handleSingleMessage(message: BaseAgentEvent, indent: string = '') {
             const usage = message.payload.usage;
             const cumulative = message.payload.cumulative;
 
-            let usageText = `${indent}${COLORS.dim}Tokens: ${usage.total_tokens} (↑${usage.prompt_tokens} ↓${usage.completion_tokens})${COLORS.reset}`;
+            let usageText = `${indent}${COLORS.muted}📊 Tokens: ${usage.total_tokens}`;
 
             if (cumulative) {
-                usageText += ` ${COLORS.dim}| 累计: ${cumulative.total_tokens}${COLORS.reset}`;
+                usageText += ` | 累计: ${cumulative.total_tokens}${COLORS.reset}`;
+            } else {
+                usageText += `${COLORS.reset}`;
             }
 
             console.log(usageText);
@@ -537,18 +611,19 @@ function handleSingleMessage(message: BaseAgentEvent, indent: string = '') {
 
         // ==================== 错误处理 ====================
         case AgentMessageType.ERROR:
-            console.error(`${indent}${COLORS.red}✗ 错误${COLORS.reset}`);
+            console.error(`\n${indent}${COLORS.error}✗ 错误${COLORS.reset}`);
             console.error(`${indent}  ${message.payload.error}`);
             if (message.payload.phase) {
-                console.error(`${indent}  阶段: ${message.payload.phase}`);
+                console.error(`${indent}  ${COLORS.muted}阶段: ${message.payload.phase}${COLORS.reset}`);
             }
+            console.log('');
             break;
 
         // ==================== 代码补丁 ====================
         case AgentMessageType.CODE_PATCH:
-            console.log(`${indent}${COLORS.magenta}📝 ${message.payload.path}${COLORS.reset}`);
+            console.log(`${indent}${COLORS.secondary}📝 ${message.payload.path}${COLORS.reset}`);
             if (message.payload.language) {
-                console.log(`${indent}  ${message.payload.language}`);
+                console.log(`${indent}  ${COLORS.muted}${message.payload.language}${COLORS.reset}`);
             }
             break;
 
@@ -578,7 +653,7 @@ function handleStreamMessage(message: AgentMessage) {
  * 打印用户输入框（支持多模态内容）
  */
 function printUserInput(query: string, parsedInput?: ParsedFileInput) {
-    const maxLineLen = 70;
+    const maxLineLen = 80;
     const lines: string[] = [];
 
     // 使用解析后的文本（已去除文件路径）
@@ -599,27 +674,29 @@ function printUserInput(query: string, parsedInput?: ParsedFileInput) {
         lines.push(currentLine);
     }
 
-    console.log(`${COLORS.dim}用户输入${COLORS.reset}`);
+    console.log('');
+    console.log(`${COLORS.primary}┌─ 用户输入 ─────────────────────────────────────────────${COLORS.reset}`);
 
     for (const line of lines) {
-        console.log(`${line}`);
+        console.log(`${COLORS.primary}│${COLORS.reset} ${line}`);
     }
 
     // 显示附件信息
     if (parsedInput && parsedInput.contentParts.length > 0) {
         const fileSummary = createFileSummary(parsedInput.contentParts);
         if (fileSummary) {
-            console.log(`${COLORS.dim}◆ ${fileSummary}${COLORS.reset}`);
+            console.log(`${COLORS.primary}│${COLORS.reset} ${COLORS.muted}📎 ${fileSummary}${COLORS.reset}`);
         }
     }
 
+    console.log(`${COLORS.primary}└────────────────────────────────────────────────────────${COLORS.reset}`);
     console.log('');
 
     // 显示解析错误
     if (parsedInput && parsedInput.errors.length > 0) {
-        console.log(`${COLORS.yellow}⚠ 文件解析警告:${COLORS.reset}`);
+        console.log(`${COLORS.warning}⚠ 文件解析警告:${COLORS.reset}`);
         for (const error of parsedInput.errors) {
-            console.log(`  ${COLORS.yellow}•${COLORS.reset} ${error}`);
+            console.log(`  ${COLORS.warning}•${COLORS.reset} ${error}`);
         }
         console.log('');
     }
@@ -630,14 +707,14 @@ function printUserInput(query: string, parsedInput?: ParsedFileInput) {
  */
 function printSessionInfo(sessionId: string, messageCount: number, restored: boolean = false) {
     console.log('');
-    console.log(`${COLORS.dim}${drawDivider('─')}${COLORS.reset}`);
-    console.log(`${COLORS.cyan}◆ 会话信息${COLORS.reset}`);
-    console.log(`${COLORS.dim}  会话 ID: ${sessionId}${COLORS.reset}`);
-    console.log(`${COLORS.dim}  消息数: ${messageCount}${COLORS.reset}`);
+    console.log(`${COLORS.primary}┌─ 会话信息 ─────────────────────────────────────────────${COLORS.reset}`);
+    console.log(`${COLORS.primary}│${COLORS.reset} ${COLORS.muted}会话 ID:${COLORS.reset} ${sessionId}`);
+    console.log(`${COLORS.primary}│${COLORS.reset} ${COLORS.muted}消息数:${COLORS.reset} ${messageCount}`);
     if (restored) {
-        console.log(`${COLORS.green}  ✓ 已恢复历史会话${COLORS.reset}`);
+        console.log(`${COLORS.primary}│${COLORS.reset} ${COLORS.success}✓ 已恢复历史会话${COLORS.reset}`);
     }
-    console.log(`${COLORS.dim}${drawDivider('─')}${COLORS.reset}`);
+    console.log(`${COLORS.primary}└────────────────────────────────────────────────────────${COLORS.reset}`);
+    console.log('');
 }
 
 /**
@@ -659,29 +736,35 @@ interface AgentResponse {
  */
 function printFinalResponse(response: AgentResponse) {
     console.log('');
-    console.log(`${COLORS.dim}${drawDivider('─')}${COLORS.reset}`);
-    console.log(`${COLORS.green}◆ 最终响应${COLORS.reset}`);
-    console.log(`${COLORS.dim}${drawDivider('─')}${COLORS.reset}`);
+    console.log(`${COLORS.success}┌─ 执行完成 ─────────────────────────────────────────────${COLORS.reset}`);
 
     if (response.finish_reason) {
-        const reasonColors: Record<string, string> = {
-            stop: COLORS.green,
-            tool_calls: COLORS.yellow,
-            length: COLORS.yellow,
-            content_filter: COLORS.red,
+        const reasonIcons: Record<string, string> = {
+            stop: '✓',
+            tool_calls: '🔧',
+            length: '📏',
+            content_filter: '🚫',
         };
+        const reasonColors: Record<string, string> = {
+            stop: COLORS.success,
+            tool_calls: COLORS.info,
+            length: COLORS.warning,
+            content_filter: COLORS.error,
+        };
+        const icon = reasonIcons[response.finish_reason] || '•';
         const reasonColor = reasonColors[response.finish_reason] || COLORS.white;
-        console.log(`  结束原因: ${reasonColor}${response.finish_reason}${COLORS.reset}`);
+        console.log(`${COLORS.success}│${COLORS.reset} ${reasonColor}${icon} ${response.finish_reason}${COLORS.reset}`);
     }
 
     if (response.usage) {
-        console.log(`  Token 使用:`);
-        console.log(`    - 输入: ${response.usage.prompt_tokens}`);
-        console.log(`    - 输出: ${response.usage.completion_tokens}`);
-        console.log(`    - 总计: ${COLORS.cyan}${response.usage.total_tokens}${COLORS.reset}`);
+        console.log(`${COLORS.success}│${COLORS.reset} ${COLORS.muted}📊 Token 使用:${COLORS.reset}`);
+        console.log(
+            `${COLORS.success}│${COLORS.reset}   ${COLORS.muted}输入: ${response.usage.prompt_tokens} | 输出: ${response.usage.completion_tokens} | 总计: ${COLORS.info}${response.usage.total_tokens}${COLORS.reset}`
+        );
     }
 
-    console.log(`${COLORS.dim}${drawDivider('─')}${COLORS.reset}`);
+    console.log(`${COLORS.success}└────────────────────────────────────────────────────────${COLORS.reset}`);
+    console.log('');
 }
 
 /**
@@ -698,27 +781,38 @@ function parseCliArgs(): { sessionId?: string; query: string } {
         if (arg === '--session-id' || arg === '-s') {
             sessionId = args[++i];
             if (!sessionId) {
-                console.error(`${COLORS.red}错误: --session-id 需要提供一个会话 ID${COLORS.reset}`);
+                console.error(`${COLORS.error}✗ 错误:${COLORS.reset} --session-id 需要提供一个会话 ID`);
                 process.exit(1);
             }
         } else if (arg === '--help' || arg === '-h') {
             console.log(`
-${COLORS.cyan}用法:${COLORS.reset} pnpm demo1 [选项] [问题]
+${COLORS.primary}╔═══════════════════════════════════════════════════════╗${COLORS.reset}
+${COLORS.primary}║${COLORS.reset}  ${COLORS.bold}${COLORS.info}Agent Demo - 使用帮助${COLORS.reset}                        ${COLORS.primary}║${COLORS.reset}
+${COLORS.primary}╚═══════════════════════════════════════════════════════╝${COLORS.reset}
 
-${COLORS.cyan}选项:${COLORS.reset}
-  -s, --session-id <id>  指定会话 ID，用于恢复之前的会话
-  -h, --help             显示此帮助信息
+${COLORS.info}用法:${COLORS.reset}
+  pnpm demo1 [选项] [问题]
 
-${COLORS.cyan}多模态支持:${COLORS.reset}
-  在问题中使用 @文件路径 来附加文件（图片/视频/文档）
-  支持的图片格式: jpg, jpeg, png, gif, webp, bmp, svg
-  支持的视频格式: mp4, mov, webm, avi, mkv
-  其他文件将作为附件发送
+${COLORS.info}选项:${COLORS.reset}
+  ${COLORS.success}-s, --session-id <id>${COLORS.reset}  指定会话 ID，用于恢复之前的会话
+  ${COLORS.success}-h, --help${COLORS.reset}             显示此帮助信息
 
-${COLORS.cyan}示例:${COLORS.reset}
+${COLORS.info}多模态支持:${COLORS.reset}
+  在问题中使用 ${COLORS.warning}@文件路径${COLORS.reset} 来附加文件（图片/视频/文档）
+  
+  ${COLORS.muted}支持的图片格式:${COLORS.reset} jpg, jpeg, png, gif, webp, bmp, svg
+  ${COLORS.muted}支持的视频格式:${COLORS.reset} mp4, mov, webm, avi, mkv
+  ${COLORS.muted}其他文件将作为附件发送${COLORS.reset}
+
+${COLORS.info}示例:${COLORS.reset}
+  ${COLORS.muted}# 基础使用${COLORS.reset}
   pnpm demo1 "分析当前项目结构"
+  
+  ${COLORS.muted}# 多模态输入${COLORS.reset}
   pnpm demo1 "这张图片里有什么? @./screenshot.png"
   pnpm demo1 "分析这个 PDF 文件 @./document.pdf"
+  
+  ${COLORS.muted}# 会话恢复${COLORS.reset}
   pnpm demo1 --session-id agent-44 "继续之前的问题"
   pnpm demo1 -s agent-44 "继续之前的问题"
 `);
@@ -749,12 +843,16 @@ async function demo1() {
     const { sessionId: cliSessionId, query: cliQuery } = parseCliArgs();
 
     // 打印标题
+    console.log('');
+    console.log(`${COLORS.primary}╔═══════════════════════════════════════════════════════╗${COLORS.reset}`);
     console.log(
-        `${COLORS.cyan}◆ Agent Demo${COLORS.reset} ${COLORS.dim}支持 Thinking 模式 • 子 Agent 可视化${COLORS.reset}`
+        `${COLORS.primary}║${COLORS.reset}  ${COLORS.bold}${COLORS.info}Agent Demo${COLORS.reset}  ${COLORS.muted}Thinking 模式 • 子 Agent 可视化${COLORS.reset}  ${COLORS.primary}║${COLORS.reset}`
     );
+    console.log(`${COLORS.primary}╚═══════════════════════════════════════════════════════╝${COLORS.reset}`);
+    console.log('');
 
     if (cliSessionId) {
-        console.log(`${COLORS.yellow}◆ 恢复会话${COLORS.reset} ${COLORS.dim}${cliSessionId}${COLORS.reset}`);
+        console.log(`${COLORS.warning}◆ 恢复会话${COLORS.reset} ${COLORS.muted}${cliSessionId}${COLORS.reset}\n`);
     }
 
     const preferredMemoryPath =
@@ -804,7 +902,7 @@ async function demo1() {
         }
 
         if (query.trim().length === 0) {
-            console.error(`${COLORS.red}错误: 查询内容不能为空${COLORS.reset}`);
+            console.error(`${COLORS.error}✗ 错误:${COLORS.reset} 查询内容不能为空`);
             process.exit(1);
         }
 
@@ -819,12 +917,12 @@ async function demo1() {
         if (parsedInput.contentParts.length > 0) {
             // 使用多模态内容
             executeContent = parsedInput.contentParts;
-            console.log(`${COLORS.dim}◆ 已附加 ${parsedInput.contentParts.length - 1} 个文件${COLORS.reset}\n`);
+            console.log(`${COLORS.info}◆ 已附加 ${parsedInput.contentParts.length - 1} 个文件${COLORS.reset}\n`);
         } else {
             // 使用纯文本
             executeContent = query;
         }
-        console.log(executeContent);
+
         const response = await agent.execute(executeContent);
 
         // 兜底：刷新所有未完成的子 Agent 缓冲区
@@ -836,7 +934,11 @@ async function demo1() {
         // 输出会话信息
         printSessionInfo(agent.getSessionId(), agent.getMessages().length, !!cliSessionId);
     } catch (error) {
-        console.error(`\n${COLORS.red}${COLORS.bold}✗ demo1 执行失败:${COLORS.reset}`);
+        console.error(`\n${COLORS.error}╔═══════════════════════════════════════════════════════╗${COLORS.reset}`);
+        console.error(
+            `${COLORS.error}║${COLORS.reset}  ${COLORS.bold}执行失败${COLORS.reset}                                        ${COLORS.error}║${COLORS.reset}`
+        );
+        console.error(`${COLORS.error}╚═══════════════════════════════════════════════════════╝${COLORS.reset}\n`);
         console.error(error);
     } finally {
         await memoryManager.close();
@@ -844,6 +946,6 @@ async function demo1() {
 }
 
 demo1().catch((error) => {
-    console.error(`${COLORS.red}✗ demo1 未捕获异常:${COLORS.reset}`, error);
+    console.error(`\n${COLORS.error}✗ 未捕获异常:${COLORS.reset}`, error);
     process.exit(1);
 });

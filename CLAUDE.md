@@ -342,9 +342,10 @@ docs/api-documentation
    ```
 
 ---
+
 ## 重要提醒
 1. 不要分析这个两个文件，这是测试用，不用理会，不用读取内容src/query.text、src/demo-1.ts
-2. 代码提交必须执行`pnpm ci:check`,确保所有测试都通过
+2. 代码提交必须执行`pnpm ci:check`,确保所有测试都通过，才能提交代码
 
 
 ## Browser Automation
