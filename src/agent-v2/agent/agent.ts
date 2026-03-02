@@ -145,17 +145,7 @@ export class Agent {
         // 系统提示词由调用者构建（如 operatorPrompt），Agent 不再内部处理 planMode
         const systemPrompt = config.systemPrompt ?? '';
 
-        this.session = new Session({
-            systemPrompt,
-            memoryManager: config.memoryManager,
-            sessionId: config.sessionId,
-            enableCompaction: config.enableCompaction,
-            compactionConfig: config.compactionConfig,
-            provider: this.provider,
-            logger: this.logger,
-        });
-
-        // 根据 planMode 选择不同的工具注册表
+        // 根据 planMode 选择不同的工具注册表（需要在 Session 之前初始化，以便传递 getTools 回调）
         if (config.toolRegistry) {
             this.toolRegistry = config.toolRegistry;
         } else if (config.planMode) {
@@ -179,6 +169,17 @@ export class Agent {
                 this.provider
             );
         }
+
+        this.session = new Session({
+            systemPrompt,
+            memoryManager: config.memoryManager,
+            sessionId: config.sessionId,
+            enableCompaction: config.enableCompaction,
+            compactionConfig: config.compactionConfig,
+            provider: this.provider,
+            logger: this.logger,
+            getTools: () => this.toolRegistry.toLLMTools(),
+        });
         this.configureToolEventBridge();
 
         this.agentState = new AgentState({
