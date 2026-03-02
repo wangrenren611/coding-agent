@@ -39,7 +39,7 @@ import {
 } from './types';
 
 /** Provider 默认超时时间（毫秒），作为 Agent.requestTimeout 的回退值 */
-const PROVIDER_DEFAULT_TIMEOUT = 1000 * 60 * 3; // 3 分钟
+const PROVIDER_DEFAULT_TIMEOUT = 1000 * 60 * 10; // 10分钟
 
 /**
  * OpenAI 兼容 Provider 基类
@@ -209,8 +209,13 @@ export class OpenAICompatibleProvider extends LLMProvider {
             throw new LLMError('Response body is not readable', 'NO_BODY');
         }
 
-        // 直接 yield 每个 chunk，不累积
-        yield* StreamParser.parseAsync(response.body.getReader());
+        // 如果适配器提供了自定义流式解析器，则使用它
+        if (this.adapter.parseStreamAsync) {
+            yield* this.adapter.parseStreamAsync(response.body.getReader());
+        } else {
+            // 否则使用默认的 OpenAI 流式解析器
+            yield* StreamParser.parseAsync(response.body.getReader());
+        }
     }
 
     /**

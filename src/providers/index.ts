@@ -68,4 +68,5 @@ export type {
     Tool,
     LLMGenerateOptions,
     LLMRequest,
+    AnthropicStreamEvent,
 } from './types';

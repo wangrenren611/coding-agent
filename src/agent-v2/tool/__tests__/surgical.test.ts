@@ -252,6 +252,25 @@ describe('SurgicalEditTool - Deep Tests', () => {
             expect((result.metadata as { fileLength: number })?.fileLength).toBe(3);
         });
 
+        it('should auto-correct when requested line is out of range but unique oldText exists', async () => {
+            const content = 'alpha\nbeta\ngamma';
+            const testFile = await env.createFile('autocorrect-oob.txt', content);
+            const tool = new SurgicalEditTool();
+            const result = await tool.execute({
+                filePath: testFile,
+                line: 99,
+                oldText: 'beta',
+                newText: 'BETA',
+            });
+
+            expect(result.success).toBe(true);
+            expect((result.metadata as { autoCorrected?: boolean })?.autoCorrected).toBe(true);
+            expect((result.metadata as { actualLine?: number })?.actualLine).toBe(2);
+
+            const modified = await env.readFile('autocorrect-oob.txt');
+            expect(modified).toBe('alpha\nBETA\ngamma');
+        });
+
         it('should return error when oldText does not match exactly', async () => {
             const content = 'Line 1\nLine 2\nLine 3';
             const testFile = await env.createFile('test.txt', content);
@@ -265,6 +284,41 @@ describe('SurgicalEditTool - Deep Tests', () => {
 
             expect(result.success).toBe(false);
             expect((result.metadata as { error: string })?.error).toContain('TEXT_NOT_FOUND');
+        });
+
+        it('should auto-correct when requested line mismatches but unique oldText exists elsewhere', async () => {
+            const content = 'Line 1\nTarget Line\nLine 3';
+            const testFile = await env.createFile('autocorrect-mismatch.txt', content);
+            const tool = new SurgicalEditTool();
+            const result = await tool.execute({
+                filePath: testFile,
+                line: 1,
+                oldText: 'Target Line',
+                newText: 'Updated Target',
+            });
+
+            expect(result.success).toBe(true);
+            expect((result.metadata as { autoCorrected?: boolean })?.autoCorrected).toBe(true);
+            expect((result.metadata as { actualLine?: number })?.actualLine).toBe(2);
+
+            const modified = await env.readFile('autocorrect-mismatch.txt');
+            expect(modified).toBe('Line 1\nUpdated Target\nLine 3');
+        });
+
+        it('should return ambiguity error when oldText appears multiple times and line mismatches', async () => {
+            const content = 'dup\nmiddle\ndup';
+            const testFile = await env.createFile('ambiguous.txt', content);
+            const tool = new SurgicalEditTool();
+            const result = await tool.execute({
+                filePath: testFile,
+                line: 2,
+                oldText: 'dup',
+                newText: 'new',
+            });
+
+            expect(result.success).toBe(false);
+            expect((result.metadata as { reason?: string })?.reason).toContain('Multiple exact matches');
+            expect((result.metadata as { candidateLines?: number[] })?.candidateLines).toEqual([1, 3]);
         });
 
         it('should return error when multiline oldText spans beyond file end', async () => {

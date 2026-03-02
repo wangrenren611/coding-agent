@@ -33,6 +33,9 @@ import {
     ValidationResult,
     createResponseValidator,
 } from './response-validator';
+import { ResponseRecovery, RecoveryContext, createResponseRecovery } from './core/response-recovery';
+import { LLMContextCompressionError } from './errors';
+import { getLogger, type Logger } from '../logger';
 
 /**
  * 内部处理器状态（细粒度状态追踪）
@@ -113,6 +116,8 @@ export interface StreamProcessorOptions {
 
     /** 重置空闲超时回调（每次收到 chunk 时调用） */
     onResetIdleTimeout?: () => void;
+    /** 日志器（可选） */
+    logger?: Logger;
 }
 
 // ==================== 主类 ====================
@@ -134,14 +139,22 @@ export class StreamProcessor {
 
     // 响应验证器
     private readonly validator: ResponseValidator;
+    // 响应恢复器
+    private readonly recovery: ResponseRecovery;
 
     // 空闲超时重置回调
     private resetIdleTimeoutCallback?: () => void;
+
+    // 已处理的字符总数（用于恢复上下文）
+    private processedChars = 0;
+    private readonly logger: Logger;
 
     constructor(options: StreamProcessorOptions) {
         this.options = options;
         this.maxBufferSize = options.maxBufferSize;
         this.validator = createResponseValidator(options.validatorOptions);
+        this.recovery = createResponseRecovery();
+        this.logger = options.logger ?? getLogger();
     }
 
     // ==================== 公共 API ====================
@@ -155,6 +168,7 @@ export class StreamProcessor {
         this.buffers = this.createInitialBuffers();
         this.metadata = {};
         this.currentMessageId = '';
+        this.processedChars = 0;
         this.validator.reset();
     }
 
@@ -504,11 +518,18 @@ export class StreamProcessor {
             this.buffers.content += content;
         }
 
+        this.processedChars += content.length;
         return true;
     }
 
     /**
      * 增量验证流式内容
+     *
+     * 验证失败时尝试恢复：
+     * 1. 调用 ResponseRecovery 尝试从已接收内容中恢复
+     * 2. partial 策略：应用部分恢复结果，继续处理
+     * 3. retry 策略：抛出 LLMContextCompressionError，建议压缩上下文后重试
+     * 4. abort 策略：中止处理
      */
     private validateAfterDelta(delta: string): boolean {
         const result = this.validator.validateIncremental(delta);
@@ -516,14 +537,70 @@ export class StreamProcessor {
             return true;
         }
 
+        // 通知验证失败
         this.options.onValidationViolation?.(result);
-        if (result.action === 'abort') {
-            this.state.aborted = true;
-            this.state.abortReason = 'validation_violation';
-            return false;
+
+        // 尝试恢复
+        const recoveryContext: RecoveryContext = {
+            validationViolation: result,
+            content: this.buffers.content,
+            reasoningContent: this.buffers.reasoning || undefined,
+            toolCalls: this.getToolCalls(),
+            messageId: this.currentMessageId,
+            totalReceivedChars: this.processedChars,
+        };
+
+        const recoveryResult = this.recovery.attemptRecovery(recoveryContext);
+
+        // 根据恢复策略处理
+        switch (recoveryResult.strategy) {
+            case 'partial':
+                // 应用部分恢复结果
+                this.applyPartialRecovery(recoveryResult.partialResponse!, recoveryResult.reason);
+                return true;
+
+            case 'retry':
+                // 抛出需要压缩上下文的错误
+                throw new LLMContextCompressionError(
+                    `Stream validation failed, context compaction recommended: ${recoveryResult.reason}`,
+                    {
+                        context: {
+                            recoveryResult,
+                            validationViolation: result,
+                            processedChars: this.processedChars,
+                        },
+                    }
+                );
+
+            case 'abort':
+                // 无法恢复，中止处理
+                this.state.aborted = true;
+                this.state.abortReason = 'validation_violation';
+                return false;
+        }
+    }
+
+    /**
+     * 应用部分恢复结果
+     */
+    private applyPartialRecovery(
+        partialResponse: { content: string; toolCalls: StreamToolCall[] },
+        reason: string
+    ): void {
+        // 恢复文本内容
+        if (partialResponse.content) {
+            this.buffers.content = partialResponse.content;
         }
 
-        return true;
+        // 恢复工具调用（如果有完整的工具调用）
+        if (partialResponse.toolCalls.length > 0) {
+            this.buffers.toolCalls = new Map(partialResponse.toolCalls.map((tc, index) => [index, tc]));
+        }
+
+        this.logger.warn(`[StreamProcessor] Applied partial recovery: ${reason}`, {
+            phase: 'stream-validation-recovery',
+            messageId: this.currentMessageId,
+        });
     }
 
     /**

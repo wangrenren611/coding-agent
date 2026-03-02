@@ -5,8 +5,10 @@
  */
 
 import { StandardAdapter } from '../adapters/standard';
+import { AnthropicAdapter } from '../adapters/anthropic';
 import { OpenAICompatibleProvider, OpenAICompatibleConfig } from '../openai-compatible';
 import type { BaseProviderConfig, ModelId } from '../types';
+import type { BaseAPIAdapter } from '../adapters/base';
 import { MODEL_DEFINITIONS } from './model-config';
 import type { ModelConfig } from '../types';
 import { KimiAdapter } from '../adapters/kimi';
@@ -82,11 +84,16 @@ export class ProviderFactory {
      * @param modelId 模型唯一标识
      * @returns API 适配器实例
      */
-    static createAdapter(modelId: ModelId): StandardAdapter {
+    static createAdapter(modelId: ModelId): BaseAPIAdapter {
         const modelConfig = MODEL_DEFINITIONS[modelId];
         // 目前所有 provider 都使用标准适配器
         // 如果需要特定适配器，可以在此处添加 switch 逻辑
         switch (modelId) {
+            case 'claude-opus-4.6':
+                return new AnthropicAdapter({
+                    defaultModel: modelConfig.model,
+                    endpointPath: modelConfig.endpointPath || '/v1/messages',
+                });
             case 'kimi-k2.5':
             case 'qwen-kimi-k2.5':
             case 'glm-5':

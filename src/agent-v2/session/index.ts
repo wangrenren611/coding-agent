@@ -4,6 +4,7 @@ import type { ContextExclusionReason, IMemoryManager } from '../memory/types';
 import { Compaction, CompactionConfig } from './compaction';
 import { LLMProvider, type MessageContent, type ToolCall } from '../../providers';
 import { ToolCallRepairer } from './tool-call-repairer';
+import { getLogger, type Logger } from '../logger';
 
 export interface SessionConfig {
     sessionId?: string;
@@ -12,9 +13,16 @@ export interface SessionConfig {
     /** 是否启用自动压缩 */
     enableCompaction?: boolean;
     /** 压缩配置 */
-    compactionConfig?: Partial<Omit<CompactionConfig, 'llmProvider'>>;
+    compactionConfig?: Partial<Omit<CompactionConfig, 'llmProvider' | 'getTools'>>;
     /** LLM Provider（启用压缩时需要） */
     provider?: LLMProvider;
+    /** 日志器（可选，不提供则使用默认日志器） */
+    logger?: Logger;
+    /** 获取工具 Schema 的回调（用于计算 tools 定义的 token） */
+    getTools?: () => Array<{
+        type: string;
+        function: { name: string; description: string; parameters: Record<string, unknown> };
+    }>;
 }
 
 export type { Message, SessionOptions } from './types';
@@ -36,6 +44,7 @@ export class Session {
     private persistQueue: Promise<void> = Promise.resolve();
     private readonly compaction?: Compaction;
     private readonly repairer = new ToolCallRepairer();
+    private readonly logger: Logger;
     private initialized = false;
     private initializePromise: Promise<void> | null = null;
 
@@ -43,6 +52,7 @@ export class Session {
         this.sessionId = options.sessionId || uuid();
         this.systemPrompt = options.systemPrompt;
         this.memoryManager = options.memoryManager;
+        this.logger = options.logger ?? getLogger();
 
         // 初始化压缩器
         if (options.enableCompaction) {
@@ -56,6 +66,8 @@ export class Session {
                 llmProvider: options.provider,
                 keepMessagesNum: options.compactionConfig?.keepMessagesNum ?? 40,
                 triggerRatio: options.compactionConfig?.triggerRatio ?? 0.9,
+                logger: this.logger,
+                getTools: options.getTools,
             });
         }
 
@@ -187,7 +199,12 @@ export class Session {
     clearMessages(): void {
         const systemMessage = this.messages.find((m) => m.role === 'system');
         this.messages = systemMessage ? [systemMessage] : [];
-        this.memoryManager?.clearContext(this.sessionId).catch(console.error);
+        this.memoryManager?.clearContext(this.sessionId).catch((error) => {
+            this.logger.error(
+                `[Session] Failed to clear context (${this.sessionId})`,
+                error instanceof Error ? error : new Error(String(error))
+            );
+        });
     }
 
     /**
@@ -214,7 +231,10 @@ export class Session {
         this.persistQueue = this.persistQueue
             .then(() => this.doRemovePersist(messageId, reason))
             .catch((error) => {
-                console.error(`[Session] Failed to remove message (${messageId}):`, error);
+                this.logger.error(
+                    `[Session] Failed to remove message (${messageId})`,
+                    error instanceof Error ? error : new Error(String(error))
+                );
             });
 
         await this.persistQueue;
@@ -334,7 +354,10 @@ export class Session {
         this.persistQueue = this.persistQueue
             .then(() => this.doPersist(message, operation))
             .catch((error) => {
-                console.error(`[Session] Failed to persist message (${operation}):`, error);
+                this.logger.error(
+                    `[Session] Failed to persist message (${operation})`,
+                    error instanceof Error ? error : new Error(String(error))
+                );
             });
     }
 

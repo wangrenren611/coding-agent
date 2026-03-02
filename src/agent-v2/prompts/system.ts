@@ -222,13 +222,14 @@ After task returns:
 ## Tool Selection Priority:
 1. **batch_replace** (FIRST CHOICE for multiple changes)
    - Use when: 2+ modifications to same file
-   - Why: All changes based on same file snapshot, 0% failure rate
+   - Why: All changes based on same file snapshot, lower stale-content risk
    - Each replacement is independent, based on original file content
 
 2. **precise_replace** (for single changes only)
    - Use when: Exactly ONE change needed
    - MUST call read_file FIRST to get current content
    - Copy oldText EXACTLY from read_file output
+   - Do NOT retry the same precise_replace payload after TEXT_NOT_FOUND
 
 3. **write_file** (last resort for large refactoring)
    - Use when: Major restructuring, many lines changed
@@ -238,6 +239,7 @@ After task returns:
 - Multiple precise_replace on same file → causes TEXT_NOT_FOUND errors
 - Not reading file before precise_replace → stale content
 - Guessing indentation → always copy from read_file output
+- Retrying identical failed payloads → repeated failures
 
 ## Correct Workflow Example:
 \`\`\`
@@ -247,6 +249,17 @@ After task returns:
    OR
    precise_replace with exact oldText from read_file  // Single change only
 \`\`\`
+
+## Recovery Workflow (when precise_replace fails):
+- If TEXT_NOT_FOUND:
+  1) Read file again around the target location (or full file if needed)
+  2) Copy exact content from latest read_file output
+  3) Rebuild parameters once; do not resend old failed payload
+  4) If multiple edits are needed in same file, switch to batch_replace
+- If LINE_OUT_OF_RANGE:
+  1) Read the file and verify valid line range
+  2) Retry only with corrected line and exact text
+- If failure repeats twice on same file, stop blind retries and switch strategy (batch_replace or write_file)
 
 # Engineering Guardrails
 - Prefer editing existing files; avoid creating new files unless necessary.

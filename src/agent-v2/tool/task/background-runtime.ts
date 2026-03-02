@@ -11,13 +11,41 @@ import {
 } from './shared';
 
 const backgroundExecutions = new Map<string, BackgroundExecution>();
+const cleanupTimers = new Map<string, NodeJS.Timeout>();
+const COMPLETED_EXECUTION_TTL_MS = 60 * 1000;
 
 export function getBackgroundExecution(taskId: string): BackgroundExecution | undefined {
     return backgroundExecutions.get(taskId);
 }
 
 export function setBackgroundExecution(taskId: string, execution: BackgroundExecution): void {
+    clearBackgroundExecutionCleanup(taskId);
     backgroundExecutions.set(taskId, execution);
+}
+
+export function scheduleBackgroundExecutionCleanup(taskId: string, ttlMs: number = COMPLETED_EXECUTION_TTL_MS): void {
+    clearBackgroundExecutionCleanup(taskId);
+
+    const timer = setTimeout(() => {
+        const execution = backgroundExecutions.get(taskId);
+        if (!execution) {
+            cleanupTimers.delete(taskId);
+            return;
+        }
+
+        stopExecutionHeartbeat(execution);
+        backgroundExecutions.delete(taskId);
+        cleanupTimers.delete(taskId);
+    }, ttlMs);
+
+    cleanupTimers.set(taskId, timer);
+}
+
+export function clearBackgroundExecutionCleanup(taskId: string): void {
+    const timer = cleanupTimers.get(taskId);
+    if (!timer) return;
+    clearTimeout(timer);
+    cleanupTimers.delete(taskId);
 }
 
 export async function waitWithTimeout<T>(
@@ -119,6 +147,7 @@ export function clearBackgroundExecutions(sessionId?: string): void {
         }
 
         stopExecutionHeartbeat(execution);
+        clearBackgroundExecutionCleanup(taskId);
         if (execution.status === 'queued' || execution.status === 'running' || execution.status === 'cancelling') {
             execution.stopRequested = true;
             execution.agent?.abort();

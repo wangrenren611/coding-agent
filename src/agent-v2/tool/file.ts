@@ -204,7 +204,7 @@ export function resolveAndValidatePath(filePath: string, policy: PathSecurityPol
         if (allowAbsolutePaths && path.isAbsolute(normalizedInput)) {
             // 允许绝对路径但记录审计日志
             onAccess?.(filePath, true, 'Absolute path outside workspace (allowed by policy)');
-            console.warn(`[Security] External path access: ${finalPath}`);
+            // console.warn(`[Security] External path access: ${finalPath}`);
             return finalPath;
         }
 

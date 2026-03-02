@@ -199,7 +199,12 @@ export function isPermanentStreamChunkError(code?: string, message?: string): bo
     return PERMANENT_STREAM_ERROR_MESSAGE_PATTERNS.some((pattern) => pattern.test(normalizedMessage));
 }
 
-export function createErrorFromStatus(status: number, statusText: string, errorText: string): LLMError {
+export function createErrorFromStatus(
+    status: number,
+    statusText: string,
+    errorText: string,
+    retryAfterMs?: number
+): LLMError {
     let details = errorText;
     try {
         const parsed = JSON.parse(errorText);
@@ -217,9 +222,9 @@ export function createErrorFromStatus(status: number, statusText: string, errorT
         case 404:
             return new LLMNotFoundError(message, 'resource');
         case 408:
-            return new LLMRetryableError(message, undefined, 'TIMEOUT');
+            return new LLMRetryableError(message, retryAfterMs, 'TIMEOUT');
         case 429:
-            return new LLMRateLimitError(message);
+            return new LLMRateLimitError(message, retryAfterMs);
         case 400:
             return new LLMBadRequestError(message);
         case 501:
@@ -228,7 +233,7 @@ export function createErrorFromStatus(status: number, statusText: string, errorT
         case 502:
         case 503:
         case 504:
-            return new LLMRetryableError(message, undefined, `SERVER_${status}`);
+            return new LLMRetryableError(message, retryAfterMs, `SERVER_${status}`);
         default:
             return new LLMError(message, `HTTP_${status}`);
     }

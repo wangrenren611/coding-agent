@@ -10,6 +10,20 @@ import type { ModelConfig, ModelId } from '../types';
  * 模型配置表（以模型 ID 为键，不包含 apiKey 的配置）
  */
 export const MODEL_DEFINITIONS: Record<ModelId, Omit<ModelConfig, 'apiKey'>> = {
+    // Anthropic 系列
+    'claude-opus-4.6': {
+        id: 'claude-opus-4.6',
+        provider: 'anthropic',
+        name: 'Claude Opus 4.6',
+        baseURL: '',
+        endpointPath: '/chat/completions',
+        envApiKey: 'ANTHROPIC_API_KEY',
+        envBaseURL: 'ANTHROPIC_API_BASE',
+        model: 'claude-opus-4-6',
+        max_tokens: 16384,
+        LLMMAX_TOKENS: 1000 * 1000,
+        features: ['streaming', 'function-calling', 'vision'],
+    },
     // GLM 系列
     'glm-4.7': {
         id: 'glm-4.7',
@@ -57,11 +71,11 @@ export const MODEL_DEFINITIONS: Record<ModelId, Omit<ModelConfig, 'apiKey'>> = {
         id: 'kimi-k2.5',
         provider: 'kimi',
         name: 'Kimi K2.5',
-        baseURL: 'https://api.moonshot.cn/v1',
+        baseURL: 'https://api.kimi.com/coding/v1',
         endpointPath: '/chat/completions',
         envApiKey: 'KIMI_API_KEY',
         envBaseURL: 'KIMI_API_BASE',
-        model: 'kimi-k2.5',
+        model: 'kimi-for-coding',
         max_tokens: 8000,
         LLMMAX_TOKENS: 200 * 1000,
         features: ['streaming', 'function-calling', 'reasoning'],
@@ -96,6 +110,20 @@ export const MODEL_DEFINITIONS: Record<ModelId, Omit<ModelConfig, 'apiKey'>> = {
         LLMMAX_TOKENS: 1024 * 1000,
         features: ['streaming', 'function-calling'],
     },
+    // Qwen 系列
+    'qwen3.5-max': {
+        id: 'qwen3.5-max',
+        provider: 'qwen',
+        name: 'Qwen 3.5 Max',
+        baseURL: 'https://coding.dashscope.aliyuncs.com/v1',
+        endpointPath: '/chat/completions',
+        envApiKey: 'QEPSEEK_API_KEY',
+        envBaseURL: 'QEPSEEK_API_BASE',
+        model: 'qwen3-max',
+        max_tokens: 1000 * 32,
+        LLMMAX_TOKENS: 1024 * 1000,
+        features: ['streaming', 'function-calling'],
+    },
     'qwen-kimi-k2.5': {
         id: 'qwen-kimi-k2.5',
         provider: 'qwen',
@@ -121,5 +149,18 @@ export const MODEL_DEFINITIONS: Record<ModelId, Omit<ModelConfig, 'apiKey'>> = {
         max_tokens: 8000,
         LLMMAX_TOKENS: 200 * 1000,
         features: ['streaming', 'function-calling'],
+    },
+    'wr-claude-4.6': {
+        id: 'wr-claude-4.6',
+        provider: 'openai',
+        name: 'Claude Opus 4.6',
+        baseURL: '',
+        endpointPath: '/chat/completions',
+        envApiKey: 'ANTHROPIC_API_KEY',
+        envBaseURL: 'ANTHROPIC_API_BASE',
+        model: 'claude-opus-4-6',
+        max_tokens: 16384,
+        LLMMAX_TOKENS: 1000 * 1000,
+        features: ['streaming', 'function-calling', 'vision'],
     },
 };
