@@ -6,6 +6,13 @@ import type { LLMGenerateOptions, MessageContent } from '../../providers';
 
 export type RuntimeRunStatus = 'queued' | 'running' | 'completed' | 'failed' | 'aborted' | 'cancelled';
 
+export interface AgentCapabilities {
+    keywords?: string[];
+    domains?: string[];
+    tools?: string[];
+    summary?: string;
+}
+
 export interface AgentProfile {
     agentId: string;
     role: string;
@@ -22,6 +29,7 @@ export interface AgentProfile {
     thinking?: boolean;
     planMode?: boolean;
     planBaseDir?: string;
+    capabilities?: AgentCapabilities;
     metadata?: Record<string, unknown>;
 }
 
@@ -99,14 +107,23 @@ export interface RouteRequest {
     account?: string;
     threadId?: string;
     stickyKey?: string;
+    intent?: string;
     metadata?: Record<string, unknown>;
 }
 
 export interface RouteDecision {
     agentId: string;
     bindingId?: string;
-    reason: 'sticky' | 'binding' | 'default';
+    reason: 'sticky' | 'binding' | 'default' | 'semantic';
     stickyKey: string;
+    semanticScore?: number;
+    semanticMatchedKeywords?: string[];
+}
+
+export interface SemanticRoutingConfig {
+    enabled?: boolean;
+    minScore?: number;
+    preferBindings?: boolean;
 }
 
 export interface InterAgentMessage {
@@ -155,6 +172,7 @@ export interface SpawnCommand {
     provider?: AgentOptions['provider'];
     toolRegistry?: ToolRegistry;
     memoryManager?: IMemoryManager;
+    capabilities?: AgentCapabilities;
     metadata?: Record<string, unknown>;
 }
 

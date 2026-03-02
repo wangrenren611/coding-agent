@@ -1,15 +1,15 @@
 import dotenv from 'dotenv';
-import { Agent } from './agent-v2/agent/agent';
-import { ModelId, ProviderRegistry } from './providers';
+import { Agent } from '../agent-v2/agent/agent';
+import { ModelId, ProviderRegistry } from '../providers';
 
 import fs from 'fs';
-import { AgentMessage, AgentMessageType, BaseAgentEvent, SubagentEventMessage } from './agent-v2/agent/stream-types';
-import { createMemoryManager } from './agent-v2';
-import { operatorPrompt } from './agent-v2/prompts/operator';
+import { AgentMessage, AgentMessageType, BaseAgentEvent, SubagentEventMessage } from '../agent-v2/agent/stream-types';
+import { createMemoryManager } from '../agent-v2';
+import { operatorPrompt } from '../agent-v2/prompts/operator';
 import { platform } from 'os';
 import path from 'path';
-import { parseFilePaths, createFileSummary, type ParsedFileInput } from './cli/utils/file';
-import type { InputContentPart } from './providers/types/api';
+import { parseFilePaths, createFileSummary, type ParsedFileInput } from '../cli/utils/file';
+import type { InputContentPart } from '../providers/types/api';
 
 // const model = 'wr-claude-4.6';
 const model: ModelId = 'qwen3.5-plus';

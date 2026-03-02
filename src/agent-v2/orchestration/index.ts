@@ -1,5 +1,6 @@
 export type {
     AgentRuntime,
+    AgentCapabilities,
     AgentProfile,
     RunRecord,
     RunHandle,
@@ -9,6 +10,7 @@ export type {
     EventFilter,
     RouteBinding,
     RouteRequest,
+    SemanticRoutingConfig,
     RouteDecision,
     InterAgentMessage,
     SpawnCommand,

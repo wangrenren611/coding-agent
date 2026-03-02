@@ -113,6 +113,7 @@ export {
 export type { AgentRuntimeServiceOptions } from './orchestration';
 export type {
     AgentRuntime,
+    AgentCapabilities,
     AgentProfile,
     RunRecord,
     RunHandle,
@@ -122,6 +123,7 @@ export type {
     EventFilter,
     RouteBinding,
     RouteRequest,
+    SemanticRoutingConfig,
     RouteDecision,
     InterAgentMessage,
     SpawnCommand,
@@ -149,3 +151,74 @@ export type {
     OrchestratorKernelRuntimeOptions,
     OrchestratorKernelBootstrapOptions,
 } from './orchestration';
+
+// 多智能体编排内核 V2（简化内核 + LLM 规划驱动）
+export {
+    OrchestratorKernelV2,
+    LocalAgentRuntimeV2,
+    parsePlan,
+    planSchemaText,
+    buildControllerPrompt,
+    buildWorkerPrompt,
+    buildDynamicRolePrompt,
+    AgentSendMessageToolV2,
+    AgentReceiveMessagesToolV2,
+    AgentAckMessagesToolV2,
+    AgentNackMessageToolV2,
+    AgentListDeadLettersToolV2,
+} from './orchestration-v2';
+export type {
+    AgentProfileV2,
+    ExecuteCommandV2,
+    RunHandleV2,
+    RunRecordV2,
+    RuntimeEventV2,
+    RuntimeRunStatus as RuntimeRunStatusV2,
+    InterAgentMessageV2,
+    ReceiveMessageOptionsV2,
+    NackMessageOptionsV2,
+    NackMessageResultV2,
+    AgentRuntimeV2,
+    MessagingPortV2,
+    PlanTaskV2,
+    GoalPlanV2,
+    TaskExecutionResultV2,
+    GoalExecutionResultV2,
+    AgentTemplateV2,
+    OrchestratorV2Options,
+} from './orchestration-v2';
+
+// 多智能体编排内核 V3（controller 监督循环 + agentsConfigs）
+export {
+    OrchestratorKernelV3,
+    AgentGetStatusToolV3,
+    AgentDispatchTaskToolV3,
+    AgentSendMessageToolV3,
+    AgentReceiveMessagesToolV3,
+    AgentWaitForMessagesToolV3,
+    AgentAckMessagesToolV3,
+    AgentNackMessageToolV3,
+    AgentListDeadLettersToolV3,
+} from './orchestration-v3';
+export type {
+    AgentRuntimeV3,
+    RuntimeEventV3,
+    AgentConfigV3,
+    OrchestratorV3Options,
+    DispatchCommandV3,
+    TrackedRunV3,
+    RunStatusSnapshotV3,
+    RunStatusQueryV3,
+    StatusPortV3,
+    DispatchPortV3,
+    InterAgentMessageV3,
+    ReceiveMessageOptionsV3,
+    WaitForMessagesOptionsV3,
+    WaitForMessagesResultV3,
+    NackMessageOptionsV3,
+    NackMessageResultV3,
+    MessagingPortV3,
+    RunHandleV2 as RunHandleV3,
+    RunRecordV2 as RunRecordV3,
+    RuntimeRunStatus as RuntimeRunStatusV3,
+} from './orchestration-v3';

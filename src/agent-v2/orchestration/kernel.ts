@@ -17,6 +17,7 @@ import type {
     RouteDecision,
     RouteRequest,
     RuntimeEvent,
+    SemanticRoutingConfig,
     RunGraphNode,
     RunHandle,
     SpawnCommand,
@@ -48,6 +49,7 @@ interface AgentRuntimeOverrides {
     thinking?: AgentProfile['thinking'];
     planMode?: AgentProfile['planMode'];
     planBaseDir?: AgentProfile['planBaseDir'];
+    capabilities?: AgentProfile['capabilities'];
     metadata?: AgentProfile['metadata'];
 }
 
@@ -87,6 +89,7 @@ export interface OrchestratorKernelRuntimeOptions {
     policyEngine: PolicyEngine;
     eventStream: EventStream;
     router?: GatewayRouter;
+    semanticRouting?: SemanticRoutingConfig;
     enableMessagingTools?: boolean;
     messageRuntime?: Partial<MessageRuntimeConfig>;
     inLoopMessageInjection?: {
@@ -115,6 +118,7 @@ export interface OrchestratorKernelBootstrapOptions extends AgentRuntimeOverride
     // Backward-compatible alias for a frequent typo in early design docs.
     agentsCodifg?: AgentConfig[];
     bindings?: RouteBinding[];
+    semanticRouting?: SemanticRoutingConfig;
     enableMessagingTools?: boolean;
     autoDispatch?: AutoDispatchConfig;
 }
@@ -143,7 +147,11 @@ export class OrchestratorKernel {
             this.stateStore = options.stateStore;
             this.policyEngine = options.policyEngine;
             this.eventStream = options.eventStream;
-            this.router = options.router || new GatewayRouter(this.stateStore);
+            this.router =
+                options.router ||
+                new GatewayRouter(this.stateStore, {
+                    semanticRouting: options.semanticRouting,
+                });
             this.enableMessagingTools = options.enableMessagingTools ?? true;
             this.messageRuntime = this.resolveMessageRuntimeConfig(options.messageRuntime);
             this.autoDispatch = this.resolveAutoDispatchConfig(options.autoDispatch);
@@ -164,6 +172,7 @@ export class OrchestratorKernel {
         const controllerAgentId = options.controllerAgentId?.trim() || 'controller';
         this.router = new GatewayRouter(this.stateStore, {
             defaultAgentId: options.defaultAgentId || controllerAgentId,
+            semanticRouting: options.semanticRouting,
         });
         this.enableMessagingTools = options.enableMessagingTools ?? true;
         this.messageRuntime = this.resolveMessageRuntimeConfig(options.messageRuntime);
@@ -226,7 +235,10 @@ export class OrchestratorKernel {
     }
 
     async routeAndExecute(request: RouteRequest, input: MessageContent): Promise<RunHandle> {
-        const decision = this.route(request);
+        const decision = this.route({
+            ...request,
+            intent: request.intent || this.messageContentToRouteIntent(input),
+        });
         return this.execute({
             agentId: decision.agentId,
             input,
@@ -307,6 +319,7 @@ export class OrchestratorKernel {
             thinking: controller.thinking,
             planMode: controller.planMode,
             planBaseDir: controller.planBaseDir,
+            capabilities: command.capabilities || controller.capabilities,
             metadata: command.metadata,
         };
 
@@ -567,8 +580,28 @@ export class OrchestratorKernel {
             thinking: source.thinking,
             planMode: source.planMode,
             planBaseDir: source.planBaseDir,
+            capabilities: source.capabilities,
             metadata: source.metadata,
         };
+    }
+
+    private messageContentToRouteIntent(input: MessageContent): string | undefined {
+        if (typeof input === 'string') {
+            return input;
+        }
+        if (!Array.isArray(input)) {
+            return undefined;
+        }
+        const text = input
+            .map((part) => {
+                if (!part || typeof part !== 'object') return '';
+                const typed = part as { type?: string; text?: string };
+                return typed.type === 'text' && typeof typed.text === 'string' ? typed.text : '';
+            })
+            .filter(Boolean)
+            .join('\n')
+            .trim();
+        return text.length > 0 ? text : undefined;
     }
 
     private attachMessagingTools(profile: AgentProfile): AgentProfile {

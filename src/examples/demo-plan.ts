@@ -20,12 +20,12 @@
 
 import dotenv from 'dotenv';
 import * as fs from 'fs';
-import { Agent } from './agent-v2/agent/agent';
-import { ProviderRegistry } from './providers';
-import { createMemoryManager } from './agent-v2';
-import { operatorPrompt } from './agent-v2/prompts/operator';
-import { AgentMessage, AgentMessageType, BaseAgentEvent, SubagentEventMessage } from './agent-v2/agent/stream-types';
-import { createPlanStorage } from './agent-v2/plan';
+import { Agent } from '../agent-v2/agent/agent';
+import { ProviderRegistry } from '../providers';
+import { createMemoryManager } from '../agent-v2';
+import { operatorPrompt } from '../agent-v2/prompts/operator';
+import { AgentMessage, AgentMessageType, BaseAgentEvent, SubagentEventMessage } from '../agent-v2/agent/stream-types';
+import { createPlanStorage } from '../agent-v2/plan';
 
 dotenv.config({ path: './.env.development' });
 
