@@ -661,7 +661,6 @@ describe('Agent completed and exception scenarios', () => {
             .getMessages()
             .filter(
                 (message) =>
-                    message.role === 'user' &&
                     typeof message.content === 'string' &&
                     message.content.includes('[Task reminder] There are still unfinished managed tasks')
             );
@@ -764,6 +763,174 @@ describe('Agent completed and exception scenarios', () => {
             (e) => e.type === AgentMessageType.STATUS && e.payload.state === AgentStatus.FAILED
         );
         expect(failedStatuses).toHaveLength(1);
+    });
+
+    it('invalid response (choices[0].message missing) should fail fast by maxLoops', async () => {
+        const provider = new SequenceProvider([
+            {
+                id: 'bad-missing-message',
+                object: 'chat.completion',
+                created: Date.now(),
+                model: 'test-model',
+                choices: [
+                    {
+                        index: 0,
+                        finish_reason: 'stop',
+                    },
+                ],
+            } as unknown as LLMResponse,
+        ]);
+        const memoryManager = await createReadyMemoryManager('invalid-missing-message');
+
+        const agent = new Agent({
+            provider: provider as unknown as LLMProvider,
+            systemPrompt: 'test',
+            stream: false,
+            memoryManager,
+            maxLoops: 2,
+        });
+
+        const result = await agent.executeWithResult('hello');
+        expect(result.status).toBe('failed');
+        expect(result.failure?.code).toBe('AGENT_LOOP_EXCEEDED');
+        expect(provider.callCount).toBe(2);
+    });
+
+    it('abnormal message.role should still complete when content is present', async () => {
+        const provider = new SequenceProvider([
+            {
+                id: 'bad-role-response',
+                object: 'chat.completion',
+                created: Date.now(),
+                model: 'test-model',
+                choices: [
+                    {
+                        index: 0,
+                        message: {
+                            role: 'user',
+                            content: 'content from abnormal role',
+                        },
+                        finish_reason: 'stop',
+                    },
+                ],
+            } as unknown as LLMResponse,
+        ]);
+        const memoryManager = await createReadyMemoryManager('abnormal-role');
+
+        const agent = new Agent({
+            provider: provider as unknown as LLMProvider,
+            systemPrompt: 'test',
+            stream: false,
+            memoryManager,
+        });
+
+        const result = await agent.executeWithResult('hello');
+        expect(result.status).toBe('completed');
+        expect(result.finalMessage?.role).toBe('assistant');
+        expect(result.finalMessage?.content).toBe('content from abnormal role');
+    });
+
+    it('invalid message.content type should be normalized to empty and fail by maxLoops', async () => {
+        const provider = new SequenceProvider([
+            {
+                id: 'bad-content-type',
+                object: 'chat.completion',
+                created: Date.now(),
+                model: 'test-model',
+                choices: [
+                    {
+                        index: 0,
+                        message: {
+                            role: 'assistant',
+                            content: { foo: 'bar' },
+                        },
+                        finish_reason: 'stop',
+                    },
+                ],
+            } as unknown as LLMResponse,
+        ]);
+        const memoryManager = await createReadyMemoryManager('invalid-content-type');
+
+        const agent = new Agent({
+            provider: provider as unknown as LLMProvider,
+            systemPrompt: 'test',
+            stream: false,
+            memoryManager,
+            maxLoops: 2,
+        });
+
+        const result = await agent.executeWithResult('hello');
+        expect(result.status).toBe('failed');
+        expect(result.failure?.code).toBe('AGENT_LOOP_EXCEEDED');
+        expect(provider.callCount).toBe(2);
+    });
+
+    it('unknown finish_reason should complete when content is non-empty', async () => {
+        const provider = new SequenceProvider([
+            {
+                id: 'unknown-finish-with-content',
+                object: 'chat.completion',
+                created: Date.now(),
+                model: 'test-model',
+                choices: [
+                    {
+                        index: 0,
+                        message: {
+                            role: 'assistant',
+                            content: 'unknown finish reason but has content',
+                        },
+                        finish_reason: 'unexpected_reason',
+                    },
+                ],
+            } as unknown as LLMResponse,
+        ]);
+        const memoryManager = await createReadyMemoryManager('unknown-finish-with-content');
+
+        const agent = new Agent({
+            provider: provider as unknown as LLMProvider,
+            systemPrompt: 'test',
+            stream: false,
+            memoryManager,
+        });
+
+        const result = await agent.executeWithResult('hello');
+        expect(result.status).toBe('completed');
+        expect(result.finalMessage?.content).toBe('unknown finish reason but has content');
+    });
+
+    it('unknown finish_reason with empty content should fail by maxLoops', async () => {
+        const provider = new SequenceProvider([
+            {
+                id: 'unknown-finish-empty',
+                object: 'chat.completion',
+                created: Date.now(),
+                model: 'test-model',
+                choices: [
+                    {
+                        index: 0,
+                        message: {
+                            role: 'assistant',
+                            content: '',
+                        },
+                        finish_reason: 'unexpected_reason',
+                    },
+                ],
+            } as unknown as LLMResponse,
+        ]);
+        const memoryManager = await createReadyMemoryManager('unknown-finish-empty');
+
+        const agent = new Agent({
+            provider: provider as unknown as LLMProvider,
+            systemPrompt: 'test',
+            stream: false,
+            memoryManager,
+            maxLoops: 2,
+        });
+
+        const result = await agent.executeWithResult('hello');
+        expect(result.status).toBe('failed');
+        expect(result.failure?.code).toBe('AGENT_LOOP_EXCEEDED');
+        expect(provider.callCount).toBe(2);
     });
 
     it('invalid tool_calls response should be excluded from context and marked in history', async () => {

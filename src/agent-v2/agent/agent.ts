@@ -470,7 +470,7 @@ export class Agent {
                 if (!pendingTaskReminderSent) {
                     this.session.addMessage({
                         messageId: uuid(),
-                        role: 'user',
+                        role: 'assistant',
                         content: this.buildPendingTaskReminder(
                             completion.blockedByTasks.inProgressCount,
                             completion.blockedByTasks.pendingCount
