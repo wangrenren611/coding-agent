@@ -10,7 +10,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as fsSync from 'fs';
 import { McpClient } from '../client';
-import { ConnectionState, McpClientEvent } from '../types';
+import { McpClientEvent } from '../types';
 import { McpManager } from '../manager';
 import { loadMcpConfig } from '../config-loader';
 import { McpToolAdapter } from '../tool-adapter';
@@ -166,7 +166,7 @@ describe('MCP Integration Tests', () => {
         it('should initialize with config', async () => {
             const manager = McpManager.getInstance();
 
-            await manager.initialize({ config: { mcpServers: [] } });
+            await manager.initialize();
 
             expect(manager.getConnectionInfo()).toHaveLength(0);
         });
@@ -388,7 +388,8 @@ describe('MCP Integration Tests', () => {
 
         it('should handle empty server list', async () => {
             const manager = McpManager.getInstance();
-            await manager.initialize({ config: { mcpServers: [] } });
+
+            await manager.initialize();
 
             expect(manager.getConnectedServers()).toHaveLength(0);
             expect(manager.getTotalToolsCount()).toBe(0);
