@@ -25,6 +25,8 @@ interface GrepMetadata {
     countMatches?: number;
     results?: GrepFileResult[];
     error?: string;
+    truncated?: boolean;
+    timedOut?: boolean;
 }
 
 describe('GrepTool', () => {
