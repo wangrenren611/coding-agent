@@ -137,10 +137,7 @@ class FailingProvider extends LLMProvider {
 class ModelCaptureProvider extends MockProvider {
     readonly requestedModels: string[] = [];
 
-    override async generate(
-        messages: LLMRequestMessage[],
-        options?: LLMGenerateOptions
-    ): Promise<LLMResponse | null> {
+    override async generate(messages: LLMRequestMessage[], options?: LLMGenerateOptions): Promise<LLMResponse | null> {
         if (options?.model) {
             this.requestedModels.push(options.model);
         }
