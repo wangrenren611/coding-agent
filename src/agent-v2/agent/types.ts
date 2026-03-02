@@ -140,4 +140,6 @@ export interface AgentOptions {
     loggerConfig?: Partial<LoggerConfig>;
     /** 是否启用 Agent 事件日志（默认 true） */
     enableEventLogging?: boolean;
+    /** 是否启用 MCP（Model Context Protocol）支持（默认 true） */
+    enableMcp?: boolean;
 }

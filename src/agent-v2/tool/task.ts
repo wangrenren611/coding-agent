@@ -688,7 +688,7 @@ export class TaskUpdateTool extends BaseTool<typeof taskUpdateSchema> {
             return this.result({
                 success: false,
                 metadata: { error: 'INVALID_STATUS_TRANSITION' },
-                output: `Invalid status transition: ${current.status} -> ${status}`,
+                output: `Invalid status transition: ${current.status} -> ${status}; Correct status progress: \`pending\` → \`in_progress\` → \`completed\``,
             });
         }
 

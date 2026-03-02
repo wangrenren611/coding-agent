@@ -43,6 +43,8 @@ export interface CompactionConfig {
         type: string;
         function: { name: string; description: string; parameters: Record<string, unknown> };
     }>;
+    /** 摘要语言，跟随主 agent language 配置（默认 'English'） */
+    language?: string;
 }
 
 export interface TokenInfo {
@@ -71,7 +73,8 @@ export interface CompactionResult {
     record?: CompactionRecord;
 }
 
-const SUMMARY_PROMPT = `You are an expert conversation compressor. Compress conversation history into a structured summary organized in following 8 sections:
+function buildSummaryPrompt(language = 'English'): string {
+    return `You are an expert conversation compressor. Compress conversation history into a structured summary organized in following 8 sections:
 1. **Primary Request and Intent**: What is user's core goal?
 2. **Key Technical Concepts**: Frameworks, libraries, tech stacks, etc.
 3. **Files and Code Sections**: All file paths mentioned or modified.
@@ -86,7 +89,8 @@ const SUMMARY_PROMPT = `You are an expert conversation compressor. Compress conv
 - Highlight key technical decisions and solutions
 - Ensure continuity of context
 - Retain all important file paths
-- Use concise English expression`;
+- Use concise ${language} expression`;
+}
 
 /**
  * 上下文压缩器
@@ -109,6 +113,7 @@ export class Compaction {
         type: string;
         function: { name: string; description: string; parameters: Record<string, unknown> };
     }>;
+    private readonly language: string;
 
     constructor(config: CompactionConfig) {
         this.maxTokens = config.maxTokens;
@@ -119,6 +124,7 @@ export class Compaction {
         this.triggerRatio = config.triggerRatio ?? 0.9;
         this.logger = config.logger ?? getLogger();
         this.getTools = config.getTools;
+        this.language = config.language ?? 'English';
     }
 
     /**
@@ -367,9 +373,10 @@ export class Compaction {
         this.logger.debug('[Compaction] Generating summary...');
 
         const historyText = this.serializeMessages(messages);
+        const summaryPrompt = buildSummaryPrompt(this.language);
         const userContent = previousSummary
-            ? `${SUMMARY_PROMPT}\n\n<previous_summary>\n${previousSummary}\n</previous_summary>\n\n<current_message_history>\n${historyText}\n</current_message_history>`
-            : `${SUMMARY_PROMPT}\n\n<current_message_history>\n${historyText}\n</current_message_history>`;
+            ? `${summaryPrompt}\n\n<previous_summary>\n${previousSummary}\n</previous_summary>\n\n<current_message_history>\n${historyText}\n</current_message_history>`
+            : `${summaryPrompt}\n\n<current_message_history>\n${historyText}\n</current_message_history>`;
 
         const summaryAbortSignal = this.createSummaryAbortSignal();
         const response = await this.llmProvider.generate(

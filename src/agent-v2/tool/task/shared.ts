@@ -381,7 +381,6 @@ export function clearTaskIdCounterState(sessionId?: string): void {
 }
 
 export function isStatusTransitionAllowed(from: TaskStatus, to: TaskStatus): boolean {
-    if (from === to) return true;
     const transitions: Record<TaskStatus, TaskStatus[]> = {
         pending: ['in_progress'],
         in_progress: ['completed'],

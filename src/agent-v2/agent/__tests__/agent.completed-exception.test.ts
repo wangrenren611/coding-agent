@@ -661,8 +661,10 @@ describe('Agent completed and exception scenarios', () => {
             .getMessages()
             .filter(
                 (message) =>
+                    message.role === 'user' &&
                     typeof message.content === 'string' &&
-                    message.content.includes('[Task reminder] There are still unfinished managed tasks')
+                    message.content.includes('[SYSTEM REMINDER]') &&
+                    message.content.includes('There are still unfinished tasks')
             );
         expect(reminderMessages).toHaveLength(1);
     });

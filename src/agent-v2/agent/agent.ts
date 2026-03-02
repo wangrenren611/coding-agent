@@ -31,6 +31,7 @@ import { EventBus, EventType } from '../eventbus';
 import { Message } from '../session/types';
 import { createDefaultToolRegistry, createPlanModeToolRegistry } from '../tool';
 import { createLogger, getLogger, Logger, createEventLoggerMiddleware } from '../logger';
+import { initializeMcp, disconnectMcp } from '../mcp';
 
 import {
     AgentAbortedError,
@@ -92,6 +93,7 @@ export class Agent {
     private readonly logger: Logger;
     private readonly ownsLogger: boolean;
     private unsubscribeEventLogger?: () => void;
+    private mcpInitialized = false;
 
     // 配置
     private readonly stream: boolean;
@@ -169,6 +171,18 @@ export class Agent {
                 this.provider
             );
         }
+                
+        // 初始化 MCP（如果配置了 MCP 服务器）
+        if (config.enableMcp !== false) {
+            this.logger.info('[Agent] Initializing MCP...');
+            this.initializeMcp().catch((error) => {
+                this.logger.warn('[Agent] MCP initialization failed', {
+                    error: error instanceof Error ? error.message : String(error),
+                });
+            });
+        } else {
+            this.logger.info('[Agent] MCP is disabled');
+        }
 
         this.session = new Session({
             systemPrompt,
@@ -241,6 +255,38 @@ export class Agent {
         });
     }
 
+    // ==================== 私有方法：MCP 初始化 ====================
+
+    /**
+     * 初始化 MCP，将 MCP 工具注册到 ToolRegistry
+     */
+    private async initializeMcp(): Promise<void> {
+        try {
+            const manager = await initializeMcp(this.toolRegistry);
+            this.mcpInitialized = true;
+
+            // 获取连接信息并记录
+            const connectionInfo = manager.getConnectionInfo();
+            const totalTools = manager.getTotalToolsCount();
+            const connectedServers = manager.getConnectedServers();
+
+            this.logger.info('[Agent] MCP initialized', {
+                connectedServers,
+                totalTools,
+                connections: connectionInfo.map((info) => ({
+                    serverName: info.serverName,
+                    state: info.state,
+                    toolsCount: info.toolsCount,
+                })),
+            });
+        } catch (error) {
+            // MCP 初始化失败不影响 Agent 启动，仅记录警告
+            this.logger.warn('[Agent] MCP initialization failed', {
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
+    }
+
     // ==================== 公共 API ====================
 
     async execute(query: MessageContent, options?: LLMGenerateOptions): Promise<Message> {
@@ -309,6 +355,19 @@ export class Agent {
      * 关闭 Agent，释放资源
      */
     async close(): Promise<void> {
+        // 断开 MCP 连接
+        if (this.mcpInitialized) {
+            try {
+                await disconnectMcp();
+                this.mcpInitialized = false;
+                this.logger.info('[Agent] MCP disconnected');
+            } catch (error) {
+                this.logger.warn('[Agent] MCP disconnect failed', {
+                    error: error instanceof Error ? error.message : String(error),
+                });
+            }
+        }
+
         // 取消事件日志订阅
         if (this.unsubscribeEventLogger) {
             this.unsubscribeEventLogger();
@@ -471,7 +530,7 @@ export class Agent {
                 if (!pendingTaskReminderSent) {
                     this.session.addMessage({
                         messageId: uuid(),
-                        role: 'assistant',
+                        role: 'user',
                         content: this.buildPendingTaskReminder(
                             completion.blockedByTasks.inProgressCount,
                             completion.blockedByTasks.pendingCount
@@ -524,7 +583,17 @@ export class Agent {
     }
 
     private buildPendingTaskReminder(inProgressCount: number, pendingCount: number): string {
-        return `[Task reminder] There are still unfinished managed tasks (in_progress: ${inProgressCount}, pending: ${pendingCount}). Continue executing remaining tasks and do not output a final completion summary until all managed tasks are completed.`;
+        return `[SYSTEM REMINDER] There are still unfinished tasks (in_progress: ${inProgressCount}, pending: ${pendingCount}).
+
+IMPORTANT: Do NOT call task_update(status="in_progress") again — the task is already declared.
+Your NEXT action MUST be actual work using real tools:
+  - Read relevant files: read_file, glob, grep, lsp
+  - Write/edit code: write_file, precise_replace, batch_replace
+  - Run commands: bash
+  - Delegate subtasks: task
+
+After completing the work, call task_update(status="completed").
+Do not output a completion summary until all managed tasks are marked completed.`;
     }
 
     private async handleLoopError(error: unknown): Promise<void> {
