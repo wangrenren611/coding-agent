@@ -95,7 +95,11 @@ function checkAssistantComplete(message: Message): boolean {
                 if (hasOnlyReasoning) {
                     return false;
                 }
-                return hasContent(message.content);
+                // 没有 content 时认为未完成（需要继续生成）
+                if (!hasContent(message.content)) {
+                    return false;
+                }
+                return true;
             }
         }
 
