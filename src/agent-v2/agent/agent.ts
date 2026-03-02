@@ -438,6 +438,8 @@ export class Agent {
             source: 'agent',
             phase: 'lifecycle',
         });
+        let pendingTaskReminderSent = false;
+        let lastBlockedTaskSignature: string | null = null;
 
         while (true) {
             if (this.agentState.isAborted()) {
@@ -450,6 +452,12 @@ export class Agent {
                 memoryManager: this.session.getMemoryManager(),
             });
             if (completion.blockedByTasks) {
+                const currentSignature = completion.blockedByTasks.taskSignature;
+                const hasSameBlockedTasks = currentSignature === lastBlockedTaskSignature;
+                if (!hasSameBlockedTasks) {
+                    lastBlockedTaskSignature = currentSignature;
+                    pendingTaskReminderSent = false;
+                }
                 this.emitter.emitStatus(
                     AgentStatus.RUNNING,
                     `Task list still has unfinished items (in_progress: ${completion.blockedByTasks.inProgressCount}, pending: ${completion.blockedByTasks.pendingCount}), continuing...`,
@@ -459,6 +467,22 @@ export class Agent {
                         phase: 'lifecycle',
                     }
                 );
+                if (!pendingTaskReminderSent) {
+                    this.session.addMessage({
+                        messageId: uuid(),
+                        role: 'user',
+                        content: this.buildPendingTaskReminder(
+                            completion.blockedByTasks.inProgressCount,
+                            completion.blockedByTasks.pendingCount
+                        ),
+                    });
+                    pendingTaskReminderSent = true;
+                } else if (hasSameBlockedTasks) {
+                    throw new AgentLoopExceededError(this.agentState.loopCount);
+                }
+            } else {
+                pendingTaskReminderSent = false;
+                lastBlockedTaskSignature = null;
             }
             if (completion.done) {
                 break;
@@ -496,6 +520,10 @@ export class Agent {
                 await this.handleLoopError(error);
             }
         }
+    }
+
+    private buildPendingTaskReminder(inProgressCount: number, pendingCount: number): string {
+        return `[Task reminder] There are still unfinished managed tasks (in_progress: ${inProgressCount}, pending: ${pendingCount}). Continue executing remaining tasks and do not output a final completion summary until all managed tasks are completed.`;
     }
 
     private async handleLoopError(error: unknown): Promise<void> {
@@ -615,12 +643,9 @@ export class Agent {
         //|| this.hasReasoningOutput(message.reasoning_content);
     }
 
-    private resolveAssistantContent(content: MessageContent, reasoning: unknown): MessageContent {
+    private resolveAssistantContent(content: MessageContent): MessageContent {
         if (hasContent(content)) {
             return content;
-        }
-        if (typeof reasoning === 'string' && reasoning.trim().length > 0) {
-            return reasoning;
         }
         return typeof content === 'string' ? content : '';
     }
@@ -744,7 +769,7 @@ export class Agent {
     private handleTextResponse(response: LLMResponse, messageId: string, usage?: Usage): void {
         const rawContent = response.choices?.[0]?.message?.content || '';
         const reasoningContent = response.choices?.[0]?.message?.reasoning_content;
-        const resolvedContent = this.resolveAssistantContent(rawContent, reasoningContent);
+        const resolvedContent = this.resolveAssistantContent(rawContent);
 
         if (this.stream) {
             const finishReason = getResponseFinishReason(response);
@@ -755,7 +780,7 @@ export class Agent {
                 if (!hasContent(existing.content) && this.hasReasoningOutput(existing.reasoning_content)) {
                     this.session.addMessage({
                         ...existing,
-                        content: this.resolveAssistantContent(existing.content, existing.reasoning_content),
+                        content: this.resolveAssistantContent(existing.content),
                     });
                 }
                 this.updateMessageFinishReason(messageId, finishReason);

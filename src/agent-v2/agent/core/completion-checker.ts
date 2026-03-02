@@ -9,6 +9,7 @@ export interface CompletionCheckResult {
     blockedByTasks?: {
         inProgressCount: number;
         pendingCount: number;
+        taskSignature: string;
     };
 }
 
@@ -61,6 +62,11 @@ export async function checkComplete(params: CompletionCheckParams): Promise<Comp
         return { done: true };
     }
 
+    const taskSignature = pendingManagedTasks
+        .slice()
+        .sort((a, b) => a.taskId.localeCompare(b.taskId))
+        .map((task) => `${task.taskId}:${task.status}:${task.updatedAt ?? ''}`)
+        .join('|');
     const inProgressCount = pendingManagedTasks.filter((task) => task.status === 'in_progress').length;
     const pendingCount = pendingManagedTasks.length - inProgressCount;
     return {
@@ -68,6 +74,7 @@ export async function checkComplete(params: CompletionCheckParams): Promise<Comp
         blockedByTasks: {
             inProgressCount,
             pendingCount,
+            taskSignature,
         },
     };
 }

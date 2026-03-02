@@ -205,6 +205,22 @@ describe('Agent completed and exception scenarios', () => {
         return memoryManager;
     }
 
+    async function createManagedTask(
+        memoryManager: Awaited<ReturnType<typeof createReadyMemoryManager>>,
+        sessionId: string,
+        taskId: string,
+        status: 'pending' | 'in_progress' | 'completed'
+    ) {
+        await memoryManager.saveTask({
+            id: taskId,
+            taskId,
+            sessionId,
+            parentTaskId: '__task_tool_managed__',
+            status,
+            title: `managed task ${taskId}`,
+        });
+    }
+
     it('stream=true fallback (non-stream response) should still emit text events before completed', async () => {
         const provider = new SequenceProvider([createTextResponse('fallback content')]);
         const memoryManager = await createReadyMemoryManager('stream-fallback');
@@ -564,7 +580,7 @@ describe('Agent completed and exception scenarios', () => {
         expect(reasoningOnlyMessage?.content).toBe('');
     });
 
-    it('reasoning-only response should not trigger compensation retry and should complete', async () => {
+    it('reasoning-only response should not trigger compensation retry and should fail fast by maxLoops', async () => {
         const provider = new SequenceProvider([createReasoningOnlyResponse('这是推理输出')]);
         const memoryManager = await createReadyMemoryManager('reasoning-only');
         const events: AgentMessage[] = [];
@@ -575,13 +591,14 @@ describe('Agent completed and exception scenarios', () => {
             stream: true,
             thinking: true,
             memoryManager,
+            maxLoops: 2,
             streamCallback: (msg) => events.push(msg),
         });
 
         const result = await agent.executeWithResult('继续');
 
-        expect(result.status).toBe('completed');
-        expect(result.finalMessage?.content).toBe('这是推理输出');
+        expect(result.status).toBe('failed');
+        expect(result.failure?.code).toBe('AGENT_LOOP_EXCEEDED');
 
         const compensationStatuses = events.filter(
             (e) =>
@@ -592,7 +609,7 @@ describe('Agent completed and exception scenarios', () => {
         expect(compensationStatuses).toHaveLength(0);
     });
 
-    it('stream fallback reasoning-only should emit reasoning events but not text events', async () => {
+    it('stream fallback reasoning-only should emit reasoning events but not text events before fast loop fail', async () => {
         const provider = new SequenceProvider([createReasoningOnlyResponse('仅推理，不是正文')]);
         const memoryManager = await createReadyMemoryManager('stream-fallback-reasoning-only');
         const events: AgentMessage[] = [];
@@ -603,16 +620,81 @@ describe('Agent completed and exception scenarios', () => {
             stream: true,
             thinking: true,
             memoryManager,
+            maxLoops: 2,
             streamCallback: (msg) => events.push(msg),
         });
 
         const result = await agent.executeWithResult('继续');
-        expect(result.status).toBe('completed');
+        expect(result.status).toBe('failed');
+        expect(result.failure?.code).toBe('AGENT_LOOP_EXCEEDED');
 
         const hasReasoningDelta = events.some((e) => e.type === AgentMessageType.REASONING_DELTA);
         const hasTextDelta = events.some((e) => e.type === AgentMessageType.TEXT_DELTA);
         expect(hasReasoningDelta).toBe(true);
         expect(hasTextDelta).toBe(false);
+    });
+
+    it('managed-task gate should inject one reminder then fail fast when blocked tasks have no progress', async () => {
+        const provider = new SequenceProvider([
+            createTextResponse('first summary'),
+            createTextResponse('second summary'),
+        ]);
+        const memoryManager = await createReadyMemoryManager('managed-stall-fail-fast');
+        const sessionId = `managed-stall-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        await createManagedTask(memoryManager, sessionId, 'managed-stall-task-1', 'pending');
+
+        const agent = new Agent({
+            provider: provider as unknown as LLMProvider,
+            systemPrompt: 'test',
+            stream: false,
+            memoryManager,
+            sessionId,
+            maxLoops: 10,
+        });
+
+        const result = await agent.executeWithResult('继续');
+        expect(result.status).toBe('failed');
+        expect(result.failure?.code).toBe('AGENT_LOOP_EXCEEDED');
+        expect(provider.callCount).toBe(2);
+
+        const reminderMessages = agent
+            .getMessages()
+            .filter(
+                (message) =>
+                    message.role === 'user' &&
+                    typeof message.content === 'string' &&
+                    message.content.includes('[Task reminder] There are still unfinished managed tasks')
+            );
+        expect(reminderMessages).toHaveLength(1);
+    });
+
+    it('managed-task gate should continue normally when blocked tasks make progress', async () => {
+        const memoryManager = await createReadyMemoryManager('managed-progress');
+        const sessionId = `managed-progress-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        const taskId = 'managed-progress-task-1';
+        await createManagedTask(memoryManager, sessionId, taskId, 'pending');
+
+        const provider = new SequenceProvider([
+            createTextResponse('first summary'),
+            async () => {
+                await createManagedTask(memoryManager, sessionId, taskId, 'completed');
+                return createTextResponse('final answer after task done');
+            },
+        ]);
+
+        const agent = new Agent({
+            provider: provider as unknown as LLMProvider,
+            systemPrompt: 'test',
+            stream: false,
+            memoryManager,
+            sessionId,
+            maxLoops: 10,
+        });
+
+        const result = await agent.executeWithResult('继续');
+        expect(result.status).toBe('completed');
+        expect(result.finalMessage?.content).toBe('final answer after task done');
+        expect(provider.callCount).toBe(2);
     });
 
     it('retryable errors should fail with max-retries-exceeded and keep detailed retry reason in status', async () => {
