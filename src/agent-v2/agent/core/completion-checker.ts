@@ -83,6 +83,20 @@ function checkAssistantComplete(message: Message): boolean {
             }
             case 'tool_calls':
                 return false;
+            case 'stop': {
+                // finish_reason=stop 时，检查是否有实际内容
+                const hasTools = Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
+                if (hasTools) {
+                    return false;
+                }
+                // 只有 reasoning_content 而没有 content 时，不认为已完成
+                const hasOnlyReasoning =
+                    !hasContent(message.content) && message.reasoning_content && hasContent(message.reasoning_content);
+                if (hasOnlyReasoning) {
+                    return false;
+                }
+                return hasContent(message.content);
+            }
         }
 
         if (Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
