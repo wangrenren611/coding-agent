@@ -165,6 +165,25 @@ describe('ToolExecutor Plan Mode 阻止逻辑', () => {
             }
         });
 
+        it('Plan Mode 下应该允许 task_output 工具', async () => {
+            const config = createMockConfig(true);
+            const executor = new ToolExecutor(config);
+
+            const taskOutputCall = createToolCall('task_output', {
+                task_id: 'task-1',
+                block: false,
+                timeout: 1000,
+            });
+
+            try {
+                await executor.execute([taskOutputCall], 'msg-1', 'test content');
+            } catch (error) {
+                if (error instanceof LLMResponseInvalidError) {
+                    expect((error as Error).message).not.toContain('Plan Mode');
+                }
+            }
+        });
+
         it('非 Plan Mode 下应该允许所有工具', async () => {
             const config = createMockConfig(false);
             const executor = new ToolExecutor(config);

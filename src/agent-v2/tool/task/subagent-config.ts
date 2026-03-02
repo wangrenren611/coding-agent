@@ -51,7 +51,14 @@ Prefer concise outputs and avoid unrelated work.`,
             WebFetchTool,
         ],
         systemPrompt: `You are a general software engineering sub-agent.
-Handle multi-step tasks pragmatically, verify your work, and keep responses concise.`,
+Handle multi-step tasks pragmatically, verify your work, and keep responses concise.
+
+When editing files:
+- Prefer batch_replace for 2+ edits in the same file.
+- Use precise_replace only for a single focused edit.
+- Before precise_replace, call read_file and copy oldText exactly from the latest output.
+- After TEXT_NOT_FOUND, do not resend the same payload. Re-read and rebuild parameters.
+- If two retries fail on the same file, switch strategy (batch_replace or write_file).`,
         maxRetries: 10,
         // 通用任务可能需要较长时间
         idleTimeoutMs: MEDIUM_IDLE_TIMEOUT_MS,
@@ -69,7 +76,7 @@ Guidelines:
 - Use Glob for broad file pattern matching
 - Use Grep for searching file contents with regex
 - Use Read when you know the specific file path you need to read
-- Use Bash for file operations like copying, moving, or listing directory contents
+- This agent has no Bash tool; rely on Glob/Grep/Read for exploration tasks
 - Adapt your search approach based on the thoroughness level specified by the caller
 - Return file paths as absolute paths in your final response
 - For clear communication, avoid using emojis

@@ -2,6 +2,7 @@ import { v4 as uuid } from 'uuid';
 import { Message } from './types';
 import { InputContentPart, LLMProvider, LLMResponse } from '../../providers';
 import { IMemoryManager, CompactionRecord } from '../memory/types';
+import { getLogger, type Logger } from '../logger';
 
 type ToolCallLike = { id?: string };
 
@@ -35,6 +36,8 @@ export interface CompactionConfig {
     keepMessagesNum?: number;
     /** 触发压缩的阈值比例（默认 0.90） */
     triggerRatio?: number;
+    /** 日志器（可选，不提供则使用默认日志器） */
+    logger?: Logger;
 }
 
 export interface TokenInfo {
@@ -96,6 +99,7 @@ export class Compaction {
     private readonly triggerRatio: number;
     private readonly keepMessagesNum: number;
     private readonly llmProvider: LLMProvider;
+    private readonly logger: Logger;
 
     constructor(config: CompactionConfig) {
         this.maxTokens = config.maxTokens;
@@ -104,6 +108,7 @@ export class Compaction {
         this.llmProvider = config.llmProvider;
         this.keepMessagesNum = config.keepMessagesNum ?? 40;
         this.triggerRatio = config.triggerRatio ?? 0.9;
+        this.logger = config.logger ?? getLogger();
     }
 
     /**
@@ -147,7 +152,9 @@ export class Compaction {
             return { isCompacted: false, summaryMessage: null, messages };
         }
 
-        console.log(`[Compaction] 触发压缩。Token: ${tokenInfo.totalUsed}, 阈值: ${Math.floor(tokenInfo.threshold)}`);
+        this.logger.info(
+            `[Compaction] Triggered. tokens=${tokenInfo.totalUsed}, threshold=${Math.floor(tokenInfo.threshold)}`
+        );
 
         // 分离消息区域
         const { systemMessage, pending, active } = this.splitMessages(messages);
@@ -181,7 +188,7 @@ export class Compaction {
             });
         }
 
-        console.log(`[Compaction] 完成。消息数: ${messages.length} -> ${newMessages.length}`);
+        this.logger.info(`[Compaction] Completed. messages=${messages.length}->${newMessages.length}`);
 
         return {
             isCompacted: true,
@@ -347,7 +354,7 @@ export class Compaction {
             return previousSummary || 'No messages to summarize.';
         }
 
-        console.log('[Compaction] 正在生成摘要...');
+        this.logger.debug('[Compaction] Generating summary...');
 
         const historyText = this.serializeMessages(messages);
         const userContent = previousSummary
@@ -360,7 +367,7 @@ export class Compaction {
             summaryAbortSignal ? { abortSignal: summaryAbortSignal } : undefined
         );
 
-        console.log('[Compaction] 摘要生成完成');
+        this.logger.debug('[Compaction] Summary generated');
 
         if (!response || typeof response !== 'object' || !('choices' in response)) {
             return previousSummary || 'Summary generation failed.';
@@ -394,8 +401,8 @@ export class Compaction {
         // 方法1（优先）：使用最后一条 assistant 消息的 usage.prompt_tokens
         // usage.prompt_tokens 是当前请求的完整上下文大小，已经包含 system prompt 和所有历史消息
         // 注意：不能累加，因为每条消息的 prompt_tokens 都是当时完整的上下文大小
-        const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant' && m.usage?.prompt_tokens);
-        const latestUsage = lastAssistant?.usage?.prompt_tokens ?? 0;
+        // const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant' && m.usage?.prompt_tokens);
+        // const latestUsage = lastAssistant?.usage?.prompt_tokens ?? 0;
 
         // 方法2（备用）：基于内容估算
         const estimatedTotal = messages.reduce((acc, m) => {
@@ -404,22 +411,44 @@ export class Compaction {
 
         // 判断 usage 是否可靠
         // 压缩后产生的 summary 消息没有 usage，此时应该使用估算
-        const hasSummary = messages.some((m) => m.type === 'summary');
-        const hasReliableUsage = latestUsage > 0 && !hasSummary;
+        //  const hasSummary = messages.some((m) => m.type === 'summary');
 
         return {
-            totalUsed: hasReliableUsage ? latestUsage : estimatedTotal,
+            totalUsed: estimatedTotal,
             estimatedTotal,
-            hasReliableUsage,
+            hasReliableUsage: false,
         };
     }
 
     /**
      * 估算文本 Token 数
+     *
+     * 算法说明：
+     * - 中文字符（Unicode \u4e00-\u9fa5）：1 字符 ≈ 1.5 token
+     * - 其他字符（英文、数字、符号等）：1 字符 ≈ 0.25 token（1/4）
+     *
+     * 此估算基于常见 LLM（GPT、GLM 等）的 BPE 分词特点：
+     * - 中文通常每个字为 1-2 个 token，平均约 1.5
+     * - 英文单词平均为 0.5-1 个 token，按字符算是约 0.25
      */
     private estimateTokens(text: string): number {
         if (!text) return 0;
-        return Math.ceil(text.length / 4);
+
+        let cnCount = 0;
+        let otherCount = 0;
+
+        for (const char of text) {
+            // 判断是否为中文字符（CJK 统一表意文字范围）
+            if (char >= '\u4e00' && char <= '\u9fa5') {
+                cnCount++;
+            } else {
+                otherCount++;
+            }
+        }
+
+        // 中文：1.5 token/字符，其他：0.25 token/字符
+        const totalTokens = cnCount * 1.5 + otherCount * 0.25;
+        return Math.ceil(totalTokens);
     }
 
     private createSummaryAbortSignal(): AbortSignal | undefined {

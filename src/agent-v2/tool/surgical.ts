@@ -125,6 +125,34 @@ function generateDiffReport(actual: string, expected: string): string {
     return lines.join('\n');
 }
 
+/**
+ * Find all start indices where expected lines match exactly.
+ */
+function findExactMatchStartIndices(lines: string[], expectedLines: string[]): number[] {
+    if (expectedLines.length === 0) {
+        return [];
+    }
+
+    const matches: number[] = [];
+    const maxStart = lines.length - expectedLines.length;
+
+    for (let start = 0; start <= maxStart; start++) {
+        let matched = true;
+        for (let i = 0; i < expectedLines.length; i++) {
+            if (lines[start + i] !== expectedLines[i]) {
+                matched = false;
+                break;
+            }
+        }
+
+        if (matched) {
+            matches.push(start);
+        }
+    }
+
+    return matches;
+}
+
 export class SurgicalEditTool extends BaseTool<typeof schema> {
     name = 'precise_replace';
 
@@ -163,7 +191,7 @@ WHEN precise_replace FAILS:
 
 TOOL SELECTION GUIDE:
 - Single small change + read file first → precise_replace
-- Multiple changes to same file → batch_replace (PREFERRED, 0% failure rate)
+- Multiple changes to same file → batch_replace (PREFERRED, lower stale-content risk)
 - Large refactoring → write_file
 `;
 
@@ -218,44 +246,101 @@ TOOL SELECTION GUIDE:
         const lines = splitAndFilterEmptyTail(normalizedContent);
         const oldTextLines = splitAndFilterEmptyTail(normalizedOldText);
 
-        // === 6. Check line range ===
+        const expectedText = oldTextLines.join('\n');
+        const expectedMatches = findExactMatchStartIndices(lines, oldTextLines);
+        let targetLineIdx = line - 1;
+        let autoCorrected = false;
+
+        // === 6. Check line range and attempt global auto-correction ===
         if (line < 1 || line > lines.length) {
-            return this.result({
-                success: false,
-                metadata: { error: 'LINE_OUT_OF_RANGE', line, fileLength: lines.length },
-                output: `LINE_OUT_OF_RANGE: line ${line} is out of range (file has ${lines.length} lines, valid range: 1-${lines.length})`,
-            });
+            if (expectedMatches.length === 1) {
+                targetLineIdx = expectedMatches[0];
+                autoCorrected = true;
+            } else {
+                const ambiguousTip =
+                    expectedMatches.length > 1
+                        ? `\nFound ${expectedMatches.length} exact matches at lines: ${expectedMatches
+                              .map((idx) => idx + 1)
+                              .slice(0, 10)
+                              .join(', ')}`
+                        : '';
+
+                return this.result({
+                    success: false,
+                    metadata: { error: 'LINE_OUT_OF_RANGE', line, fileLength: lines.length },
+                    output: `LINE_OUT_OF_RANGE: line ${line} is out of range (file has ${lines.length} lines, valid range: 1-${lines.length})${ambiguousTip}`,
+                });
+            }
         }
 
-        const targetLineIdx = line - 1;
-
-        // === 7. Check if enough lines available ===
+        // === 7. Check if enough lines available, then attempt global auto-correction ===
         if (targetLineIdx + oldTextLines.length > lines.length) {
-            const contextSnippet = generateContextSnippet(lines, targetLineIdx, oldTextLines.length);
+            if (expectedMatches.length === 1) {
+                targetLineIdx = expectedMatches[0];
+                autoCorrected = true;
+            } else {
+                const contextSnippet = generateContextSnippet(
+                    lines,
+                    Math.min(targetLineIdx, lines.length - 1),
+                    oldTextLines.length
+                );
+                const ambiguousTip =
+                    expectedMatches.length > 1
+                        ? `\nFound ${expectedMatches.length} exact matches at lines: ${expectedMatches
+                              .map((idx) => idx + 1)
+                              .slice(0, 10)
+                              .join(', ')}`
+                        : '';
 
-            return this.result({
-                success: false,
-                metadata: {
-                    error: 'TEXT_NOT_FOUND',
-                    reason: 'Not enough lines from specified position',
-                    expectedLines: oldTextLines.length,
-                    availableLines: lines.length - targetLineIdx,
-                },
-                output: `TEXT_NOT_FOUND: Need ${oldTextLines.length} lines starting from line ${line}, but only ${lines.length - targetLineIdx} lines available
+                return this.result({
+                    success: false,
+                    metadata: {
+                        error: 'TEXT_NOT_FOUND',
+                        reason: 'Not enough lines from specified position',
+                        expectedLines: oldTextLines.length,
+                        availableLines: Math.max(0, lines.length - targetLineIdx),
+                    },
+                    output: `TEXT_NOT_FOUND: Need ${oldTextLines.length} lines starting from line ${line}, but only ${Math.max(0, lines.length - targetLineIdx)} lines available${ambiguousTip}
 
 === Content near line ${line} ===
 ${contextSnippet}
 === End ===`,
-            });
+                });
+            }
         }
 
         // === 8. Extract actual text and compare ===
-        // Use oldTextLines.join('\n') instead of normalizedOldText for consistent comparison
         const actualText = lines.slice(targetLineIdx, targetLineIdx + oldTextLines.length).join('\n');
-        const expectedText = oldTextLines.join('\n');
 
         if (actualText !== expectedText) {
-            const diffReport = generateDiffReport(actualText, expectedText);
+            if (expectedMatches.length === 1) {
+                targetLineIdx = expectedMatches[0];
+                autoCorrected = true;
+            } else if (expectedMatches.length > 1) {
+                return this.result({
+                    success: false,
+                    metadata: {
+                        error: 'TEXT_NOT_FOUND',
+                        line,
+                        reason: 'Multiple exact matches found, line disambiguation required',
+                        candidateLines: expectedMatches.map((idx) => idx + 1),
+                    },
+                    output: `TEXT_NOT_FOUND at line ${line}: Text does not match oldText
+
+AMBIGUOUS_MATCH: Found ${expectedMatches.length} exact matches at lines: ${expectedMatches
+                        .map((idx) => idx + 1)
+                        .slice(0, 10)
+                        .join(', ')}
+
+TIP: Retry with the exact matching line number.`,
+                });
+            }
+        }
+
+        // Recompute text after optional auto-correction
+        const correctedActualText = lines.slice(targetLineIdx, targetLineIdx + oldTextLines.length).join('\n');
+        if (correctedActualText !== expectedText) {
+            const diffReport = generateDiffReport(correctedActualText, expectedText);
             const contextSnippet = generateContextSnippet(lines, targetLineIdx, oldTextLines.length);
 
             // Extract the exact actual content for easy copying
@@ -269,7 +354,7 @@ ${contextSnippet}
                     expectedLines: oldTextLines.length,
                     reason: 'Text at specified position does not match oldText',
                     expectedPreview: expectedText.slice(0, 100),
-                    actualPreview: actualText.slice(0, 100),
+                    actualPreview: correctedActualText.slice(0, 100),
                     actualContent: actualContentForCopy,
                 },
                 output: `TEXT_NOT_FOUND at line ${line}: Text does not match oldText
@@ -317,9 +402,13 @@ TIP: Copy the EXACT content above, including ALL indentation spaces, and retry.`
             metadata: {
                 filePath,
                 line,
+                actualLine: targetLineIdx + 1,
+                autoCorrected,
                 message: 'Modification successful',
             },
-            output: `Replaced line ${line} in ${filePath}`,
+            output: autoCorrected
+                ? `Replaced line ${targetLineIdx + 1} in ${filePath} (requested line ${line}, auto-corrected by unique global match)`
+                : `Replaced line ${line} in ${filePath}`,
         });
     }
 }

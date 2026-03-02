@@ -28,6 +28,7 @@ export type {
     Tool,
     LLMGenerateOptions,
     LLMRequest,
+    AnthropicStreamEvent,
 } from './api';
 
 // 配置相关类型

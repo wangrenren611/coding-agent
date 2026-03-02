@@ -233,3 +233,38 @@ export interface LLMRequest extends LLMGenerateOptions {
     /** 对话消息列表 */
     messages: LLMRequestMessage[];
 }
+
+/**
+ * Anthropic 流式事件类型
+ */
+export interface AnthropicStreamEvent {
+    type: string;
+    message?: {
+        id: string;
+        type: 'message';
+        role: 'assistant';
+        content: Array<{ type: string; text?: string }>;
+        model: string;
+        stop_reason: string | null;
+        stop_sequence: string | null;
+        usage: { input_tokens: number; output_tokens: number };
+    };
+    index?: number;
+    content_block?: {
+        type: 'text' | 'image' | 'tool_use' | 'tool_result';
+        text?: string;
+        id?: string;
+        name?: string;
+        input?: Record<string, unknown>;
+    };
+    delta?: {
+        type: string;
+        text?: string;
+        stop_reason?: string;
+        partial_json?: string;
+    };
+    usage?: {
+        input_tokens: number;
+        output_tokens: number;
+    };
+}

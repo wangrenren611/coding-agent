@@ -27,6 +27,7 @@ export const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
     'task_list',
     'task_update',
     'task_stop',
+    'task_output',
     // Skill
     'skill',
 ]);

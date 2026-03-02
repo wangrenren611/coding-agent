@@ -59,6 +59,42 @@ describe('BatchReplaceTool - Deep Tests', () => {
             expect(modified).toBe('Line 1 NEW\nLine 2 NOMATCH\nLine 3 NEW');
         });
 
+        it('should treat already-applied replacement as success on retry', async () => {
+            const content = 'import { describe, it } from "vitest";';
+            const testFile = await env.createFile('idempotent.ts', content);
+            const tool = new BatchReplaceTool();
+
+            const first = await tool.execute({
+                filePath: testFile,
+                replacements: [
+                    {
+                        line: 1,
+                        oldText: 'describe, it',
+                        newText: 'describe, it, expect',
+                    },
+                ],
+            });
+            expect(first.success).toBe(true);
+            expect((first.metadata as { modifiedCount: number })?.modifiedCount).toBe(1);
+
+            const second = await tool.execute({
+                filePath: testFile,
+                replacements: [
+                    {
+                        line: 1,
+                        oldText: 'describe, it',
+                        newText: 'describe, it, expect',
+                    },
+                ],
+            });
+            expect(second.success).toBe(true);
+            expect((second.metadata as { failedCount: number })?.failedCount).toBe(0);
+            expect((second.metadata as { hasErrors?: boolean })?.hasErrors).toBeUndefined();
+
+            const modified = await env.readFile('idempotent.ts');
+            expect(modified).toBe('import { describe, it, expect } from "vitest";');
+        });
+
         it('should return error for empty replacements array', async () => {
             const content = 'Some content';
             const testFile = await env.createFile('test.txt', content);

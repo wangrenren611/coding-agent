@@ -2,7 +2,7 @@
 /**
  * Prompt 组件 - 用户输入 (React 版本)
  */
-import React, { useState, useRef, useEffect, useImperativeHandle, useCallback, forwardRef } from 'react';
+import React, { useState, useRef, useEffect, useImperativeHandle, useCallback, forwardRef, useMemo } from 'react';
 import { useKeyboard } from '@opentui/react';
 import type { TextareaRenderable } from '@opentui/core';
 import { useTheme } from '../context/theme';
@@ -149,7 +149,16 @@ export const Prompt = forwardRef<PromptRef, PromptProps>((props: PromptProps, re
     }, [agent.state.status, focusInput]);
 
     const borderColor = focused ? theme.borderActive : theme.border;
-    const statusText = isRunning() ? `● ${agent.state.status}` : 'Ready';
+    const statusText = useMemo(() => {
+        if (!isRunning()) return 'Ready';
+        if (agent.state.status === AgentStatus.RETRYING && agent.state.retryInfo) {
+            const { attempt, max, delayMs, reason } = agent.state.retryInfo;
+            const delaySec = Math.ceil(delayMs / 1000);
+            const reasonShort = reason ? ` (${reason.slice(0, 30)}${reason.length > 30 ? '...' : ''})` : '';
+            return `● retrying ${attempt}/${max} in ${delaySec}s${reasonShort}`;
+        }
+        return `● ${agent.state.status}`;
+    }, [agent.state.status, agent.state.retryInfo]);
 
     const handleContentChange = () => {
         if (textareaRef.current?.plainText !== undefined) {
@@ -179,7 +188,7 @@ export const Prompt = forwardRef<PromptRef, PromptProps>((props: PromptProps, re
                 keyBindings={PROMPT_TEXTAREA_KEYBINDINGS}
                 onContentChange={handleContentChange}
                 onSubmit={handleSubmit}
-                placeholder={props.placeholder ?? 'Type message... (Enter send, Shift+Enter newline)'}
+                placeholder={props.placeholder ?? 'Type message... (@path for image/video/file, Enter send)'}
                 placeholderColor={theme.textMuted}
                 textColor={theme.text}
                 focusedTextColor={theme.text}

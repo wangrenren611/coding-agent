@@ -30,6 +30,7 @@ import { ToolRegistry } from '../tool/registry';
 import { EventBus, EventType } from '../eventbus';
 import { Message } from '../session/types';
 import { createDefaultToolRegistry, createPlanModeToolRegistry } from '../tool';
+import { createLogger, getLogger, Logger, createEventLoggerMiddleware } from '../logger';
 
 import {
     AgentAbortedError,
@@ -40,11 +41,13 @@ import {
     AgentValidationError,
     LLMRequestError,
     LLMResponseInvalidError,
+    isLLMContextCompressionError,
 } from './errors';
 import { AgentExecutionResult, AgentOptions, AgentStatus, StreamCallback } from './types';
 import { AgentState } from './core/agent-state';
 import { LLMCaller } from './core/llm-caller';
 import { ToolExecutor } from './core/tool-executor';
+import { checkComplete as evaluateCompletion } from './core/completion-checker';
 import { DefaultTimeProvider } from './time-provider';
 import { InputValidator } from './input-validator';
 import { ErrorClassifier } from './error-classifier';
@@ -86,6 +89,9 @@ export class Agent {
     private readonly session: Session;
     private readonly toolRegistry: ToolRegistry;
     private readonly eventBus: EventBus;
+    private readonly logger: Logger;
+    private readonly ownsLogger: boolean;
+    private unsubscribeEventLogger?: () => void;
 
     // 配置
     private readonly stream: boolean;
@@ -114,6 +120,25 @@ export class Agent {
 
         this.timeProvider = config.timeProvider ?? new DefaultTimeProvider();
         this.eventBus = new EventBus();
+
+        // 初始化日志器（仅关闭内部创建的实例，避免误关闭共享默认 logger）
+        if (config.logger) {
+            this.logger = config.logger;
+            this.ownsLogger = false;
+        } else if (config.loggerConfig) {
+            this.logger = createLogger(config.loggerConfig);
+            this.ownsLogger = true;
+        } else {
+            this.logger = getLogger();
+            this.ownsLogger = false;
+        }
+
+        // 设置 Agent 事件日志
+        if (config.enableEventLogging !== false) {
+            this.unsubscribeEventLogger = createEventLoggerMiddleware(this.eventBus, this.logger, {
+                sessionId: config.sessionId,
+            });
+        }
         this.inputValidator = new InputValidator();
         this.errorClassifier = new ErrorClassifier();
 
@@ -127,6 +152,7 @@ export class Agent {
             enableCompaction: config.enableCompaction,
             compactionConfig: config.compactionConfig,
             provider: this.provider,
+            logger: this.logger,
         });
 
         // 根据 planMode 选择不同的工具注册表
@@ -278,6 +304,28 @@ export class Agent {
         });
     }
 
+    /**
+     * 关闭 Agent，释放资源
+     */
+    async close(): Promise<void> {
+        // 取消事件日志订阅
+        if (this.unsubscribeEventLogger) {
+            this.unsubscribeEventLogger();
+            this.unsubscribeEventLogger = undefined;
+        }
+        // 关闭日志器（清理定时器等资源）
+        if (this.ownsLogger) {
+            await this.logger.close();
+        }
+    }
+
+    /**
+     * 获取日志器
+     */
+    getLogger(): Logger {
+        return this.logger;
+    }
+
     // ==================== 事件订阅 ====================
 
     on(type: EventType, listener: (data: unknown) => void): void {
@@ -396,7 +444,23 @@ export class Agent {
                 break;
             }
 
-            if (this.checkComplete()) {
+            const completion = await evaluateCompletion({
+                lastMessage: this.session.getLastMessage(),
+                sessionId: this.session.getSessionId(),
+                memoryManager: this.session.getMemoryManager(),
+            });
+            if (completion.blockedByTasks) {
+                this.emitter.emitStatus(
+                    AgentStatus.RUNNING,
+                    `Task list still has unfinished items (in_progress: ${completion.blockedByTasks.inProgressCount}, pending: ${completion.blockedByTasks.pendingCount}), continuing...`,
+                    undefined,
+                    {
+                        source: 'agent',
+                        phase: 'lifecycle',
+                    }
+                );
+            }
+            if (completion.done) {
                 break;
             }
 
@@ -429,28 +493,41 @@ export class Agent {
                 await this.executeLLMCall(options);
                 this.agentState.recordSuccess();
             } catch (error) {
-                this.handleLoopError(error);
+                await this.handleLoopError(error);
             }
         }
     }
 
-    private handleLoopError(error: unknown): never | void {
-        // 可重试错误
-        if (isRetryableError(error)) {
-            const delay = this.resolveRetryDelay(error);
-            this.agentState.recordRetryableError(delay);
-            this.pendingRetryReason = this.formatRetryReason(error);
-            const stats = this.agentState.getStats();
-            this.eventBus.emit(EventType.TASK_RETRY, {
-                timestamp: this.timeProvider.getCurrentTime(),
-                retryCount: stats.retries,
-                maxRetries: stats.maxRetries,
-                reason: this.pendingRetryReason,
-            });
-            return;
+    private async handleLoopError(error: unknown): Promise<void> {
+        // 检查是否为可重试错误
+        if (!isRetryableError(error)) {
+            throw error;
         }
 
-        throw error;
+        // 特殊处理：LLMContextCompressionError 需要先压缩上下文
+        if (isLLMContextCompressionError(error)) {
+            try {
+                await this.session.compactBeforeLLMCall();
+            } catch (compactError) {
+                // 压缩失败不影响重试流程，仅记录日志
+                this.logger.warn('[Agent] Context compaction failed', {
+                    phase: 'compaction',
+                    error: compactError instanceof Error ? compactError.message : String(compactError),
+                });
+            }
+        }
+
+        // 记录重试
+        const delay = this.resolveRetryDelay(error);
+        this.agentState.recordRetryableError(delay);
+        this.pendingRetryReason = this.formatRetryReason(error);
+        const stats = this.agentState.getStats();
+        this.eventBus.emit(EventType.TASK_RETRY, {
+            timestamp: this.timeProvider.getCurrentTime(),
+            retryCount: stats.retries,
+            maxRetries: stats.maxRetries,
+            reason: this.pendingRetryReason,
+        });
     }
 
     private async handleRetry(): Promise<void> {
@@ -528,56 +605,6 @@ export class Agent {
     }
 
     // ==================== 内部方法：完成检测 ====================
-
-    private checkComplete(): boolean {
-        const lastMessage = this.session.getLastMessage();
-        if (!lastMessage) return false;
-
-        switch (lastMessage.role) {
-            case 'user':
-                return false;
-            case 'tool':
-                return false;
-            case 'assistant':
-                return this.checkAssistantComplete(lastMessage);
-            default:
-                return false;
-        }
-    }
-
-    private checkAssistantComplete(message: Message): boolean {
-        if (message.finish_reason) {
-            switch (message.finish_reason) {
-                case 'abort':
-                    return false;
-                case 'length': {
-                    // finish_reason=length 时，检查是否有未完成的内容或工具调用
-                    const hasTools = Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
-                    return this.hasAssistantOutput(message) && !hasTools;
-                }
-                case 'tool_calls':
-                    return false;
-            }
-
-            if (Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
-                return false;
-            }
-
-            if (this.isEmptyResponse(message)) {
-                return false;
-            }
-
-            return true;
-        }
-
-        const hasToolCalls = Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
-        return message.type === 'text' && this.hasAssistantOutput(message) && !hasToolCalls;
-    }
-
-    private isEmptyResponse(message: Message): boolean {
-        const hasToolCalls = Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
-        return message.role === 'assistant' && !hasToolCalls && !this.hasAssistantOutput(message);
-    }
 
     private hasReasoningOutput(reasoning: unknown): reasoning is string {
         return typeof reasoning === 'string' && reasoning.trim().length > 0;

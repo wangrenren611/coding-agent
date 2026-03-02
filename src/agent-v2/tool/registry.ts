@@ -4,6 +4,7 @@ import { ToolSchema } from './type';
 import { ToolCall } from '../../providers';
 import { safeParse } from '../util';
 import type { TruncationMiddleware, TruncationContext } from '../truncation';
+import { getLogger } from '../logger';
 
 /** 默认工具执行超时时间（毫秒） */
 const DEFAULT_TOOL_TIMEOUT = 300000; // 5分钟
@@ -61,6 +62,7 @@ export class ToolRegistry {
     private toolTimeout: number;
     private eventCallbacks?: ToolEventCallbacks;
     private truncationMiddleware?: TruncationMiddleware;
+    private readonly logger = getLogger();
 
     constructor(config: ToolRegistryConfig) {
         this.workingDirectory = config.workingDirectory;
@@ -276,7 +278,13 @@ export class ToolRegistry {
                             result.metadata = truncatedResult.metadata;
                         } catch (truncationError) {
                             // 截断失败不影响工具执行结果，仅记录日志
-                            console.error('[Truncation] Middleware error:', truncationError);
+                            this.logger.warn('[Truncation] Middleware error', {
+                                toolName: name,
+                                error:
+                                    truncationError instanceof Error
+                                        ? truncationError.message
+                                        : String(truncationError),
+                            });
                         }
                     }
 
