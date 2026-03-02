@@ -171,7 +171,7 @@ export class Agent {
                 this.provider
             );
         }
-                
+
         // 初始化 MCP（如果配置了 MCP 服务器）
         if (config.enableMcp !== false) {
             this.logger.info('[Agent] Initializing MCP...');

@@ -150,7 +150,8 @@ describe('Logger Config', () => {
         it('should respect LOG_DIR env var', () => {
             process.env.LOG_DIR = '/custom/logs';
             const config = mergeConfig({ env: 'development' });
-            expect(config.file?.filepath).toContain('/custom/logs');
+            // 跨平台路径检查（Windows 使用反斜杠）
+            expect(config.file?.filepath).toMatch(/[/\\]custom[/\\]logs/);
         });
     });
 

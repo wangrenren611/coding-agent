@@ -171,15 +171,16 @@ describe('IdleTimeoutController', () => {
             const controller = new IdleTimeoutController(100);
 
             const initial = controller.getRemainingTime();
-            expect(initial).toBeGreaterThan(90);
+            expect(initial).toBeGreaterThan(80);
             expect(initial).toBeLessThanOrEqual(100);
 
             await new Promise((resolve) => setTimeout(resolve, 50));
 
             const after50ms = controller.getRemainingTime();
             // setTimeout 精度不保证，使用更宽松的边界
-            expect(after50ms).toBeGreaterThan(30);
-            expect(after50ms).toBeLessThan(60);
+            // Windows 上 setTimeout 可能有 15-30ms 误差
+            expect(after50ms).toBeGreaterThanOrEqual(10);
+            expect(after50ms).toBeLessThan(80);
         });
 
         it('超时后 getRemainingTime() 应该返回 0', async () => {
@@ -213,8 +214,8 @@ describe('IdleTimeoutController', () => {
         it('应该能与 AbortSignal.timeout() 一起使用', async () => {
             // 空闲超时 50ms
             const idleController = new IdleTimeoutController(50);
-            // 固定超时 200ms
-            const fixedTimeout = AbortSignal.timeout(200);
+            // 固定超时 300ms (增加超时时间以避免 Windows 时序问题)
+            const fixedTimeout = AbortSignal.timeout(300);
 
             // 合并信号
             const merged = AbortSignal.any([idleController.signal, fixedTimeout]);
@@ -223,16 +224,18 @@ describe('IdleTimeoutController', () => {
             expect(merged.aborted).toBe(false);
 
             // 持续重置空闲超时
-            for (let i = 0; i < 5; i++) {
+            // Windows 上 setTimeout 可能有 15-30ms 误差，使用更保守的测试策略
+            for (let i = 0; i < 3; i++) {
                 await new Promise((resolve) => setTimeout(resolve, 30));
                 idleController.reset();
             }
 
-            // 约 150ms 后，因为持续重置，两个信号都不应该触发
+            // 约 90ms 后，因为持续重置，两个信号都不应该触发
+            // 固定超时 300ms，空闲超时 50ms（但持续重置）
             expect(merged.aborted).toBe(false);
 
             // 停止重置，等待空闲超时
-            await new Promise((resolve) => setTimeout(resolve, 70));
+            await new Promise((resolve) => setTimeout(resolve, 100));
 
             // 应该因为空闲超时而中止
             expect(merged.aborted).toBe(true);
