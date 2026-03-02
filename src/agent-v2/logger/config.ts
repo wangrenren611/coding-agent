@@ -83,7 +83,7 @@ function getEnvOverrides(baseConfig: LoggerConfig): Partial<LoggerConfig> {
         logAgentEvents: parseBoolean(process.env.LOG_AGENT_EVENTS) ?? baseConfig.logAgentEvents,
         sensitiveFields: sensitiveFields || baseConfig.sensitiveFields,
         console: {
-            enabled: parseBoolean(process.env.LOG_CONSOLE_ENABLED),
+            enabled: parseBoolean(process.env.LOG_CONSOLE_ENABLED) ?? baseConfig.console?.enabled,
             level: consoleLevel,
             format: parseFormat(process.env.LOG_CONSOLE_FORMAT),
             colorize: parseBoolean(process.env.LOG_CONSOLE_COLORIZE),
@@ -91,7 +91,7 @@ function getEnvOverrides(baseConfig: LoggerConfig): Partial<LoggerConfig> {
             stream: parseStream(process.env.LOG_CONSOLE_STREAM),
         },
         file: {
-            enabled: parseBoolean(process.env.LOG_FILE_ENABLED),
+            enabled: parseBoolean(process.env.LOG_FILE_ENABLED) ?? baseConfig.file?.enabled,
             level: fileLevel,
             filepath: filePath || baseFilepath,
             format: parseFormat(process.env.LOG_FILE_FORMAT),
