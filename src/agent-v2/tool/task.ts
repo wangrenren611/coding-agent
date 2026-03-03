@@ -56,6 +56,7 @@ import {
     getSubTaskRunRecord,
     saveSubTaskRunRecord,
 } from './task/subtask-run-store';
+import { clearSubtaskNotifierState } from './task/subtask-notifier';
 import {
     clearBackgroundExecutions,
     getBackgroundExecution,
@@ -1037,6 +1038,7 @@ export function clearTaskState(sessionId?: string): void {
     clearTaskIdCounterState(sessionId);
     clearManagedTaskState(sessionId);
     clearSubTaskRunFallbackStore(sessionId);
+    clearSubtaskNotifierState(sessionId);
     clearBackgroundExecutions(sessionId);
 }
 

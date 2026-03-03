@@ -1,4 +1,5 @@
 import { buildSubTaskRunData, saveSubTaskRunRecord } from './subtask-run-store';
+import { notifySubtaskStatus } from './subtask-notifier';
 import {
     BACKGROUND_HEARTBEAT_INTERVAL_MS,
     BACKGROUND_HEARTBEAT_PERSIST_INTERVAL_MS,
@@ -90,6 +91,11 @@ export async function persistExecutionSnapshot(execution: BackgroundExecution): 
             messageCount: getMessageCount(execution.messages),
         })
     );
+    notifySubtaskStatus({
+        parentSessionId: execution.parentSessionId,
+        runId: execution.taskId,
+        status: execution.status,
+    });
 }
 
 export async function refreshExecutionProgress(execution: BackgroundExecution, forcePersist = false): Promise<void> {
@@ -155,6 +161,11 @@ export function clearBackgroundExecutions(sessionId?: string): void {
             execution.finishedAt = nowIso();
             execution.error = 'TASK_CANCELLED';
             execution.output = execution.output || 'Task cancelled by cleanup.';
+            notifySubtaskStatus({
+                parentSessionId: execution.parentSessionId,
+                runId: execution.taskId,
+                status: execution.status,
+            });
         }
         backgroundExecutions.delete(taskId);
     }

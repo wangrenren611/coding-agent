@@ -32,6 +32,9 @@ export enum AgentMessageType {
 
     // 子 Agent 事件冒泡
     SUBAGENT_EVENT = 'subagent_event', // 子 Agent 事件冒泡到父会话
+
+    // 权限确认事件
+    PERMISSION_REQUEST = 'permission_request', // 请求用户确认是否放行工具调用
 }
 
 /**
@@ -212,6 +215,21 @@ export interface UsageUpdateMessage extends BaseAgentMessage {
 }
 
 /**
+ * 权限确认请求消息
+ */
+export interface PermissionRequestMessage extends BaseAgentMessage {
+    type: AgentMessageType.PERMISSION_REQUEST;
+    payload: {
+        ticketId: string;
+        toolName: string;
+        reason: string;
+        source?: string;
+        args: string;
+    };
+    msgId: string;
+}
+
+/**
  * 基础事件联合类型（不包含子 Agent 事件）
  */
 export type BaseAgentEvent =
@@ -226,6 +244,7 @@ export type BaseAgentEvent =
     | ToolCallResultMessage
     | CodePatchMessage
     | UsageUpdateMessage
+    | PermissionRequestMessage
     | StatusMessage
     | ErrorMessage;
 

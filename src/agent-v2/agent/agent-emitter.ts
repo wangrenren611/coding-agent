@@ -233,6 +233,27 @@ export class AgentEmitter {
         return { ...this.cumulativeUsage };
     }
 
+    emitPermissionRequest(
+        ticketId: string,
+        toolName: string,
+        reason: string,
+        args: string,
+        messageId: string,
+        source?: string
+    ): void {
+        this.emit({
+            type: AgentMessageType.PERMISSION_REQUEST,
+            payload: {
+                ticketId,
+                toolName,
+                reason,
+                args,
+                ...(source ? { source } : {}),
+            },
+            msgId: messageId,
+        });
+    }
+
     // ==================== 私有方法 ====================
 
     private emit(message: EmitMessage): void {

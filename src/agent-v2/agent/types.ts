@@ -14,6 +14,15 @@ import type { Logger, LoggerConfig } from '../logger';
 import type { McpManager } from '../mcp/manager';
 import type { PermissionRule } from '../security/permission-engine';
 
+export interface PermissionAskContext {
+    ticketId: string;
+    toolName: string;
+    reason: string;
+    source?: string;
+    args: string;
+    messageId: string;
+}
+
 export enum AgentStatus {
     THINKING = 'thinking',
     RUNNING = 'running',
@@ -138,8 +147,12 @@ export interface AgentOptions {
     planBaseDir?: string;
     /** 权限规则（allow/deny/ask） */
     permissionRules?: PermissionRule[];
-    /** 是否启用 PermissionEngine（默认 true） */
+    /** 是否启用 PermissionEngine（默认 true；未显式设置时可由 AGENT_ENABLE_PERMISSION_ENGINE 控制） */
     enablePermissionEngine?: boolean;
+    /** ASK 权限决策模式：callback=通过 onPermissionAsk 回调；event=通过 permission_request 事件 + resolvePermission 回传 */
+    permissionDecisionMode?: 'callback' | 'event';
+    /** 当权限策略为 ASK 时，向上层请求用户确认（true=继续，false=中止） */
+    onPermissionAsk?: (context: PermissionAskContext) => boolean | Promise<boolean>;
     /** 日志器实例（可选，不提供则使用默认日志器） */
     logger?: Logger;
     /** 日志配置（可选，用于创建默认日志器） */

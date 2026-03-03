@@ -48,7 +48,7 @@ import {
     LLMResponseInvalidError,
     isLLMContextCompressionError,
 } from './errors';
-import { AgentExecutionResult, AgentOptions, AgentStatus, StreamCallback } from './types';
+import { AgentExecutionResult, AgentOptions, AgentStatus, PermissionAskContext, StreamCallback } from './types';
 import { AgentState } from './core/agent-state';
 import { LLMCaller } from './core/llm-caller';
 import { ToolExecutor } from './core/tool-executor';
@@ -89,6 +89,17 @@ const AGENT_DEFAULTS = {
     SUBTASK_FALLBACK_POLL_MS: 3000,
 } as const;
 
+const PERMISSION_ENGINE_ENABLE_ENV_KEY = 'AGENT_ENABLE_PERMISSION_ENGINE';
+
+function parseOptionalBooleanEnv(value: string | undefined): boolean | undefined {
+    if (typeof value !== 'string') return undefined;
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) return undefined;
+    if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+    if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+    return undefined;
+}
+
 // ==================== Agent 类 ====================
 
 export class Agent {
@@ -105,6 +116,8 @@ export class Agent {
     private readonly stream: boolean;
     private readonly streamCallback?: StreamCallback;
     private readonly thinking?: boolean;
+    private readonly permissionDecisionMode: AgentOptions['permissionDecisionMode'];
+    private readonly onPermissionAsk?: AgentOptions['onPermissionAsk'];
     private readonly requestTimeoutMs?: number;
     private pendingRetryReason: string | null = null;
     private readonly idleTimeoutMs: number;
@@ -120,12 +133,15 @@ export class Agent {
     private readonly inputValidator: InputValidator;
     private readonly errorClassifier: ErrorClassifier;
     private initializePromise?: Promise<void>;
+    private readonly pendingPermissionResolvers = new Map<string, (approved: boolean) => void>();
 
     constructor(config: AgentOptions) {
         this.provider = this.validateAndGetProvider(config);
         this.stream = config.stream ?? false;
         this.streamCallback = config.streamCallback;
         this.thinking = config.thinking;
+        this.permissionDecisionMode = config.permissionDecisionMode ?? 'callback';
+        this.onPermissionAsk = config.onPermissionAsk;
         this.requestTimeoutMs = this.normalizeMs(config.requestTimeout);
         this.idleTimeoutMs = this.normalizeMs(config.idleTimeout) ?? AGENT_DEFAULTS.IDLE_TIMEOUT_MS;
         const mcpManager = config.mcpManager;
@@ -235,7 +251,10 @@ export class Agent {
         });
 
         // 创建工具执行器
-        const enablePermissionEngine = config.enablePermissionEngine !== false;
+        const enablePermissionEngine =
+            typeof config.enablePermissionEngine === 'boolean'
+                ? config.enablePermissionEngine
+                : (parseOptionalBooleanEnv(process.env[PERMISSION_ENGINE_ENABLE_ENV_KEY]) ?? true);
         const permissionEngine = enablePermissionEngine
             ? createDefaultPermissionEngine({
                   rules: config.permissionRules,
@@ -249,6 +268,7 @@ export class Agent {
             planMode: config.planMode,
             enablePermissionEngine,
             permissionEngine,
+            onPermissionAsk: (context) => this.handlePermissionAsk(context),
             onToolCallCreated: (toolCalls, messageId, content) =>
                 this.emitter.emitToolCallCreated(toolCalls, messageId, content),
             onToolCallStream: (toolCallId, output, messageId) =>
@@ -332,6 +352,7 @@ export class Agent {
     }
 
     abort(): void {
+        this.resolveAllPendingPermissions(false);
         this.agentState.abort();
         this.llmCaller.abort();
         this.emitter.emitStatus(AgentStatus.ABORTED, 'Agent aborted by user.', undefined, {
@@ -340,10 +361,20 @@ export class Agent {
         });
     }
 
+    resolvePermission(ticketId: string, approved: boolean): boolean {
+        const resolver = this.pendingPermissionResolvers.get(ticketId);
+        if (!resolver) {
+            return false;
+        }
+        resolver(approved);
+        return true;
+    }
+
     /**
      * 关闭 Agent，释放资源
      */
     async close(): Promise<void> {
+        this.resolveAllPendingPermissions(false);
         // 取消事件日志订阅
         if (this.unsubscribeEventLogger) {
             this.unsubscribeEventLogger();
@@ -1045,6 +1076,73 @@ Do not output a completion summary until all managed tasks are marked completed.
                     phase: 'tool',
                 }
             );
+        }
+    }
+
+    private async handlePermissionAsk(context: PermissionAskContext): Promise<boolean> {
+        this.emitter.emitPermissionRequest(
+            context.ticketId,
+            context.toolName,
+            context.reason,
+            context.args,
+            context.messageId,
+            context.source
+        );
+
+        const ask = this.onPermissionAsk;
+        let approved = false;
+        if (ask) {
+            approved = await ask(context);
+        } else if (this.permissionDecisionMode === 'event') {
+            approved = await this.waitForPermissionDecision(context.ticketId);
+        }
+
+        if (!approved) {
+            this.abort();
+            return false;
+        }
+
+        this.emitter.emitStatus(AgentStatus.RUNNING, `Permission granted for tool "${context.toolName}"`, undefined, {
+            source: 'tool-executor',
+            phase: 'tool',
+        });
+        return true;
+    }
+
+    private waitForPermissionDecision(ticketId: string): Promise<boolean> {
+        return new Promise<boolean>((resolve) => {
+            const signal = this.agentState.abortController?.signal;
+            let settled = false;
+
+            const finalize = (approved: boolean) => {
+                if (settled) return;
+                settled = true;
+                if (signal) {
+                    signal.removeEventListener('abort', onAbort);
+                }
+                this.pendingPermissionResolvers.delete(ticketId);
+                resolve(approved);
+            };
+
+            const onAbort = () => finalize(false);
+
+            if (signal?.aborted) {
+                finalize(false);
+                return;
+            }
+
+            this.pendingPermissionResolvers.set(ticketId, finalize);
+            if (signal) {
+                signal.addEventListener('abort', onAbort, { once: true });
+            }
+        });
+    }
+
+    private resolveAllPendingPermissions(approved: boolean): void {
+        const resolvers = Array.from(this.pendingPermissionResolvers.values());
+        this.pendingPermissionResolvers.clear();
+        for (const resolver of resolvers) {
+            resolver(approved);
         }
     }
 

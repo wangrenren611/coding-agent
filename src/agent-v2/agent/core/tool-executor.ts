@@ -21,7 +21,7 @@ import { sanitizeToolResult as sanitizeToolResultUtil, toolResultToString } from
 import type { PermissionEngine } from '../../security/permission-engine';
 import { createDefaultPermissionEngine } from '../../security/permission-engine';
 import { safeParse } from '../../util';
-import { LLMResponseInvalidError, PermissionDecisionError } from '../errors';
+import { AgentAbortedError, LLMResponseInvalidError, PermissionDecisionError } from '../errors';
 
 const PATCH_PATH_KEYS = new Set(['filePath', 'path', 'targetPath', 'fromPath', 'toPath']);
 const MAX_SNAPSHOT_BYTES = 300 * 1024;
@@ -52,6 +52,15 @@ export interface ToolExecutorConfig {
     enablePermissionEngine?: boolean;
     /** 权限引擎（可选，不提供则使用默认引擎） */
     permissionEngine?: PermissionEngine;
+    /** ASK 权限确认回调（true=继续，false=中止） */
+    onPermissionAsk?: (context: {
+        ticketId: string;
+        toolName: string;
+        reason: string;
+        source?: string;
+        args: string;
+        messageId: string;
+    }) => boolean | Promise<boolean>;
 
     // 回调
     /** 工具调用创建回调 */
@@ -189,6 +198,22 @@ export class ToolExecutor {
             if (decision.effect === 'ask') {
                 const ticketId = decision.ticket?.id || 'unknown-ticket';
                 const reason = decision.reason || `Tool "${toolName}" requires explicit approval`;
+                if (this.config.onPermissionAsk) {
+                    const approved = await this.config.onPermissionAsk({
+                        ticketId,
+                        toolName,
+                        reason,
+                        source: decision.source,
+                        args: toolCall.function?.arguments || '',
+                        messageId,
+                    });
+                    if (approved) {
+                        continue;
+                    }
+                    throw new AgentAbortedError(
+                        `Permission rejected by user for tool "${toolName}" (ticket=${ticketId})`
+                    );
+                }
                 throw new PermissionDecisionError({
                     effect: 'ask',
                     toolName,

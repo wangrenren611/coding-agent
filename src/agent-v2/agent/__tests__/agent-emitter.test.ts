@@ -377,4 +377,29 @@ describe('AgentEmitter', () => {
             });
         });
     });
+
+    describe('权限确认事件', () => {
+        it('emitPermissionRequest 应该发送正确的消息', () => {
+            emitter.emitPermissionRequest(
+                'ticket-1',
+                'bash',
+                'manual approval required',
+                '{"command":"echo 1"}',
+                'msg-1'
+            );
+
+            expect(mockCallback).toHaveBeenCalledWith({
+                type: AgentMessageType.PERMISSION_REQUEST,
+                payload: {
+                    ticketId: 'ticket-1',
+                    toolName: 'bash',
+                    reason: 'manual approval required',
+                    args: '{"command":"echo 1"}',
+                },
+                msgId: 'msg-1',
+                sessionId,
+                timestamp,
+            });
+        });
+    });
 });

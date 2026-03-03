@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ToolExecutor } from '../core/tool-executor';
-import { LLMResponseInvalidError, PermissionDecisionError } from '../errors';
+import { AgentAbortedError, LLMResponseInvalidError, PermissionDecisionError } from '../errors';
 import { ToolCallValidationError } from '../../tool/registry';
 import type { ToolCall } from '../core-types';
 import type { ToolRegistry } from '../../tool/registry';
@@ -222,6 +222,58 @@ describe('ToolExecutor protocol events', () => {
         await expect(
             executor.execute([createToolCall('call-7', 'write_file', { filePath: 'x', content: 'y' })], 'msg-7')
         ).rejects.toThrow(/PERMISSION_ASK_REQUIRED/);
+        expect(registry.execute).not.toHaveBeenCalled();
+    });
+
+    it('should continue execution when ask callback approves', async () => {
+        const registry = {
+            validateToolCalls: vi.fn(),
+            execute: vi.fn(async () => [
+                {
+                    tool_call_id: 'call-8',
+                    result: { success: true, output: 'ok-after-approval' },
+                },
+            ]),
+        } as unknown as ToolRegistry;
+
+        const permissionEngine = createDefaultPermissionEngine({
+            rules: [{ effect: 'ask', tool: 'write_file', reason: 'manual approval required' }],
+        });
+        const askSpy = vi.fn(async () => true);
+        const executor = new ToolExecutor({
+            toolRegistry: registry,
+            sessionId: 's-1',
+            enablePermissionEngine: true,
+            permissionEngine,
+            onPermissionAsk: askSpy,
+        });
+
+        await executor.execute([createToolCall('call-8', 'write_file', { filePath: 'x', content: 'y' })], 'msg-8');
+
+        expect(askSpy).toHaveBeenCalledTimes(1);
+        expect(registry.execute).toHaveBeenCalledTimes(1);
+    });
+
+    it('should abort execution when ask callback rejects', async () => {
+        const registry = {
+            validateToolCalls: vi.fn(),
+            execute: vi.fn(async () => []),
+        } as unknown as ToolRegistry;
+
+        const permissionEngine = createDefaultPermissionEngine({
+            rules: [{ effect: 'ask', tool: 'write_file', reason: 'manual approval required' }],
+        });
+        const executor = new ToolExecutor({
+            toolRegistry: registry,
+            sessionId: 's-1',
+            enablePermissionEngine: true,
+            permissionEngine,
+            onPermissionAsk: async () => false,
+        });
+
+        await expect(
+            executor.execute([createToolCall('call-9', 'write_file', { filePath: 'x', content: 'y' })], 'msg-9')
+        ).rejects.toThrow(AgentAbortedError);
         expect(registry.execute).not.toHaveBeenCalled();
     });
 });

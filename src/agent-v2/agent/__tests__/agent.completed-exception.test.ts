@@ -1,9 +1,10 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Agent } from '../agent';
 import { AgentMessageType, type AgentMessage, type StatusMessage } from '../stream-types';
 import { AgentStatus } from '../types';
 import { createMemoryManager } from '../../memory';
 import { LLMRetryableError } from '../../../providers';
+import { notifySubtaskStatus } from '../../tool/task/subtask-notifier';
 import type { LLMProvider, LLMResponse, LLMGenerateOptions, LLMRequestMessage, Chunk } from '../../../providers';
 
 type ProviderStep =
@@ -245,6 +246,20 @@ describe('Agent completed and exception scenarios', () => {
         });
     }
 
+    function attachSubTaskRunQueryCounter(memoryManager: Awaited<ReturnType<typeof createReadyMemoryManager>>) {
+        let queryCount = 0;
+        const originalQuery = memoryManager.querySubTaskRuns.bind(memoryManager);
+        (memoryManager as typeof memoryManager & { querySubTaskRuns: typeof originalQuery }).querySubTaskRuns = async (
+            ...args: Parameters<typeof originalQuery>
+        ) => {
+            queryCount += 1;
+            return await originalQuery(...args);
+        };
+        return {
+            getCount: () => queryCount,
+        };
+    }
+
     it('stream=true fallback (non-stream response) should still emit text events before completed', async () => {
         const provider = new SequenceProvider([createTextResponse('fallback content')]);
         const memoryManager = await createReadyMemoryManager('stream-fallback');
@@ -369,6 +384,170 @@ describe('Agent completed and exception scenarios', () => {
             (e) => e.type === AgentMessageType.STATUS && e.payload.state === AgentStatus.COMPLETED
         );
         expect(completedStatuses).toHaveLength(1);
+    });
+
+    it('permission ask should emit request event and continue when user approves', async () => {
+        const provider = new SequenceProvider([
+            createToolCallResponse('unknown_tool', { x: 1 }),
+            createTextResponse('final answer after permission approval'),
+        ]);
+        const memoryManager = await createReadyMemoryManager('permission-ask-approve');
+        const events: AgentMessage[] = [];
+        const askSpy = vi.fn(async () => true);
+
+        const agent = new Agent({
+            provider: provider as unknown as LLMProvider,
+            systemPrompt: 'test',
+            stream: false,
+            memoryManager,
+            permissionRules: [{ effect: 'ask', tool: 'unknown_tool', reason: 'manual approval required' }],
+            onPermissionAsk: askSpy,
+            streamCallback: (msg) => events.push(msg),
+        });
+
+        const result = await agent.executeWithResult('run tool');
+        expect(result.status).toBe('completed');
+        expect(result.finalMessage?.content).toBe('final answer after permission approval');
+        expect(askSpy).toHaveBeenCalledTimes(1);
+        expect(events.some((event) => event.type === AgentMessageType.PERMISSION_REQUEST)).toBe(true);
+    });
+
+    it('permission ask should abort loop when user rejects', async () => {
+        const provider = new SequenceProvider([createToolCallResponse('unknown_tool', { x: 1 })]);
+        const memoryManager = await createReadyMemoryManager('permission-ask-reject');
+        const events: AgentMessage[] = [];
+
+        const agent = new Agent({
+            provider: provider as unknown as LLMProvider,
+            systemPrompt: 'test',
+            stream: false,
+            memoryManager,
+            permissionRules: [{ effect: 'ask', tool: 'unknown_tool', reason: 'manual approval required' }],
+            onPermissionAsk: async () => false,
+            streamCallback: (msg) => events.push(msg),
+        });
+
+        const result = await agent.executeWithResult('run tool');
+        expect(result.status).toBe('aborted');
+        expect(provider.callCount).toBe(1);
+        expect(events.some((event) => event.type === AgentMessageType.PERMISSION_REQUEST)).toBe(true);
+    });
+
+    it('permission ask should continue in event mode when resolvePermission=true', async () => {
+        const provider = new SequenceProvider([
+            createToolCallResponse('unknown_tool', { x: 1 }),
+            createTextResponse('final answer after event approval'),
+        ]);
+        const memoryManager = await createReadyMemoryManager('permission-event-approve');
+        const events: AgentMessage[] = [];
+        const agent = new Agent({
+            provider: provider as unknown as LLMProvider,
+            systemPrompt: 'test',
+            stream: false,
+            memoryManager,
+            permissionDecisionMode: 'event',
+            permissionRules: [{ effect: 'ask', tool: 'unknown_tool', reason: 'manual approval required' }],
+            streamCallback: (msg) => {
+                events.push(msg);
+                if (msg.type === AgentMessageType.PERMISSION_REQUEST) {
+                    setTimeout(() => {
+                        agent.resolvePermission(msg.payload.ticketId, true);
+                    }, 0);
+                }
+            },
+        });
+
+        const result = await agent.executeWithResult('run tool');
+        expect(result.status).toBe('completed');
+        expect(result.finalMessage?.content).toBe('final answer after event approval');
+        expect(events.some((event) => event.type === AgentMessageType.PERMISSION_REQUEST)).toBe(true);
+    });
+
+    it('permission ask should abort in event mode when resolvePermission=false', async () => {
+        const provider = new SequenceProvider([createToolCallResponse('unknown_tool', { x: 1 })]);
+        const memoryManager = await createReadyMemoryManager('permission-event-reject');
+        const events: AgentMessage[] = [];
+        const agent = new Agent({
+            provider: provider as unknown as LLMProvider,
+            systemPrompt: 'test',
+            stream: false,
+            memoryManager,
+            permissionDecisionMode: 'event',
+            permissionRules: [{ effect: 'ask', tool: 'unknown_tool', reason: 'manual approval required' }],
+            streamCallback: (msg) => {
+                events.push(msg);
+                if (msg.type === AgentMessageType.PERMISSION_REQUEST) {
+                    setTimeout(() => {
+                        agent.resolvePermission(msg.payload.ticketId, false);
+                    }, 0);
+                }
+            },
+        });
+
+        const result = await agent.executeWithResult('run tool');
+        expect(result.status).toBe('aborted');
+        expect(provider.callCount).toBe(1);
+        expect(events.some((event) => event.type === AgentMessageType.PERMISSION_REQUEST)).toBe(true);
+    });
+
+    it('should disable permission engine via env when Agent option is unset', async () => {
+        const previous = process.env.AGENT_ENABLE_PERMISSION_ENGINE;
+        process.env.AGENT_ENABLE_PERMISSION_ENGINE = 'false';
+        try {
+            const provider = new SequenceProvider([
+                createToolCallResponse('unknown_tool', { x: 1 }),
+                createTextResponse('final answer after env-disabled permission engine'),
+            ]);
+            const memoryManager = await createReadyMemoryManager('permission-env-disable');
+
+            const agent = new Agent({
+                provider: provider as unknown as LLMProvider,
+                systemPrompt: 'test',
+                stream: false,
+                memoryManager,
+                permissionRules: [{ effect: 'deny', tool: 'unknown_tool', reason: 'blocked by test policy' }],
+            });
+
+            const result = await agent.executeWithResult('run tool');
+            expect(result.status).toBe('completed');
+            expect(result.finalMessage?.content).toBe('final answer after env-disabled permission engine');
+            expect(provider.callCount).toBe(2);
+        } finally {
+            if (previous === undefined) {
+                delete process.env.AGENT_ENABLE_PERMISSION_ENGINE;
+            } else {
+                process.env.AGENT_ENABLE_PERMISSION_ENGINE = previous;
+            }
+        }
+    });
+
+    it('explicit Agent.enablePermissionEngine should override env setting', async () => {
+        const previous = process.env.AGENT_ENABLE_PERMISSION_ENGINE;
+        process.env.AGENT_ENABLE_PERMISSION_ENGINE = 'false';
+        try {
+            const provider = new SequenceProvider([createToolCallResponse('unknown_tool', { x: 1 })]);
+            const memoryManager = await createReadyMemoryManager('permission-env-override');
+
+            const agent = new Agent({
+                provider: provider as unknown as LLMProvider,
+                systemPrompt: 'test',
+                stream: false,
+                memoryManager,
+                enablePermissionEngine: true,
+                permissionRules: [{ effect: 'deny', tool: 'unknown_tool', reason: 'blocked by test policy' }],
+            });
+
+            const result = await agent.executeWithResult('run tool');
+            expect(result.status).toBe('failed');
+            expect(result.failure?.code).toBe('LLM_RESPONSE_INVALID');
+            expect(provider.callCount).toBe(1);
+        } finally {
+            if (previous === undefined) {
+                delete process.env.AGENT_ENABLE_PERMISSION_ENGINE;
+            } else {
+                process.env.AGENT_ENABLE_PERMISSION_ENGINE = previous;
+            }
+        }
     });
 
     it('empty assistant response should fail after normal retries and emit retrying status', async () => {
@@ -727,7 +906,45 @@ describe('Agent completed and exception scenarios', () => {
         const memoryManager = await createReadyMemoryManager('background-subtask-wait');
         const sessionId = `background-wait-${Date.now()}-${Math.random().toString(16).slice(2)}`;
         const runId = `task_bg_wait_${Date.now()}`;
+        const queryCounter = attachSubTaskRunQueryCounter(memoryManager);
         await createBackgroundSubtaskRun(memoryManager, sessionId, runId, 'running');
+        const startedAt = Date.now();
+
+        setTimeout(() => {
+            void createBackgroundSubtaskRun(memoryManager, sessionId, runId, 'completed');
+            notifySubtaskStatus({
+                parentSessionId: sessionId,
+                runId,
+                status: 'completed',
+            });
+        }, 50);
+
+        const agent = new Agent({
+            provider: provider as unknown as LLMProvider,
+            systemPrompt: 'test',
+            stream: false,
+            memoryManager,
+            sessionId,
+            maxLoops: 10,
+        });
+
+        const result = await agent.executeWithResult('继续');
+        const elapsed = Date.now() - startedAt;
+        expect(result.status).toBe('completed');
+        expect(result.finalMessage?.content).toBe('final answer after background run');
+        expect(provider.callCount).toBe(1);
+        expect(elapsed).toBeLessThan(2000);
+        expect(queryCounter.getCount()).toBeLessThanOrEqual(3);
+    });
+
+    it('background-subtask gate should still complete via fallback polling when event is missed', async () => {
+        const provider = new SequenceProvider([createTextResponse('final answer via fallback polling')]);
+        const memoryManager = await createReadyMemoryManager('background-subtask-fallback');
+        const sessionId = `background-fallback-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        const runId = `task_bg_fallback_${Date.now()}`;
+        const queryCounter = attachSubTaskRunQueryCounter(memoryManager);
+        await createBackgroundSubtaskRun(memoryManager, sessionId, runId, 'running');
+        const startedAt = Date.now();
 
         setTimeout(() => {
             void createBackgroundSubtaskRun(memoryManager, sessionId, runId, 'completed');
@@ -743,10 +960,13 @@ describe('Agent completed and exception scenarios', () => {
         });
 
         const result = await agent.executeWithResult('继续');
+        const elapsed = Date.now() - startedAt;
         expect(result.status).toBe('completed');
-        expect(result.finalMessage?.content).toBe('final answer after background run');
+        expect(result.finalMessage?.content).toBe('final answer via fallback polling');
         expect(provider.callCount).toBe(1);
-    });
+        expect(elapsed).toBeGreaterThanOrEqual(2000);
+        expect(queryCounter.getCount()).toBeLessThanOrEqual(4);
+    }, 15000);
 
     it('retryable errors should fail with max-retries-exceeded and keep detailed retry reason in status', async () => {
         const provider = new SequenceProvider([

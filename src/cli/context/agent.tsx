@@ -171,6 +171,12 @@ function agentMessageToPart(msg: AgentMessage): MessagePart | null {
             };
         case AgentMessageType.USAGE_UPDATE:
             return null; // Usage 不显示为消息部分
+        case AgentMessageType.PERMISSION_REQUEST:
+            return {
+                id: `permission-${msg.msgId || msg.timestamp}`,
+                type: 'text',
+                content: `权限确认: ${msg.payload.toolName} (${msg.payload.reason})`,
+            };
         default:
             return null;
     }
@@ -528,6 +534,14 @@ export const { Provider: AgentProvider, use: useAgent } = createSimpleContext<Ag
                 case AgentMessageType.SUBAGENT_EVENT:
                     // 子 Agent 事件冒泡 - 处理子 Agent 事件
                     handleSubagentEvent(parts, msg as SubagentEventMessage);
+                    break;
+
+                case AgentMessageType.PERMISSION_REQUEST:
+                    parts.push({
+                        id: `permission-${msg.msgId || msg.timestamp}`,
+                        type: 'text',
+                        content: `权限确认: ${msg.payload.toolName} (${msg.payload.reason})`,
+                    });
                     break;
 
                 default: {

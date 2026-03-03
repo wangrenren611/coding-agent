@@ -3,15 +3,23 @@ import { Agent } from './agent-v2/agent/agent';
 import { ModelId, ProviderRegistry } from './providers';
 
 import fs from 'fs';
-import { AgentMessage, AgentMessageType, BaseAgentEvent, SubagentEventMessage } from './agent-v2/agent/stream-types';
+import {
+    AgentMessage,
+    AgentMessageType,
+    BaseAgentEvent,
+    PermissionRequestMessage,
+    SubagentEventMessage,
+} from './agent-v2/agent/stream-types';
 import { createMemoryManager } from './agent-v2';
 import { initializeMcp, disconnectMcp, getConfigSearchPaths } from './agent-v2/mcp';
 import { operatorPrompt } from './agent-v2/prompts/operator';
 import { platform } from 'os';
 import path from 'path';
+import readline from 'readline/promises';
 import { parseFilePaths, createFileSummary, type ParsedFileInput } from './cli/utils/file';
 import type { InputContentPart } from './providers/types/api';
 import type { McpManager } from './agent-v2/mcp';
+import type { PermissionAskContext } from './agent-v2/agent/types';
 
 // const model = 'wr-claude-4.6';
 const model: ModelId = 'glm-5';
@@ -94,6 +102,37 @@ function parseRequestTimeoutMs(envValue: string | undefined): number {
     return parsed;
 }
 
+async function askPermissionFromTerminal(context: PermissionAskContext): Promise<boolean> {
+    if (!process.stdin.isTTY || !process.stdout.isTTY) {
+        return false;
+    }
+
+    const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+    });
+
+    try {
+        console.log(
+            `\n${COLORS.warning}◆ 权限确认${COLORS.reset} ${COLORS.muted}(ticket=${context.ticketId}, tool=${context.toolName})${COLORS.reset}`
+        );
+        console.log(`${COLORS.muted}  原因: ${context.reason}${COLORS.reset}`);
+        while (true) {
+            const answer = await rl.question(`${COLORS.primary}  是否允许执行？(yes/no): ${COLORS.reset}`);
+            const normalized = answer.trim().toLowerCase();
+            if (['y', 'yes', '是', '允许', 'ok'].includes(normalized)) {
+                return true;
+            }
+            if (['n', 'no', '否', '拒绝'].includes(normalized)) {
+                return false;
+            }
+            console.log(`${COLORS.warning}  请输入 yes 或 no（也支持 是/否）${COLORS.reset}`);
+        }
+    } finally {
+        rl.close();
+    }
+}
+
 // ==================== 子 Agent 输出缓冲系统 ====================
 
 interface SubagentBuffer {
@@ -123,9 +162,36 @@ let subagentColorCounter = 0;
 
 // 状态追踪
 let lastStatusSignature = '';
+let currentAgent: Agent | undefined;
+let permissionPromptChain: Promise<void> = Promise.resolve();
 
 // 全局序号计数器
 let globalTaskCounter = 0;
+
+function queuePermissionDecision(message: PermissionRequestMessage): void {
+    permissionPromptChain = permissionPromptChain
+        .then(async () => {
+            if (!currentAgent) return;
+            const approved = await askPermissionFromTerminal({
+                ticketId: message.payload.ticketId,
+                toolName: message.payload.toolName,
+                reason: message.payload.reason,
+                source: message.payload.source,
+                args: message.payload.args,
+                messageId: message.msgId || `permission-${message.timestamp}`,
+            });
+            const accepted = currentAgent.resolvePermission(message.payload.ticketId, approved);
+            if (!accepted) {
+                console.log(
+                    `${COLORS.warning}  [warn] 权限请求已失效或已处理: ticket=${message.payload.ticketId}${COLORS.reset}`
+                );
+            }
+        })
+        .catch((error) => {
+            console.error(`${COLORS.error}  权限确认处理失败: ${String(error)}${COLORS.reset}`);
+            currentAgent?.resolvePermission(message.payload.ticketId, false);
+        });
+}
 
 /**
  * 获取子 Agent 的颜色
@@ -641,6 +707,10 @@ function handleSingleMessage(message: BaseAgentEvent, indent: string = '') {
  */
 function handleStreamMessage(message: AgentMessage) {
     switch (message.type) {
+        case AgentMessageType.PERMISSION_REQUEST:
+            queuePermissionDecision(message as PermissionRequestMessage);
+            break;
+
         // ==================== 子 Agent 事件冒泡（缓冲） ====================
         case AgentMessageType.SUBAGENT_EVENT:
             bufferSubagentEvent(message as SubagentEventMessage);
@@ -842,6 +912,8 @@ async function demo1() {
     lastStatusSignature = '';
     isInTextBlock = false;
     isInReasoningBlock = false;
+    currentAgent = undefined;
+    permissionPromptChain = Promise.resolve();
 
     // 解析命令行参数
     const { sessionId: cliSessionId, query: cliQuery } = parseCliArgs();
@@ -928,8 +1000,10 @@ async function demo1() {
             },
             memoryManager,
             mcpManager,
+            permissionDecisionMode: 'event',
             streamCallback: handleStreamMessage,
         });
+        currentAgent = agent;
         await agent.initialize();
 
         // 执行查询
@@ -979,6 +1053,7 @@ async function demo1() {
         console.error(`${COLORS.error}╚═══════════════════════════════════════════════════════╝${COLORS.reset}\n`);
         console.error(error);
     } finally {
+        currentAgent = undefined;
         await memoryManager.close();
         await agent?.close();
         if (mcpManager) {
