@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { PermissionEngine } from '../permission-engine';
 import type { PermissionRequest } from '../permission-engine';
+import { evaluateBashPolicy } from '../bash-policy';
 
 function createRequest(toolName: string, args: Record<string, unknown> = {}): PermissionRequest {
     return {
@@ -122,9 +123,10 @@ describe('PermissionEngine', () => {
     it('should allow Windows dir command under guarded legacy bash policy', () => {
         process.env.BASH_TOOL_POLICY = 'guarded';
 
-        const engine = new PermissionEngine();
-        const decision = engine.evaluate(createRequest('bash', { command: 'dir' }));
+        // 使用 bash-policy 直接测试平台特定行为
+        const decision = evaluateBashPolicy('dir', { platform: 'win32', mode: 'guarded' });
 
+        // 在 Windows 平台上，dir 应该在允许列表中
         expect(decision.effect).toBe('allow');
     });
 
