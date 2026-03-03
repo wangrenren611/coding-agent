@@ -30,7 +30,8 @@ export type ModelId =
     | 'qwen-kimi-k2.5'
     | 'qwen-glm-5'
     | 'wr-claude-4.6'
-    | 'qwen3.5-max';
+    | 'qwen3.5-max'
+    | 'qwen-minimax-2.5';
 
 /**
  * 模型配置
