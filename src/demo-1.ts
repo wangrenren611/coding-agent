@@ -15,7 +15,7 @@ import { initializeMcp, disconnectMcp, getConfigSearchPaths } from './agent-v2/m
 import { operatorPrompt } from './agent-v2/prompts/operator';
 import { platform } from 'os';
 import path from 'path';
-import readline from 'readline/promises';
+import readline from 'readline';
 import { parseFilePaths, createFileSummary, type ParsedFileInput } from './cli/utils/file';
 import type { InputContentPart } from './providers/types/api';
 import type { McpManager } from './agent-v2/mcp';
@@ -112,13 +112,22 @@ async function askPermissionFromTerminal(context: PermissionAskContext): Promise
         output: process.stdout,
     });
 
+    // Promise 版本的 question 函数，兼容所有 Node.js 版本
+    const question = (query: string): Promise<string> => {
+        return new Promise((resolve) => {
+            rl.question(query, (answer) => {
+                resolve(answer);
+            });
+        });
+    };
+
     try {
         console.log(
             `\n${COLORS.warning}◆ 权限确认${COLORS.reset} ${COLORS.muted}(ticket=${context.ticketId}, tool=${context.toolName})${COLORS.reset}`
         );
         console.log(`${COLORS.muted}  原因: ${context.reason}${COLORS.reset}`);
         while (true) {
-            const answer = await rl.question(`${COLORS.primary}  是否允许执行？(yes/no): ${COLORS.reset}`);
+            const answer = await question(`${COLORS.primary}  是否允许执行？(yes/no): ${COLORS.reset}`);
             const normalized = answer.trim().toLowerCase();
             if (['y', 'yes', '是', '允许', 'ok'].includes(normalized)) {
                 return true;
