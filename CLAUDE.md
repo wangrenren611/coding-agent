@@ -342,19 +342,13 @@ docs/api-documentation
    ```
 
 ---
+
 ## 重要提醒
 1. 不要分析这个两个文件，这是测试用，不用理会，不用读取内容src/query.text、src/demo-1.ts
-2. 代码提交必须执行`pnpm ci:check`,确保所有测试都通过
+2. 代码提交必须执行`pnpm ci:check`,确保所有测试都通过，才能提交代码
 
 
-## Browser Automation
-Use `agent-browser` for web automation. Run `agent-browser --help` for all commands.
 
-Core workflow:
-1. `agent-browser open <url>` - Navigate to page
-2. `agent-browser snapshot -i` - Get interactive elements with refs (@e1, @e2)
-3. `agent-browser click @e1` / `fill @e2 "text"` - Interact using refs
-4. Re-snapshot after page changes
 ## 参考文档
 
 - [README.md](./README.md) - 完整使用文档

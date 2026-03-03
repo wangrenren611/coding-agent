@@ -253,7 +253,7 @@ async function runPlanDemo() {
         });
 
         const planAgent = new Agent({
-            provider: ProviderRegistry.createFromEnv('qwen3.5-plus', { temperature: 0.3 }),
+            provider: ProviderRegistry.createFromEnv('qwen3.5-plus', { temperature: 0.1 }),
             systemPrompt: planSystemPrompt,
             planMode: true, // 🔑 启用 Plan 模式（只读工具 + plan_create）
             planBaseDir: MEMORY_PATH, // 🔑 Plan 存储目录
@@ -265,6 +265,7 @@ async function runPlanDemo() {
             memoryManager,
             streamCallback: handleStreamMessage,
         });
+        await planAgent.initialize();
 
         console.log(`${CYAN}Plan 模式 Session:${RESET} ${planAgent.getSessionId()}`);
         console.log(`${CYAN}查询:${RESET} ${query}\n`);
@@ -306,7 +307,7 @@ async function runPlanDemo() {
         });
 
         const executionAgent = new Agent({
-            provider: ProviderRegistry.createFromEnv('qwen3.5-plus', { temperature: 0.3 }),
+            provider: ProviderRegistry.createFromEnv('qwen3.5-plus', { temperature: 0.1 }),
             systemPrompt: executionSystemPrompt,
             // planMode: false, // 默认就是执行模式（完整工具）
             requestTimeout: parseRequestTimeoutMs(process.env.AGENT_REQUEST_TIMEOUT_MS),
@@ -317,6 +318,7 @@ async function runPlanDemo() {
             memoryManager,
             streamCallback: handleStreamMessage,
         });
+        await executionAgent.initialize();
 
         console.log(`${CYAN}执行模式 Session:${RESET} ${executionAgent.getSessionId()}`);
         console.log(`${CYAN}Plan 文档内容预览:${RESET}`);

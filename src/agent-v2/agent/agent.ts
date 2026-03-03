@@ -47,6 +47,7 @@ import { AgentExecutionResult, AgentOptions, AgentStatus, StreamCallback } from 
 import { AgentState } from './core/agent-state';
 import { LLMCaller } from './core/llm-caller';
 import { ToolExecutor } from './core/tool-executor';
+import { checkComplete as evaluateCompletion } from './core/completion-checker';
 import { DefaultTimeProvider } from './time-provider';
 import { InputValidator } from './input-validator';
 import { ErrorClassifier } from './error-classifier';
@@ -108,6 +109,7 @@ export class Agent {
     private readonly emitter: AgentEmitter;
     private readonly inputValidator: InputValidator;
     private readonly errorClassifier: ErrorClassifier;
+    private initializePromise?: Promise<void>;
 
     constructor(config: AgentOptions) {
         this.provider = this.validateAndGetProvider(config);
@@ -116,6 +118,7 @@ export class Agent {
         this.thinking = config.thinking;
         this.requestTimeoutMs = this.normalizeMs(config.requestTimeout);
         this.idleTimeoutMs = this.normalizeMs(config.idleTimeout) ?? AGENT_DEFAULTS.IDLE_TIMEOUT_MS;
+        const mcpManager = config.mcpManager;
 
         this.timeProvider = config.timeProvider ?? new DefaultTimeProvider();
         this.eventBus = new EventBus();
@@ -144,17 +147,7 @@ export class Agent {
         // 系统提示词由调用者构建（如 operatorPrompt），Agent 不再内部处理 planMode
         const systemPrompt = config.systemPrompt ?? '';
 
-        this.session = new Session({
-            systemPrompt,
-            memoryManager: config.memoryManager,
-            sessionId: config.sessionId,
-            enableCompaction: config.enableCompaction,
-            compactionConfig: config.compactionConfig,
-            provider: this.provider,
-            logger: this.logger,
-        });
-
-        // 根据 planMode 选择不同的工具注册表
+        // 根据 planMode 选择不同的工具注册表（需要在 Session 之前初始化，以便传递 getTools 回调）
         if (config.toolRegistry) {
             this.toolRegistry = config.toolRegistry;
         } else if (config.planMode) {
@@ -178,7 +171,18 @@ export class Agent {
                 this.provider
             );
         }
+        this.session = new Session({
+            systemPrompt,
+            memoryManager: config.memoryManager,
+            sessionId: config.sessionId,
+            enableCompaction: config.enableCompaction,
+            compactionConfig: config.compactionConfig,
+            provider: this.provider,
+            logger: this.logger,
+            getTools: () => this.toolRegistry.toLLMTools(),
+        });
         this.configureToolEventBridge();
+        mcpManager?.setToolRegistry(this.toolRegistry);
 
         this.agentState = new AgentState({
             maxLoops: config.maxLoops ?? AGENT_DEFAULTS.LOOP_MAX,
@@ -237,18 +241,31 @@ export class Agent {
                 this.emitter.emitCodePatch(filePath, diff, messageId, language),
             onMessageAdd: (msg) => this.session.addMessage(msg),
         });
+
+        // 构造时启动初始化流程；execute 阶段仅等待初始化完成。
+        this.startInitialization();
     }
 
     // ==================== 公共 API ====================
 
+    async initialize(): Promise<void> {
+        this.startInitialization();
+        if (this.initializePromise) {
+            await this.initializePromise;
+        }
+    }
+
     async execute(query: MessageContent, options?: LLMGenerateOptions): Promise<Message> {
         this.validateInput(query);
+        if (!this.initializePromise) {
+            throw new AgentConfigurationError('Agent initialization is unavailable.');
+        }
+        await this.initializePromise;
         this.ensureIdle();
         this.agentState.startTask();
         this.pendingRetryReason = null;
 
         try {
-            await this.session.initialize();
             this.eventBus.emit(EventType.TASK_START, {
                 timestamp: this.timeProvider.getCurrentTime(),
                 query: contentToText(query),
@@ -312,6 +329,8 @@ export class Agent {
             this.unsubscribeEventLogger();
             this.unsubscribeEventLogger = undefined;
         }
+        // 清理事件总线监听器
+        this.eventBus.clear();
         // 关闭日志器（清理定时器等资源）
         if (this.ownsLogger) {
             await this.logger.close();
@@ -430,6 +449,18 @@ export class Agent {
         return value;
     }
 
+    private startInitialization(): void {
+        if (this.initializePromise) {
+            return;
+        }
+
+        this.initializePromise = (async () => {
+            await this.session.initialize();
+        })();
+        // 防止调用方未等待 initialize 时产生未处理拒绝；真实错误会在后续 await 时抛出。
+        void this.initializePromise.catch(() => {});
+    }
+
     // ==================== 内部方法：主循环 ====================
 
     private async runLoop(options?: LLMGenerateOptions): Promise<void> {
@@ -437,13 +468,53 @@ export class Agent {
             source: 'agent',
             phase: 'lifecycle',
         });
+        let pendingTaskReminderSent = false;
+        let lastBlockedTaskSignature: string | null = null;
 
         while (true) {
             if (this.agentState.isAborted()) {
                 break;
             }
 
-            if (this.checkComplete()) {
+            const completion = await evaluateCompletion({
+                lastMessage: this.session.getLastMessage(),
+                sessionId: this.session.getSessionId(),
+                memoryManager: this.session.getMemoryManager(),
+            });
+            if (completion.blockedByTasks) {
+                const currentSignature = completion.blockedByTasks.taskSignature;
+                const hasSameBlockedTasks = currentSignature === lastBlockedTaskSignature;
+                if (!hasSameBlockedTasks) {
+                    lastBlockedTaskSignature = currentSignature;
+                    pendingTaskReminderSent = false;
+                }
+                this.emitter.emitStatus(
+                    AgentStatus.RUNNING,
+                    `Task list still has unfinished items (in_progress: ${completion.blockedByTasks.inProgressCount}, pending: ${completion.blockedByTasks.pendingCount}), continuing...`,
+                    undefined,
+                    {
+                        source: 'agent',
+                        phase: 'lifecycle',
+                    }
+                );
+                if (!pendingTaskReminderSent) {
+                    this.session.addMessage({
+                        messageId: uuid(),
+                        role: 'user',
+                        content: this.buildPendingTaskReminder(
+                            completion.blockedByTasks.inProgressCount,
+                            completion.blockedByTasks.pendingCount
+                        ),
+                    });
+                    pendingTaskReminderSent = true;
+                } else if (hasSameBlockedTasks) {
+                    throw new AgentLoopExceededError(this.agentState.loopCount);
+                }
+            } else {
+                pendingTaskReminderSent = false;
+                lastBlockedTaskSignature = null;
+            }
+            if (completion.done) {
                 break;
             }
 
@@ -479,6 +550,20 @@ export class Agent {
                 await this.handleLoopError(error);
             }
         }
+    }
+
+    private buildPendingTaskReminder(inProgressCount: number, pendingCount: number): string {
+        return `[SYSTEM REMINDER] There are still unfinished tasks (in_progress: ${inProgressCount}, pending: ${pendingCount}).
+
+IMPORTANT: Do NOT call task_update(status="in_progress") again — the task is already declared.
+Your NEXT action MUST be actual work using real tools:
+  - Read relevant files: read_file, glob, grep, lsp
+  - Write/edit code: write_file, precise_replace, batch_replace
+  - Run commands: bash
+  - Delegate subtasks: task
+
+After completing the work, call task_update(status="completed").
+Do not output a completion summary until all managed tasks are marked completed.`;
     }
 
     private async handleLoopError(error: unknown): Promise<void> {
@@ -589,56 +674,6 @@ export class Agent {
 
     // ==================== 内部方法：完成检测 ====================
 
-    private checkComplete(): boolean {
-        const lastMessage = this.session.getLastMessage();
-        if (!lastMessage) return false;
-
-        switch (lastMessage.role) {
-            case 'user':
-                return false;
-            case 'tool':
-                return false;
-            case 'assistant':
-                return this.checkAssistantComplete(lastMessage);
-            default:
-                return false;
-        }
-    }
-
-    private checkAssistantComplete(message: Message): boolean {
-        if (message.finish_reason) {
-            switch (message.finish_reason) {
-                case 'abort':
-                    return false;
-                case 'length': {
-                    // finish_reason=length 时，检查是否有未完成的内容或工具调用
-                    const hasTools = Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
-                    return this.hasAssistantOutput(message) && !hasTools;
-                }
-                case 'tool_calls':
-                    return false;
-            }
-
-            if (Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
-                return false;
-            }
-
-            if (this.isEmptyResponse(message)) {
-                return false;
-            }
-
-            return true;
-        }
-
-        const hasToolCalls = Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
-        return message.type === 'text' && this.hasAssistantOutput(message) && !hasToolCalls;
-    }
-
-    private isEmptyResponse(message: Message): boolean {
-        const hasToolCalls = Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
-        return message.role === 'assistant' && !hasToolCalls && !this.hasAssistantOutput(message);
-    }
-
     private hasReasoningOutput(reasoning: unknown): reasoning is string {
         return typeof reasoning === 'string' && reasoning.trim().length > 0;
     }
@@ -648,12 +683,9 @@ export class Agent {
         //|| this.hasReasoningOutput(message.reasoning_content);
     }
 
-    private resolveAssistantContent(content: MessageContent, reasoning: unknown): MessageContent {
+    private resolveAssistantContent(content: MessageContent): MessageContent {
         if (hasContent(content)) {
             return content;
-        }
-        if (typeof reasoning === 'string' && reasoning.trim().length > 0) {
-            return reasoning;
         }
         return typeof content === 'string' ? content : '';
     }
@@ -777,7 +809,7 @@ export class Agent {
     private handleTextResponse(response: LLMResponse, messageId: string, usage?: Usage): void {
         const rawContent = response.choices?.[0]?.message?.content || '';
         const reasoningContent = response.choices?.[0]?.message?.reasoning_content;
-        const resolvedContent = this.resolveAssistantContent(rawContent, reasoningContent);
+        const resolvedContent = this.resolveAssistantContent(rawContent);
 
         if (this.stream) {
             const finishReason = getResponseFinishReason(response);
@@ -788,7 +820,7 @@ export class Agent {
                 if (!hasContent(existing.content) && this.hasReasoningOutput(existing.reasoning_content)) {
                     this.session.addMessage({
                         ...existing,
-                        content: this.resolveAssistantContent(existing.content, existing.reasoning_content),
+                        content: this.resolveAssistantContent(existing.content),
                     });
                 }
                 this.updateMessageFinishReason(messageId, finishReason);

@@ -607,6 +607,43 @@ describe('Task tools', () => {
         expect(results[0].result?.output).toContain('slow success');
     });
 
+    it('should accept case-insensitive subagent_type in ToolRegistry execution', async () => {
+        const registry = new ToolRegistry({
+            workingDirectory: process.cwd(),
+        });
+        registry.register([new TaskTool(new MockProvider('normalized success', 10))]);
+
+        const results = await registry.execute(
+            [
+                {
+                    id: 'call_case_normalized',
+                    index: 0,
+                    type: 'function',
+                    function: {
+                        name: 'task',
+                        arguments: JSON.stringify({
+                            description: 'Case normalize',
+                            prompt: 'Run with mixed-case subagent type',
+                            subagent_type: 'Explore',
+                            run_in_background: false,
+                        }),
+                    },
+                } as ToolCall,
+            ],
+            {
+                sessionId,
+                memoryManager,
+            }
+        );
+
+        expect(results).toHaveLength(1);
+        expect(results[0].result?.success).toBe(true);
+        expect(results[0].result?.output).toContain('normalized success');
+
+        const metadata = results[0].result?.metadata as TaskToolMetadata | undefined;
+        expect(metadata?.subagent_type).toBe(SubagentType.Explore);
+    });
+
     it('should return agent-layer failure code for foreground task failures', async () => {
         const taskTool = withContext(new TaskTool(new FailingProvider()));
         const result = await taskTool.execute({

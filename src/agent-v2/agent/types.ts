@@ -11,6 +11,7 @@ import type { CompactionConfig } from '../session';
 import type { Message } from '../session/types';
 import type { ResponseValidatorOptions, ValidationResult } from './response-validator';
 import type { Logger, LoggerConfig } from '../logger';
+import type { McpManager } from '../mcp/manager';
 
 export enum AgentStatus {
     THINKING = 'thinking',
@@ -140,4 +141,6 @@ export interface AgentOptions {
     loggerConfig?: Partial<LoggerConfig>;
     /** 是否启用 Agent 事件日志（默认 true） */
     enableEventLogging?: boolean;
+    /** 外部注入的 MCP 管理器（Agent 不负责初始化其连接） */
+    mcpManager?: McpManager;
 }

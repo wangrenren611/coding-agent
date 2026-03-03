@@ -1,0 +1,22 @@
+[
+    {
+        "id": "system-output-contract",
+        "query": "请读取 {{cwd}}/src/agent-v2/prompts/system.ts，判断是否包含标题 '# Output Contract'。只回答 YES 或 NO。",
+        "expectRegex": "\\b(YES|是)\\b"
+    },
+    {
+        "id": "task-shared-explore",
+        "query": "请读取 {{cwd}}/src/agent-v2/tool/task/shared.ts，判断是否明确写了 subagent_type=explore。只回答 YES 或 NO。",
+        "expectRegex": "\\b(YES|是)\\b"
+    },
+    {
+        "id": "operator-runtime-tools",
+        "query": "请读取 {{cwd}}/src/agent-v2/prompts/operator.ts，判断 OperatorPromptOptions 是否包含 runtimeToolNames 字段。只回答 YES 或 NO。",
+        "expectRegex": "\\b(YES|是)\\b"
+    },
+    {
+        "id": "plan-forbidden-write",
+        "query": "请读取 {{cwd}}/src/agent-v2/prompts/plan.ts，判断 Plan Mode 是否将 write_file 标记为 FORBIDDEN。只回答 YES 或 NO。",
+        "expectRegex": "\\b(YES|是)\\b"
+    }
+]

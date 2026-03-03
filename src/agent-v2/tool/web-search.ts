@@ -73,6 +73,21 @@ export class WebSearchTool extends BaseTool<typeof schema> {
             score: r.score,
         }));
 
+        // 构建包含详细结果的输出字符串
+        const outputLines = [`Found ${results.length} result(s) for "${query}":\n`];
+        for (let i = 0; i < summarizedResults.length; i++) {
+            const r = summarizedResults[i];
+            outputLines.push(`[${i + 1}] ${r.title || 'No title'}`);
+            outputLines.push(`    URL: ${r.url}`);
+            outputLines.push(`    Score: ${r.score?.toFixed(2) || 'N/A'}`);
+            if (r.content) {
+                // 截断过长的内容
+                const content = r.content.length > 500 ? r.content.slice(0, 500) + '...' : r.content;
+                outputLines.push(`    Content: ${content}`);
+            }
+            outputLines.push('');
+        }
+
         return this.result({
             success: true,
             metadata: {
@@ -80,7 +95,7 @@ export class WebSearchTool extends BaseTool<typeof schema> {
                 results: summarizedResults,
                 responseTime: response.responseTime,
             },
-            output: `Found ${results.length} result(s) for "${query}"`,
+            output: outputLines.join('\n'),
         });
     }
 }
