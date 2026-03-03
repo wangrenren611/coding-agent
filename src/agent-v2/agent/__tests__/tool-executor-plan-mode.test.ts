@@ -1,14 +1,13 @@
 /**
- * ToolExecutor Plan Mode 阻止逻辑测试
+ * ToolExecutor 与 Plan Mode 工具注册表协作测试
  *
- * 测试 ToolExecutor 在 Plan 模式下如何阻止写操作
+ * Plan Mode 的限制由工具注册表和工具自身策略承担，而非 ToolExecutor 静态拦截。
  */
 
 import { describe, it, expect } from 'vitest';
 import { ToolExecutor, ToolExecutorConfig } from '../core/tool-executor';
 import { ToolRegistry } from '../../tool/registry';
 import { createPlanModeToolRegistry, createDefaultToolRegistry } from '../../tool';
-import { LLMResponseInvalidError } from '../errors';
 import type { ToolCall } from '../core-types';
 
 // ==================== Mock 回调 ====================
@@ -44,9 +43,9 @@ function createToolCall(toolName: string, args: Record<string, unknown> = {}): T
 
 // ==================== 测试 ====================
 
-describe('ToolExecutor Plan Mode 阻止逻辑', () => {
-    describe('getPlanModeBlockedTools', () => {
-        it('Plan Mode 下应该阻止写工具', async () => {
+describe('ToolExecutor Plan Mode 行为', () => {
+    describe('Plan Mode 工具限制来源', () => {
+        it('Plan Mode 下写工具应由注册表返回工具不存在错误结果', async () => {
             const config = createMockConfig(true);
             const executor = new ToolExecutor(config);
 
@@ -55,19 +54,12 @@ describe('ToolExecutor Plan Mode 阻止逻辑', () => {
                 content: 'test',
             });
 
-            // 应该抛出错误
-            await expect(executor.execute([writeToolCall], 'msg-1', 'test content')).rejects.toThrow();
-
-            try {
-                await executor.execute([writeToolCall], 'msg-1', 'test content');
-            } catch (error) {
-                expect(error).toBeInstanceOf(LLMResponseInvalidError);
-                expect((error as Error).message).toContain('Plan Mode');
-                expect((error as Error).message).toContain('write_file');
-            }
+            const result = await executor.execute([writeToolCall], 'msg-1', 'test content');
+            expect(result.success).toBe(false);
+            expect(result.resultMessages[0]?.content).toContain('Tool "write_file" not found');
         });
 
-        it('Plan Mode 下应该阻止 bash 工具', async () => {
+        it('Plan Mode 下 bash 工具应由注册表返回工具不存在错误结果', async () => {
             const config = createMockConfig(true);
             const executor = new ToolExecutor(config);
 
@@ -75,12 +67,12 @@ describe('ToolExecutor Plan Mode 阻止逻辑', () => {
                 command: 'echo test',
             });
 
-            await expect(executor.execute([bashToolCall], 'msg-1', 'test content')).rejects.toThrow(
-                LLMResponseInvalidError
-            );
+            const result = await executor.execute([bashToolCall], 'msg-1', 'test content');
+            expect(result.success).toBe(false);
+            expect(result.resultMessages[0]?.content).toContain('Tool "bash" not found');
         });
 
-        it('Plan Mode 下应该阻止 precise_replace 工具', async () => {
+        it('Plan Mode 下 precise_replace 工具应由注册表返回工具不存在错误结果', async () => {
             const config = createMockConfig(true);
             const executor = new ToolExecutor(config);
 
@@ -90,12 +82,12 @@ describe('ToolExecutor Plan Mode 阻止逻辑', () => {
                 newText: 'new',
             });
 
-            await expect(executor.execute([editToolCall], 'msg-1', 'test content')).rejects.toThrow(
-                LLMResponseInvalidError
-            );
+            const result = await executor.execute([editToolCall], 'msg-1', 'test content');
+            expect(result.success).toBe(false);
+            expect(result.resultMessages[0]?.content).toContain('Tool "precise_replace" not found');
         });
 
-        it('Plan Mode 下应该阻止 batch_replace 工具', async () => {
+        it('Plan Mode 下 batch_replace 工具应由注册表返回工具不存在错误结果', async () => {
             const config = createMockConfig(true);
             const executor = new ToolExecutor(config);
 
@@ -104,9 +96,9 @@ describe('ToolExecutor Plan Mode 阻止逻辑', () => {
                 replacements: [],
             });
 
-            await expect(executor.execute([batchToolCall], 'msg-1', 'test content')).rejects.toThrow(
-                LLMResponseInvalidError
-            );
+            const result = await executor.execute([batchToolCall], 'msg-1', 'test content');
+            expect(result.success).toBe(false);
+            expect(result.resultMessages[0]?.content).toContain('Tool "batch_replace" not found');
         });
 
         it('Plan Mode 下应该允许 read_file 工具', async () => {
@@ -117,14 +109,11 @@ describe('ToolExecutor Plan Mode 阻止逻辑', () => {
                 filePath: '/etc/hosts', // 这个文件通常存在
             });
 
-            // 这个应该不会抛出 Plan Mode 错误（可能因为文件不存在失败，但不是 Plan Mode 阻止）
+            // 这个应该不会被注册表拦截为未知工具
             try {
                 await executor.execute([readToolCall], 'msg-1', 'test content');
-            } catch (error) {
-                // 如果抛出错误，不应该是 Plan Mode 错误
-                if (error instanceof LLMResponseInvalidError) {
-                    expect((error as Error).message).not.toContain('Plan Mode');
-                }
+            } catch {
+                // read_file 执行可能失败（例如文件权限），但不是此测试关注点
             }
         });
 
@@ -140,11 +129,8 @@ describe('ToolExecutor Plan Mode 阻止逻辑', () => {
             // plan_create 是允许的
             try {
                 await executor.execute([planCreateCall], 'msg-1', 'test content');
-            } catch (error) {
-                // 如果抛出错误，不应该是 Plan Mode 阻止
-                if (error instanceof LLMResponseInvalidError) {
-                    expect((error as Error).message).not.toContain('Plan Mode');
-                }
+            } catch {
+                // 执行失败不是此测试关注点
             }
         });
 
@@ -158,10 +144,8 @@ describe('ToolExecutor Plan Mode 阻止逻辑', () => {
 
             try {
                 await executor.execute([globCall], 'msg-1', 'test content');
-            } catch (error) {
-                if (error instanceof LLMResponseInvalidError) {
-                    expect((error as Error).message).not.toContain('Plan Mode');
-                }
+            } catch {
+                // 执行失败不是此测试关注点
             }
         });
 
@@ -177,10 +161,8 @@ describe('ToolExecutor Plan Mode 阻止逻辑', () => {
 
             try {
                 await executor.execute([taskOutputCall], 'msg-1', 'test content');
-            } catch (error) {
-                if (error instanceof LLMResponseInvalidError) {
-                    expect((error as Error).message).not.toContain('Plan Mode');
-                }
+            } catch {
+                // 执行失败不是此测试关注点
             }
         });
 
@@ -196,14 +178,12 @@ describe('ToolExecutor Plan Mode 阻止逻辑', () => {
             // 非 Plan Mode 下不应该抛出 Plan Mode 错误
             try {
                 await executor.execute([writeToolCall], 'msg-1', 'test content');
-            } catch (error) {
-                if (error instanceof LLMResponseInvalidError) {
-                    expect((error as Error).message).not.toContain('Plan Mode');
-                }
+            } catch {
+                // 非 Plan Mode 写工具执行失败不是此测试关注点
             }
         });
 
-        it('应该正确报告多个被阻止工具', async () => {
+        it('应该为不存在的写工具返回错误结果', async () => {
             const config = createMockConfig(true);
             const executor = new ToolExecutor(config);
 
@@ -213,16 +193,11 @@ describe('ToolExecutor Plan Mode 阻止逻辑', () => {
                 createToolCall('read_file', { filePath: '/tmp/b.txt' }),
             ];
 
-            try {
-                await executor.execute(toolCalls, 'msg-1', 'test content');
-            } catch (error) {
-                expect(error).toBeInstanceOf(LLMResponseInvalidError);
-                const message = (error as Error).message;
-                expect(message).toContain('Plan Mode');
-                // 应该包含所有被阻止工具
-                expect(message).toContain('write_file');
-                expect(message).toContain('bash');
-            }
+            const result = await executor.execute(toolCalls, 'msg-1', 'test content');
+            expect(result.success).toBe(false);
+            const joined = result.resultMessages.map((msg) => msg.content).join('\n');
+            expect(joined).toContain('Tool "write_file" not found');
+            expect(joined).toContain('Tool "bash" not found');
         });
     });
 
@@ -290,7 +265,7 @@ describe('ToolExecutor Plan Mode 阻止逻辑', () => {
 // ==================== 辅助函数测试 ====================
 
 describe('ToolExecutor 辅助方法', () => {
-    describe('getPlanModeBlockedTools 内部逻辑', () => {
+    describe('输入校验', () => {
         it('空工具列表应该抛出验证错误', async () => {
             const config = createMockConfig(true);
             const executor = new ToolExecutor(config);

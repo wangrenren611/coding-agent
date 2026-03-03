@@ -12,6 +12,7 @@ import type { Message } from '../session/types';
 import type { ResponseValidatorOptions, ValidationResult } from './response-validator';
 import type { Logger, LoggerConfig } from '../logger';
 import type { McpManager } from '../mcp/manager';
+import type { PermissionRule } from '../security/permission-engine';
 
 export enum AgentStatus {
     THINKING = 'thinking',
@@ -135,6 +136,10 @@ export interface AgentOptions {
     planMode?: boolean;
     /** Plan 存储目录（默认使用 process.cwd()） */
     planBaseDir?: string;
+    /** 权限规则（allow/deny/ask） */
+    permissionRules?: PermissionRule[];
+    /** 是否启用 PermissionEngine（默认 true） */
+    enablePermissionEngine?: boolean;
     /** 日志器实例（可选，不提供则使用默认日志器） */
     logger?: Logger;
     /** 日志配置（可选，用于创建默认日志器） */

@@ -28,6 +28,7 @@ import {
     AgentValidationError,
     LLMRequestError,
     LLMResponseInvalidError,
+    PermissionDecisionError,
     ToolError,
     LLMRetryableError,
     isAgentError,
@@ -39,6 +40,7 @@ import {
     isAgentValidationError,
     isLLMRequestError,
     isLLMResponseInvalidError,
+    isPermissionDecisionError,
     isToolError,
     isLLMRetryableError,
     hasValidFailureCode,
@@ -274,6 +276,32 @@ describe('专用错误子类测试', () => {
         });
     });
 
+    describe('PermissionDecisionError', () => {
+        it('应该格式化 ask 错误并携带 ticket', () => {
+            const error = new PermissionDecisionError({
+                effect: 'ask',
+                toolName: 'write_file',
+                reason: 'manual approval required',
+                ticketId: 'ticket-1',
+                source: 'rule',
+            });
+            expect(error.name).toBe('PermissionDecisionError');
+            expect(error.code).toBe('LLM_RESPONSE_INVALID');
+            expect(error.message).toContain('PERMISSION_ASK_REQUIRED');
+            expect(error.message).toContain('ticket=ticket-1');
+        });
+
+        it('应该被 Permission/LLM invalid 类型守卫识别', () => {
+            const error = new PermissionDecisionError({
+                effect: 'deny',
+                toolName: 'bash',
+                reason: 'blocked',
+            });
+            expect(isPermissionDecisionError(error)).toBe(true);
+            expect(isLLMResponseInvalidError(error)).toBe(true);
+        });
+    });
+
     describe('ToolError', () => {
         it('应该有正确的默认 code', () => {
             const error = new ToolError('Tool failed');
@@ -341,6 +369,15 @@ describe('类型守卫函数测试', () => {
     it('isToolError 应该正确识别', () => {
         expect(isToolError(new ToolError('test'))).toBe(true);
         expect(isToolError(new AgentError('test'))).toBe(false);
+    });
+
+    it('isPermissionDecisionError 应该正确识别', () => {
+        expect(
+            isPermissionDecisionError(
+                new PermissionDecisionError({ effect: 'deny', toolName: 'bash', reason: 'blocked' })
+            )
+        ).toBe(true);
+        expect(isPermissionDecisionError(new AgentError('test'))).toBe(false);
     });
 
     it('isLLMRetryableError 应该正确识别', () => {

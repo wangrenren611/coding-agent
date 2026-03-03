@@ -7,7 +7,7 @@
  * 1. 执行工具调用
  * 2. 记录工具结果
  * 3. 敏感信息脱敏
- * 4. Plan 模式工具限制
+ * 4. 可选权限策略校验（PermissionEngine）
  */
 
 import { v4 as uuid } from 'uuid';
@@ -18,9 +18,10 @@ import type { ToolContext } from '../../tool/base';
 import type { ToolCall, ToolExecutionResult } from '../core-types';
 import type { Message } from '../../session/types';
 import { sanitizeToolResult as sanitizeToolResultUtil, toolResultToString } from '../../security';
+import type { PermissionEngine } from '../../security/permission-engine';
+import { createDefaultPermissionEngine } from '../../security/permission-engine';
 import { safeParse } from '../../util';
-import { LLMResponseInvalidError } from '../errors';
-import { READ_ONLY_TOOLS, BLOCKED_TOOL_PATTERNS } from '../../plan/plan-mode';
+import { LLMResponseInvalidError, PermissionDecisionError } from '../errors';
 
 const PATCH_PATH_KEYS = new Set(['filePath', 'path', 'targetPath', 'fromPath', 'toPath']);
 const MAX_SNAPSHOT_BYTES = 300 * 1024;
@@ -47,6 +48,10 @@ export interface ToolExecutorConfig {
     streamCallback?: ToolContext['streamCallback'];
     /** Plan 模式（只读模式） */
     planMode?: boolean;
+    /** 是否启用 PermissionEngine（默认 true） */
+    enablePermissionEngine?: boolean;
+    /** 权限引擎（可选，不提供则使用默认引擎） */
+    permissionEngine?: PermissionEngine;
 
     // 回调
     /** 工具调用创建回调 */
@@ -78,9 +83,15 @@ export interface ToolExecutionOutput {
  */
 export class ToolExecutor {
     private readonly config: ToolExecutorConfig;
+    private readonly enablePermissionEngine: boolean;
+    private readonly permissionEngine?: PermissionEngine;
 
     constructor(config: ToolExecutorConfig) {
         this.config = config;
+        this.enablePermissionEngine = config.enablePermissionEngine !== false;
+        if (this.enablePermissionEngine) {
+            this.permissionEngine = config.permissionEngine ?? createDefaultPermissionEngine();
+        }
     }
 
     /**
@@ -97,15 +108,8 @@ export class ToolExecutor {
             throw error;
         }
 
-        // Plan 模式下检查工具是否允许执行
-        if (this.config.planMode) {
-            const blockedTools = this.getPlanModeBlockedTools(toolCalls);
-            if (blockedTools.length > 0) {
-                throw new LLMResponseInvalidError(
-                    `Plan Mode: Cannot execute write operations. Blocked tools: ${blockedTools.join(', ')}. ` +
-                        `Only read-only operations are allowed in Plan Mode.`
-                );
-            }
+        if (this.enablePermissionEngine) {
+            await this.authorizeToolCalls(toolCalls, messageId);
         }
 
         // 触发工具调用创建回调
@@ -162,37 +166,58 @@ export class ToolExecutor {
         return context;
     }
 
-    /**
-     * 获取 Plan 模式下被阻止的工具列表
-     */
-    private getPlanModeBlockedTools(toolCalls: ToolCall[]): string[] {
-        const blocked: string[] = [];
-        const allowedTools = new Set(READ_ONLY_TOOLS);
-
-        for (const toolCall of toolCalls) {
-            const toolName = toolCall.function?.name;
-            if (!toolName) continue;
-
-            // 检查黑名单模式
-            let isBlocked = false;
-            for (const pattern of BLOCKED_TOOL_PATTERNS) {
-                if (pattern.test(toolName)) {
-                    isBlocked = true;
-                    break;
-                }
-            }
-
-            // 检查白名单
-            if (!isBlocked && !allowedTools.has(toolName)) {
-                isBlocked = true;
-            }
-
-            if (isBlocked) {
-                blocked.push(toolName);
-            }
+    private async authorizeToolCalls(toolCalls: ToolCall[], messageId: string): Promise<void> {
+        if (!this.permissionEngine) {
+            return;
         }
 
-        return blocked;
+        const deniedDecisions: Array<{ toolName: string; reason: string; source?: string }> = [];
+
+        for (const toolCall of toolCalls) {
+            const toolName = toolCall.function?.name || 'unknown';
+            const decision = this.permissionEngine.evaluate({
+                toolCall,
+                sessionId: this.config.sessionId,
+                messageId,
+                planMode: this.config.planMode === true,
+            });
+
+            if (decision.effect === 'allow') {
+                continue;
+            }
+
+            if (decision.effect === 'ask') {
+                const ticketId = decision.ticket?.id || 'unknown-ticket';
+                const reason = decision.reason || `Tool "${toolName}" requires explicit approval`;
+                throw new PermissionDecisionError({
+                    effect: 'ask',
+                    toolName,
+                    reason,
+                    ticketId,
+                    source: decision.source,
+                });
+            }
+
+            const reason = decision.reason || `Tool "${toolName}" is denied by permission policy`;
+            deniedDecisions.push({ toolName, reason, source: decision.source });
+        }
+
+        if (deniedDecisions.length === 1) {
+            const denied = deniedDecisions[0];
+            throw new PermissionDecisionError({
+                effect: 'deny',
+                toolName: denied.toolName,
+                reason: denied.reason,
+                source: denied.source,
+            });
+        }
+
+        if (deniedDecisions.length > 1) {
+            const details = deniedDecisions
+                .map((item) => `Tool "${item.toolName}": ${item.reason}${item.source ? ` [source=${item.source}]` : ''}`)
+                .join(' | ');
+            throw new LLMResponseInvalidError(`PERMISSION_DENIED: ${details}`);
+        }
     }
 
     /**

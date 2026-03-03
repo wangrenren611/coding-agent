@@ -3,10 +3,12 @@ import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ToolExecutor } from '../core/tool-executor';
-import { LLMResponseInvalidError } from '../errors';
+import { LLMResponseInvalidError, PermissionDecisionError } from '../errors';
 import { ToolCallValidationError } from '../../tool/registry';
 import type { ToolCall } from '../core-types';
 import type { ToolRegistry } from '../../tool/registry';
+import type { PermissionEngine } from '../../security/permission-engine';
+import { createDefaultPermissionEngine } from '../../security/permission-engine';
 
 function createToolCall(callId: string, toolName: string, args: Record<string, unknown>): ToolCall {
     return {
@@ -135,6 +137,91 @@ describe('ToolExecutor protocol events', () => {
             executor.execute([createToolCall('call-3', 'read_file', { filePath: 'x' })], 'msg-3')
         ).rejects.toThrow(LLMResponseInvalidError);
         expect(createdSpy).not.toHaveBeenCalled();
+        expect(registry.execute).not.toHaveBeenCalled();
+    });
+
+    it('should bypass permission engine when enablePermissionEngine=false', async () => {
+        const registry = {
+            validateToolCalls: vi.fn(),
+            execute: vi.fn(async () => [
+                {
+                    tool_call_id: 'call-4',
+                    result: { success: true, output: 'ok' },
+                },
+            ]),
+        } as unknown as ToolRegistry;
+
+        const permissionEngine = {
+            evaluate: vi.fn(() => ({
+                effect: 'deny',
+                reason: 'blocked by test policy',
+                source: 'rule',
+            })),
+        } as unknown as PermissionEngine;
+
+        const executor = new ToolExecutor({
+            toolRegistry: registry,
+            sessionId: 's-1',
+            enablePermissionEngine: false,
+            permissionEngine,
+        });
+
+        await executor.execute([createToolCall('call-4', 'write_file', { filePath: 'x', content: 'y' })], 'msg-4');
+
+        expect(permissionEngine.evaluate).not.toHaveBeenCalled();
+        expect(registry.execute).toHaveBeenCalledTimes(1);
+    });
+
+    it('should enforce permission rules when enablePermissionEngine=true', async () => {
+        const registry = {
+            validateToolCalls: vi.fn(),
+            execute: vi.fn(async () => []),
+        } as unknown as ToolRegistry;
+
+        const permissionEngine = {
+            evaluate: vi.fn(() => ({
+                effect: 'deny',
+                reason: 'blocked by test policy',
+                source: 'rule',
+            })),
+        } as unknown as PermissionEngine;
+
+        const executor = new ToolExecutor({
+            toolRegistry: registry,
+            sessionId: 's-1',
+            enablePermissionEngine: true,
+            permissionEngine,
+        });
+
+        await expect(
+            executor.execute([createToolCall('call-5', 'write_file', { filePath: 'x', content: 'y' })], 'msg-5')
+        ).rejects.toThrow(PermissionDecisionError);
+        expect(permissionEngine.evaluate).toHaveBeenCalledTimes(1);
+        expect(registry.execute).not.toHaveBeenCalled();
+    });
+
+    it('should require approval when permission rule effect is ask', async () => {
+        const registry = {
+            validateToolCalls: vi.fn(),
+            execute: vi.fn(async () => []),
+        } as unknown as ToolRegistry;
+
+        const permissionEngine = createDefaultPermissionEngine({
+            rules: [{ effect: 'ask', tool: 'write_file', reason: 'manual approval required' }],
+        });
+        const executor = new ToolExecutor({
+            toolRegistry: registry,
+            sessionId: 's-1',
+            enablePermissionEngine: true,
+            permissionEngine,
+        });
+
+        await expect(
+            executor.execute([createToolCall('call-6', 'write_file', { filePath: 'x', content: 'y' })], 'msg-6')
+        ).rejects.toThrow(PermissionDecisionError);
+        await expect(
+            executor.execute([createToolCall('call-7', 'write_file', { filePath: 'x', content: 'y' })], 'msg-7')
+        ).rejects.toThrow(/PERMISSION_ASK_REQUIRED/);
         expect(registry.execute).not.toHaveBeenCalled();
     });
 });

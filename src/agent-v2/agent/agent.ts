@@ -31,6 +31,7 @@ import { EventBus, EventType } from '../eventbus';
 import { Message } from '../session/types';
 import { createDefaultToolRegistry, createPlanModeToolRegistry } from '../tool';
 import { createLogger, getLogger, Logger, createEventLoggerMiddleware } from '../logger';
+import { createDefaultPermissionEngine } from '../security';
 
 import {
     AgentError,
@@ -233,12 +234,20 @@ export class Agent {
         });
 
         // 创建工具执行器
+        const enablePermissionEngine = config.enablePermissionEngine !== false;
+        const permissionEngine = enablePermissionEngine
+            ? createDefaultPermissionEngine({
+                  rules: config.permissionRules,
+              })
+            : undefined;
         this.toolExecutor = new ToolExecutor({
             toolRegistry: this.toolRegistry,
             sessionId: this.session.getSessionId(),
             memoryManager: this.session.getMemoryManager(),
             streamCallback: this.streamCallback,
             planMode: config.planMode,
+            enablePermissionEngine,
+            permissionEngine,
             onToolCallCreated: (toolCalls, messageId, content) =>
                 this.emitter.emitToolCallCreated(toolCalls, messageId, content),
             onToolCallStream: (toolCallId, output, messageId) =>

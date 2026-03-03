@@ -304,3 +304,22 @@ export function toolResultToString(result: unknown): string {
 
     return String(result);
 }
+
+export {
+    createDefaultPolicySourceRules,
+    createEnvPermissionRules,
+    createLegacyBashPermissionRules,
+    createLegacyPlanModePermissionRules,
+    type DefaultPolicySourceOptions,
+} from './policy-sources';
+
+export {
+    PermissionEngine,
+    createDefaultPermissionEngine,
+    type PermissionEffect,
+    type PermissionTicket,
+    type PermissionRequest,
+    type PermissionDecision,
+    type PermissionRule,
+    type PermissionEngineOptions,
+} from './permission-engine';

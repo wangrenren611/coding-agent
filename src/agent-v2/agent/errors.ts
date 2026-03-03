@@ -193,6 +193,42 @@ export class LLMResponseInvalidError extends AgentError {
     }
 }
 
+export type PermissionDecisionEffect = 'ask' | 'deny';
+
+export interface PermissionDecisionErrorOptions {
+    effect: PermissionDecisionEffect;
+    toolName: string;
+    reason: string;
+    ticketId?: string;
+    source?: string;
+}
+
+/**
+ * 权限决策错误（统一承载 allow/deny/ask 中的 deny/ask）
+ */
+export class PermissionDecisionError extends LLMResponseInvalidError {
+    public readonly effect: PermissionDecisionEffect;
+    public readonly toolName: string;
+    public readonly reason: string;
+    public readonly ticketId?: string;
+    public readonly source?: string;
+
+    constructor(options: PermissionDecisionErrorOptions) {
+        const { effect, toolName, reason, ticketId, source } = options;
+        const prefix = effect === 'ask' ? 'PERMISSION_ASK_REQUIRED' : 'PERMISSION_DENIED';
+        const ticketSuffix = effect === 'ask' ? ` (ticket=${ticketId || 'unknown-ticket'})` : '';
+        const sourceSuffix = source ? ` [source=${source}]` : '';
+        const message = `${prefix}: Tool "${toolName}"${ticketSuffix}. ${reason}${sourceSuffix}`;
+        super(message);
+        this.name = 'PermissionDecisionError';
+        this.effect = effect;
+        this.toolName = toolName;
+        this.reason = reason;
+        this.ticketId = ticketId;
+        this.source = source;
+    }
+}
+
 // ==================== 工具相关错误 ====================
 
 /**
@@ -327,6 +363,10 @@ export function isLLMRequestError(error: unknown): error is LLMRequestError {
 
 export function isLLMResponseInvalidError(error: unknown): error is LLMResponseInvalidError {
     return error instanceof LLMResponseInvalidError;
+}
+
+export function isPermissionDecisionError(error: unknown): error is PermissionDecisionError {
+    return error instanceof PermissionDecisionError;
 }
 
 export function isToolError(error: unknown): error is ToolError {

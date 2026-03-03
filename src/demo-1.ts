@@ -869,7 +869,7 @@ async function demo1() {
 
     const memoryManager = createMemoryManager({
         type: 'mongodb',
-        connectionString: preferredMemoryPath,
+        // connectionString: preferredMemoryPath,
     });
 
     await memoryManager.initialize();
