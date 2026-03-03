@@ -40,7 +40,7 @@ export class ProviderFactory {
         const baseConfig: Record<string, unknown> = {
             baseURL,
             model: modelConfig.model,
-            temperature: modelConfig.temperature || 0.3,
+            temperature: modelConfig.temperature || 0.1,
             max_tokens: modelConfig.max_tokens,
             LLMMAX_TOKENS: modelConfig.LLMMAX_TOKENS,
             thinking: modelConfig.thinking,
