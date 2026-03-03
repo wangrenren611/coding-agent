@@ -138,6 +138,27 @@ export class ToolRegistry {
     }
 
     /**
+     * 注册或替换工具定义
+     *
+     * 用于动态工具源（如 MCP）在运行时同步工具。
+     */
+    upsert(tools: BaseTool<z.ZodType>[]): void {
+        tools.forEach((tool) => {
+            this.validateTool(tool);
+            this.tools.set(tool.name, tool);
+        });
+    }
+
+    /**
+     * 反注册工具
+     */
+    unregister(toolNames: string[]): void {
+        toolNames.forEach((toolName) => {
+            this.tools.delete(toolName);
+        });
+    }
+
+    /**
      * 验证 tool_calls 的基础结构
      */
     validateToolCalls(toolCalls: ToolCall[]): void {

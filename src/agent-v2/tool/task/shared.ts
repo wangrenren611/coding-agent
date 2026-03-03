@@ -118,7 +118,7 @@ Available agent types and the tools they have access to:
   the search for you.
   Tools: *
 
-- Explore: Fast agent specialized for exploring codebases.
+- explore: Fast agent specialized for exploring codebases.
   Use this when you need to quickly find files by patterns (eg. "src/components/**/*.tsx"),
   search code for keywords (eg. "API endpoints"), or answer questions about the codebase
   (eg. "how do API endpoints work?").
@@ -126,7 +126,7 @@ Available agent types and the tools they have access to:
   "medium" for moderate exploration, or "very thorough" for comprehensive analysis
   across multiple locations and naming conventions.
 
-- Plan: Software architect agent for designing implementation plans.
+- plan: Software architect agent for designing implementation plans.
   Use this when you need to plan the implementation strategy for a task.
   Returns step-by-step plans, identifies critical files, and considers architectural
   trade-offs.
@@ -158,7 +158,7 @@ Usage notes:
 - IMPORTANT: When searching for a keyword or file and you are not confident you will find
   the right match in the first few tries, use the Task tool.
 
-IMPORTANT: Use the Task tool with subagent_type=Explore instead of running search commands
+IMPORTANT: Use the Task tool with subagent_type=explore instead of running search commands
 directly when exploring the codebase to gather context or answer questions that are not a
 needle query for a specific file/class/function.
 
@@ -381,7 +381,6 @@ export function clearTaskIdCounterState(sessionId?: string): void {
 }
 
 export function isStatusTransitionAllowed(from: TaskStatus, to: TaskStatus): boolean {
-    if (from === to) return true;
     const transitions: Record<TaskStatus, TaskStatus[]> = {
         pending: ['in_progress'],
         in_progress: ['completed'],

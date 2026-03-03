@@ -3,7 +3,7 @@
  */
 
 export { McpClient } from './client';
-export { McpManager } from './manager';
+export { McpManager, initializeMcp, disconnectMcp } from './manager';
 export { McpToolAdapter, createToolAdapters } from './tool-adapter';
 export { loadMcpConfig, validateServerConfig, getConfigSearchPaths } from './config-loader';
 export { jsonSchemaToZod } from './json-schema-to-zod';

@@ -166,7 +166,8 @@ describe('MCP Integration Tests', () => {
         it('should initialize with config', async () => {
             const manager = McpManager.getInstance();
 
-            await manager.initialize();
+            // 使用不存在的配置文件路径，确保测试环境干净
+            await manager.initialize({ configPath: 'non-existent-config.json' });
 
             expect(manager.getConnectionInfo()).toHaveLength(0);
         });
@@ -389,7 +390,8 @@ describe('MCP Integration Tests', () => {
         it('should handle empty server list', async () => {
             const manager = McpManager.getInstance();
 
-            await manager.initialize();
+            // 显式使用不存在的配置文件，避免读取工作目录中的真实 MCP 配置
+            await manager.initialize({ configPath: path.join(tempDir, 'empty-config.json') });
 
             expect(manager.getConnectedServers()).toHaveLength(0);
             expect(manager.getTotalToolsCount()).toBe(0);

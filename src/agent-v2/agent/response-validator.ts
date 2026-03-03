@@ -66,17 +66,14 @@ const KNOWN_NONSENSE_PATTERNS = [
  * 高频幻觉词汇（出现过多时触发警告）
  */
 const HALLUCINATION_WORDS = [
+    // Only truly hallucination-specific words; common tech terms removed to avoid false positives
     'alpha',
     'daemon',
     'gamma',
     'beta',
     'omega',
     'lambda',
-    'shared',
-    'team',
-    'local',
-    'global',
-    'agent',
+    // Removed: 'shared', 'team', 'local', 'global', 'agent' — these are normal programming vocabulary
 ];
 
 /**

@@ -109,6 +109,7 @@ export class Agent {
     private readonly emitter: AgentEmitter;
     private readonly inputValidator: InputValidator;
     private readonly errorClassifier: ErrorClassifier;
+    private initializePromise?: Promise<void>;
 
     constructor(config: AgentOptions) {
         this.provider = this.validateAndGetProvider(config);
@@ -117,6 +118,7 @@ export class Agent {
         this.thinking = config.thinking;
         this.requestTimeoutMs = this.normalizeMs(config.requestTimeout);
         this.idleTimeoutMs = this.normalizeMs(config.idleTimeout) ?? AGENT_DEFAULTS.IDLE_TIMEOUT_MS;
+        const mcpManager = config.mcpManager;
 
         this.timeProvider = config.timeProvider ?? new DefaultTimeProvider();
         this.eventBus = new EventBus();
@@ -169,7 +171,6 @@ export class Agent {
                 this.provider
             );
         }
-
         this.session = new Session({
             systemPrompt,
             memoryManager: config.memoryManager,
@@ -181,6 +182,7 @@ export class Agent {
             getTools: () => this.toolRegistry.toLLMTools(),
         });
         this.configureToolEventBridge();
+        mcpManager?.setToolRegistry(this.toolRegistry);
 
         this.agentState = new AgentState({
             maxLoops: config.maxLoops ?? AGENT_DEFAULTS.LOOP_MAX,
@@ -239,18 +241,31 @@ export class Agent {
                 this.emitter.emitCodePatch(filePath, diff, messageId, language),
             onMessageAdd: (msg) => this.session.addMessage(msg),
         });
+
+        // 构造时启动初始化流程；execute 阶段仅等待初始化完成。
+        this.startInitialization();
     }
 
     // ==================== 公共 API ====================
 
+    async initialize(): Promise<void> {
+        this.startInitialization();
+        if (this.initializePromise) {
+            await this.initializePromise;
+        }
+    }
+
     async execute(query: MessageContent, options?: LLMGenerateOptions): Promise<Message> {
         this.validateInput(query);
+        if (!this.initializePromise) {
+            throw new AgentConfigurationError('Agent initialization is unavailable.');
+        }
+        await this.initializePromise;
         this.ensureIdle();
         this.agentState.startTask();
         this.pendingRetryReason = null;
 
         try {
-            await this.session.initialize();
             this.eventBus.emit(EventType.TASK_START, {
                 timestamp: this.timeProvider.getCurrentTime(),
                 query: contentToText(query),
@@ -314,6 +329,8 @@ export class Agent {
             this.unsubscribeEventLogger();
             this.unsubscribeEventLogger = undefined;
         }
+        // 清理事件总线监听器
+        this.eventBus.clear();
         // 关闭日志器（清理定时器等资源）
         if (this.ownsLogger) {
             await this.logger.close();
@@ -432,6 +449,18 @@ export class Agent {
         return value;
     }
 
+    private startInitialization(): void {
+        if (this.initializePromise) {
+            return;
+        }
+
+        this.initializePromise = (async () => {
+            await this.session.initialize();
+        })();
+        // 防止调用方未等待 initialize 时产生未处理拒绝；真实错误会在后续 await 时抛出。
+        void this.initializePromise.catch(() => {});
+    }
+
     // ==================== 内部方法：主循环 ====================
 
     private async runLoop(options?: LLMGenerateOptions): Promise<void> {
@@ -471,7 +500,7 @@ export class Agent {
                 if (!pendingTaskReminderSent) {
                     this.session.addMessage({
                         messageId: uuid(),
-                        role: 'assistant',
+                        role: 'user',
                         content: this.buildPendingTaskReminder(
                             completion.blockedByTasks.inProgressCount,
                             completion.blockedByTasks.pendingCount
@@ -524,7 +553,17 @@ export class Agent {
     }
 
     private buildPendingTaskReminder(inProgressCount: number, pendingCount: number): string {
-        return `[Task reminder] There are still unfinished managed tasks (in_progress: ${inProgressCount}, pending: ${pendingCount}). Continue executing remaining tasks and do not output a final completion summary until all managed tasks are completed.`;
+        return `[SYSTEM REMINDER] There are still unfinished tasks (in_progress: ${inProgressCount}, pending: ${pendingCount}).
+
+IMPORTANT: Do NOT call task_update(status="in_progress") again — the task is already declared.
+Your NEXT action MUST be actual work using real tools:
+  - Read relevant files: read_file, glob, grep, lsp
+  - Write/edit code: write_file, precise_replace, batch_replace
+  - Run commands: bash
+  - Delegate subtasks: task
+
+After completing the work, call task_update(status="completed").
+Do not output a completion summary until all managed tasks are marked completed.`;
     }
 
     private async handleLoopError(error: unknown): Promise<void> {

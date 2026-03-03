@@ -265,6 +265,7 @@ async function runPlanDemo() {
             memoryManager,
             streamCallback: handleStreamMessage,
         });
+        await planAgent.initialize();
 
         console.log(`${CYAN}Plan 模式 Session:${RESET} ${planAgent.getSessionId()}`);
         console.log(`${CYAN}查询:${RESET} ${query}\n`);
@@ -317,6 +318,7 @@ async function runPlanDemo() {
             memoryManager,
             streamCallback: handleStreamMessage,
         });
+        await executionAgent.initialize();
 
         console.log(`${CYAN}执行模式 Session:${RESET} ${executionAgent.getSessionId()}`);
         console.log(`${CYAN}Plan 文档内容预览:${RESET}`);

@@ -65,7 +65,7 @@ export async function checkComplete(params: CompletionCheckParams): Promise<Comp
     const taskSignature = pendingManagedTasks
         .slice()
         .sort((a, b) => a.taskId.localeCompare(b.taskId))
-        .map((task) => `${task.taskId}:${task.status}:${task.updatedAt ?? ''}`)
+        .map((task) => `${task.taskId}:${task.status}`)
         .join('|');
     const inProgressCount = pendingManagedTasks.filter((task) => task.status === 'in_progress').length;
     const pendingCount = pendingManagedTasks.length - inProgressCount;

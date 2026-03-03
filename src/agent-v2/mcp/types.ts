@@ -87,7 +87,8 @@ export interface ClientCapabilities {
     roots?: {
         listChanged?: boolean;
     };
-    sampling?: boolean;
+    /** 按 MCP 规范为对象类型；不支持时应省略该字段 */
+    sampling?: Record<string, unknown>;
 }
 
 /**
@@ -402,5 +403,5 @@ export const MCP_CLIENT_CAPABILITIES: ClientCapabilities = {
     roots: {
         listChanged: true,
     },
-    sampling: false,
+    sampling: {},
 };

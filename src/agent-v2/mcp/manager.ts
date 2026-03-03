@@ -8,7 +8,8 @@ import { getLogger, Logger } from '../logger';
 import { McpClient } from './client';
 import { McpToolAdapter, createToolAdapters } from './tool-adapter';
 import { loadMcpConfig } from './config-loader';
-import type { McpServerConfig, McpConnectionInfo, ConnectionState } from './types';
+import { ConnectionState } from './types';
+import type { McpServerConfig, McpConnectionInfo } from './types';
 import type { ToolRegistry } from '../tool/registry';
 
 /**
@@ -48,7 +49,7 @@ export class McpManager {
     /** 是否已初始化 */
     private initialized = false;
 
-    private constructor() {
+    constructor() {
         this.logger = getLogger();
     }
 
@@ -76,12 +77,15 @@ export class McpManager {
      * 初始化管理器
      */
     async initialize(config?: McpManagerConfig): Promise<void> {
+        if (config?.toolRegistry) {
+            this.setToolRegistry(config.toolRegistry);
+        }
+
         if (this.initialized) {
-            this.logger.warn('[MCP] Manager already initialized');
+            this.logger.debug('[MCP] Manager already initialized');
             return;
         }
 
-        this.toolRegistry = config?.toolRegistry;
         await this.loadAndConnect(config?.configPath);
         this.initialized = true;
     }
@@ -91,19 +95,20 @@ export class McpManager {
      */
     async loadAndConnect(configPath?: string): Promise<void> {
         const config = loadMcpConfig(configPath);
+        const serversToConnect = config.mcpServers.filter((server) => server.autoConnect !== false);
 
-        if (config.mcpServers.length === 0) {
+        if (serversToConnect.length === 0) {
             this.logger.info('[MCP] No servers configured');
             return;
         }
 
         this.logger.info('[MCP] Connecting to servers', {
-            count: config.mcpServers.length,
+            count: serversToConnect.length,
         });
 
         // 并行连接所有服务器
         const results = await Promise.allSettled(
-            config.mcpServers.map((serverConfig) => this.connectServer(serverConfig))
+            serversToConnect.map((serverConfig) => this.connectServer(serverConfig))
         );
 
         // 统计结果
@@ -145,7 +150,7 @@ export class McpManager {
         });
 
         // 更新初始状态
-        this.updateConnectionInfo(serverName, client, 'connecting' as ConnectionState);
+        this.updateConnectionInfo(serverName, client, ConnectionState.CONNECTING);
 
         try {
             // 建立连接
@@ -153,21 +158,7 @@ export class McpManager {
 
             // 创建工具适配器
             const adapters = createToolAdapters(client, client.tools, serverName);
-            this.toolAdapters.set(serverName, adapters);
-
-            // 注册到工具注册表
-            if (this.toolRegistry && adapters.length > 0) {
-                try {
-                    this.toolRegistry.register(adapters);
-                    this.logger.info('[MCP] Tools registered', {
-                        serverName,
-                        toolCount: adapters.length,
-                    });
-                } catch (error) {
-                    // 工具名称冲突等情况
-                    this.logger.error('[MCP] Failed to register some tools', error as Error, { serverName });
-                }
-            }
+            this.syncServerTools(serverName, adapters);
 
             // 更新连接信息
             this.updateConnectionInfo(serverName, client, client.state);
@@ -182,7 +173,8 @@ export class McpManager {
             this.logger.error('[MCP] Failed to connect to server', error as Error, { serverName });
 
             // 更新错误状态
-            this.updateConnectionInfo(serverName, client, 'error' as ConnectionState, errorMessage);
+            this.updateConnectionInfo(serverName, client, ConnectionState.ERROR, errorMessage);
+            await client.disconnect().catch(() => {});
 
             throw error;
         }
@@ -200,6 +192,12 @@ export class McpManager {
         }
 
         this.logger.info('[MCP] Disconnecting from server', { serverName });
+
+        // 从注册表移除该服务器的 MCP 工具
+        const adapters = this.toolAdapters.get(serverName) ?? [];
+        if (this.toolRegistry && adapters.length > 0) {
+            this.toolRegistry.unregister(adapters.map((adapter) => adapter.name));
+        }
 
         // 断开连接
         await client.disconnect();
@@ -247,7 +245,7 @@ export class McpManager {
 
             // 重新创建适配器
             const adapters = createToolAdapters(client, tools, serverName);
-            this.toolAdapters.set(serverName, adapters);
+            this.syncServerTools(serverName, adapters);
 
             // 更新连接信息
             this.updateConnectionInfo(serverName, client, client.state);
@@ -273,7 +271,7 @@ export class McpManager {
      */
     getConnectedServers(): string[] {
         return Array.from(this.clients.entries())
-            .filter(([, client]) => client.state === ('ready' as ConnectionState))
+            .filter(([, client]) => client.state === ConnectionState.READY)
             .map(([name]) => name);
     }
 
@@ -304,6 +302,7 @@ export class McpManager {
      */
     setToolRegistry(registry: ToolRegistry): void {
         this.toolRegistry = registry;
+        this.syncAllToolsToRegistry();
     }
 
     // ==================== 私有方法 ====================
@@ -312,13 +311,65 @@ export class McpManager {
      * 更新连接信息
      */
     private updateConnectionInfo(serverName: string, client: McpClient, state: ConnectionState, error?: string): void {
+        const previous = this.connectionInfo.get(serverName);
+        const preservedError = state === ConnectionState.READY ? undefined : previous?.error;
         this.connectionInfo.set(serverName, {
             serverName,
             state,
             toolsCount: client.tools.length,
-            error,
+            error: error ?? preservedError,
             lastUpdated: new Date().toISOString(),
         });
+    }
+
+    /**
+     * 同步单个服务器的工具到本地缓存和工具注册表
+     */
+    private syncServerTools(serverName: string, adapters: McpToolAdapter[]): void {
+        const previousAdapters = this.toolAdapters.get(serverName) ?? [];
+        this.toolAdapters.set(serverName, adapters);
+
+        if (!this.toolRegistry) {
+            return;
+        }
+
+        const previousNames = new Set(previousAdapters.map((adapter) => adapter.name));
+        const currentNames = new Set(adapters.map((adapter) => adapter.name));
+        const removedNames = Array.from(previousNames).filter((name) => !currentNames.has(name));
+
+        if (removedNames.length > 0) {
+            this.toolRegistry.unregister(removedNames);
+        }
+
+        if (adapters.length > 0) {
+            try {
+                this.toolRegistry.upsert(adapters);
+            } catch (error) {
+                this.logger.error('[MCP] Failed to synchronize tools into registry', error as Error, {
+                    serverName,
+                    toolCount: adapters.length,
+                });
+            }
+        }
+
+        this.logger.info('[MCP] Tools synchronized', {
+            serverName,
+            totalTools: adapters.length,
+            removedTools: removedNames.length,
+        });
+    }
+
+    /**
+     * 将所有已缓存工具同步到当前注册表
+     */
+    private syncAllToolsToRegistry(): void {
+        if (!this.toolRegistry) {
+            return;
+        }
+
+        for (const [serverName, adapters] of this.toolAdapters.entries()) {
+            this.syncServerTools(serverName, adapters);
+        }
     }
 }
 

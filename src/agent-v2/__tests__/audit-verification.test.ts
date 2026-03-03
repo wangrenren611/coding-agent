@@ -228,7 +228,7 @@ describe('P0-6: WebFetch SSRF 防护', () => {
 
         // 使用一个可靠的外部 URL 进行测试
         // 注意：这个测试需要网络连接
-        const result = await tool.execute({ url: 'https://httpbin.org/get', format: 'markdown', timeout: 10 });
+        const result = await tool.execute({ url: 'https://httpbin.org/get', format: 'markdown', timeout: 15 });
 
         // 只要不是 SSRF_BLOCKED 错误就算通过
         // 可能因为网络问题失败，但不应该是 SSRF 阻止

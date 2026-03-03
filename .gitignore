@@ -24,3 +24,4 @@ request.json
 coverage/
 plans
 logs
+.mcp.json

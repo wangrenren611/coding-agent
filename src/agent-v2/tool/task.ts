@@ -72,7 +72,9 @@ const taskRunSchema = z
     .object({
         description: z.string().min(1).max(200).describe('A short (3-5 words) description of the task'),
         prompt: z.string().min(1).describe('The task for the agent to perform'),
-        subagent_type: SubagentTypeSchema.describe('The type of specialized agent to use for this task'),
+        subagent_type: z
+            .preprocess((value) => (typeof value === 'string' ? value.trim().toLowerCase() : value), SubagentTypeSchema)
+            .describe('The type of specialized agent to use for this task'),
         model: z
             .enum(['sonnet', 'opus', 'haiku'])
             .optional()
@@ -444,6 +446,7 @@ Execution context:
     }
 
     private async runSubagent(subagent: Agent, prompt: string, options?: LLMGenerateOptions): Promise<SubagentResult> {
+        await subagent.initialize();
         const execution = await subagent.executeWithResult(prompt, options);
         const turns = subagent.getLoopCount();
         const rawMessages = subagent.getMessages();
@@ -688,7 +691,7 @@ export class TaskUpdateTool extends BaseTool<typeof taskUpdateSchema> {
             return this.result({
                 success: false,
                 metadata: { error: 'INVALID_STATUS_TRANSITION' },
-                output: `Invalid status transition: ${current.status} -> ${status}`,
+                output: `Invalid status transition: ${current.status} -> ${status}; Correct status progress: \`pending\` → \`in_progress\` → \`completed\``,
             });
         }
 

@@ -5,14 +5,16 @@ import { ModelId, ProviderRegistry } from './providers';
 import fs from 'fs';
 import { AgentMessage, AgentMessageType, BaseAgentEvent, SubagentEventMessage } from './agent-v2/agent/stream-types';
 import { createMemoryManager } from './agent-v2';
+import { initializeMcp, disconnectMcp, getConfigSearchPaths } from './agent-v2/mcp';
 import { operatorPrompt } from './agent-v2/prompts/operator';
 import { platform } from 'os';
 import path from 'path';
 import { parseFilePaths, createFileSummary, type ParsedFileInput } from './cli/utils/file';
 import type { InputContentPart } from './providers/types/api';
+import type { McpManager } from './agent-v2/mcp';
 
 // const model = 'wr-claude-4.6';
-const model: ModelId = 'qwen3.5-plus';
+const model: ModelId = 'glm-5';
 dotenv.config({
     path: './.env.development',
 });
@@ -420,7 +422,7 @@ function printSubagentReport(buffer: SubagentBuffer) {
         buffer.status === 'completed' ? `${COLORS.success}✓` : buffer.status === 'failed' ? `${COLORS.error}✗` : '🛑';
 
     // 头部 - 更简洁的设计
-    console.log('');
+    process.stdout.write('');
     process.stdout.write(
         `${COLORS.muted}┌─ 子任务 #${taskNum}${COLORS.reset} ${color}${buffer.subagentType}${COLORS.reset} ${statusIcon}${COLORS.reset} ${COLORS.muted}${elapsed}${COLORS.reset}`
     );
@@ -445,11 +447,11 @@ function printSubagentReport(buffer: SubagentBuffer) {
             hasContent = true;
         }
 
-        console.log(`${COLORS.muted}│${COLORS.reset} ${line}`);
+        process.stdout.write(`${COLORS.muted}│${COLORS.reset} ${line}`);
     }
 
     // 底部
-    console.log(`${COLORS.muted}└─${COLORS.reset}`);
+    process.stdout.write(`${COLORS.muted}└─${COLORS.reset}`);
 }
 
 /**
@@ -480,7 +482,7 @@ function handleSingleMessage(message: BaseAgentEvent, indent: string = '') {
         // ==================== 推理/思考内容 (thinking 模式) ====================
         case AgentMessageType.REASONING_START:
             isInReasoningBlock = true;
-            console.log(`\n${indent}${COLORS.muted}💭 思考中...${COLORS.reset}\n`);
+            process.stdout.write(`\n${indent}${COLORS.muted}💭 思考中...${COLORS.reset}\n`);
             break;
 
         case AgentMessageType.REASONING_DELTA:
@@ -490,13 +492,15 @@ function handleSingleMessage(message: BaseAgentEvent, indent: string = '') {
 
         case AgentMessageType.REASONING_COMPLETE:
             isInReasoningBlock = false;
-            console.log(`\n${indent}${COLORS.success}✓${COLORS.reset} ${COLORS.muted}思考完成${COLORS.reset}\n`);
+            process.stdout.write(
+                `\n${indent}${COLORS.success}✓${COLORS.reset} ${COLORS.muted}思考完成${COLORS.reset}\n`
+            );
             break;
 
         // ==================== 正式文本回复 ====================
         case AgentMessageType.TEXT_START:
             if (!isInTextBlock) {
-                console.log(`\n${indent}${COLORS.primary}━━━ 回复 ━━━${COLORS.reset}\n`);
+                process.stdout.write(`\n${indent}${COLORS.primary}━━━ 回复 ━━━${COLORS.reset}\n`);
                 isInTextBlock = true;
             }
             break;
@@ -521,15 +525,15 @@ function handleSingleMessage(message: BaseAgentEvent, indent: string = '') {
                 }
             }
 
-            console.log(`\n${indent}${COLORS.primary}━━━ 工具调用 ━━━${COLORS.reset}\n`);
+            process.stdout.write(`\n${indent}${COLORS.primary}━━━ 工具调用 ━━━${COLORS.reset}\n`);
 
             for (const call of tools) {
                 const icon = getToolIcon(call.toolName);
                 const argsFormatted = formatToolArgs(call.args, 60);
 
-                console.log(`${indent}${icon} ${COLORS.bold}${COLORS.info}${call.toolName}${COLORS.reset}`);
+                process.stdout.write(`${indent}${icon} ${COLORS.bold}${COLORS.info}${call.toolName}${COLORS.reset}`);
                 if (argsFormatted) {
-                    console.log(`${indent}  ${COLORS.muted}${argsFormatted}${COLORS.reset}`);
+                    process.stdout.write(`${indent}  ${COLORS.muted}${argsFormatted}${COLORS.reset}`);
                 }
             }
             console.log('');
@@ -605,7 +609,7 @@ function handleSingleMessage(message: BaseAgentEvent, indent: string = '') {
                 usageText += `${COLORS.reset}`;
             }
 
-            console.log(usageText);
+            process.stdout.write(usageText);
             break;
         }
 
@@ -621,9 +625,9 @@ function handleSingleMessage(message: BaseAgentEvent, indent: string = '') {
 
         // ==================== 代码补丁 ====================
         case AgentMessageType.CODE_PATCH:
-            console.log(`${indent}${COLORS.secondary}📝 ${message.payload.path}${COLORS.reset}`);
+            process.stdout.write(`${indent}${COLORS.secondary}📝 ${message.payload.path}${COLORS.reset}`);
             if (message.payload.language) {
-                console.log(`${indent}  ${COLORS.muted}${message.payload.language}${COLORS.reset}`);
+                process.stdout.write(`${indent}  ${COLORS.muted}${message.payload.language}${COLORS.reset}`);
             }
             break;
 
@@ -694,9 +698,9 @@ function printUserInput(query: string, parsedInput?: ParsedFileInput) {
 
     // 显示解析错误
     if (parsedInput && parsedInput.errors.length > 0) {
-        console.log(`${COLORS.warning}⚠ 文件解析警告:${COLORS.reset}`);
+        process.stdout.write(`${COLORS.warning}⚠ 文件解析警告:${COLORS.reset}`);
         for (const error of parsedInput.errors) {
-            console.log(`  ${COLORS.warning}•${COLORS.reset} ${error}`);
+            process.stdout.write(`  ${COLORS.warning}•${COLORS.reset} ${error}`);
         }
         console.log('');
     }
@@ -871,10 +875,42 @@ async function demo1() {
     await memoryManager.initialize();
 
     let agent: Agent | undefined;
+    let mcpManager: McpManager | undefined;
     try {
+        // MCP 由 demo 外部初始化，再注入 Agent。
+        const mcpConfigPath = process.env.MCP_CONFIG_PATH;
+        mcpManager = await initializeMcp(undefined, mcpConfigPath);
+        const connectedServers = mcpManager.getConnectedServers();
+        const totalMcpTools = mcpManager.getTotalToolsCount();
+        if (totalMcpTools > 0) {
+            console.log(
+                `${COLORS.success}◆ MCP 初始化成功${COLORS.reset} ${COLORS.muted}(servers: ${connectedServers.length}, tools: ${totalMcpTools})${COLORS.reset}`
+            );
+        } else {
+            const connectionInfo = mcpManager.getConnectionInfo();
+            const searchTargets = mcpConfigPath ? [mcpConfigPath] : getConfigSearchPaths();
+            console.log(`${COLORS.warning}◆ MCP 已初始化但未加载到工具${COLORS.reset}`);
+            console.log(
+                `${COLORS.muted}  已连接服务: ${connectedServers.length}，MCP 工具数: ${totalMcpTools}${COLORS.reset}`
+            );
+            if (connectionInfo.length > 0) {
+                console.log(`${COLORS.muted}  连接详情:${COLORS.reset}`);
+                for (const info of connectionInfo) {
+                    const errorSuffix = info.error ? `, error: ${info.error}` : '';
+                    console.log(
+                        `${COLORS.muted}    - ${info.serverName}: state=${info.state}, tools=${info.toolsCount}${errorSuffix}${COLORS.reset}`
+                    );
+                }
+            }
+            console.log(`${COLORS.muted}  请检查 MCP 配置路径:${COLORS.reset}`);
+            for (const target of searchTargets) {
+                console.log(`${COLORS.muted}    - ${target}${COLORS.reset}`);
+            }
+        }
+
         agent = new Agent({
             provider: ProviderRegistry.createFromEnv(model, {
-                temperature: 0.3,
+                temperature: 0.1,
             }),
             systemPrompt: operatorPrompt({
                 directory: process.cwd(),
@@ -891,8 +927,10 @@ async function demo1() {
                 triggerRatio: 0.9,
             },
             memoryManager,
+            mcpManager,
             streamCallback: handleStreamMessage,
         });
+        await agent.initialize();
 
         // 执行查询
         let query = cliQuery;
@@ -942,6 +980,10 @@ async function demo1() {
         console.error(error);
     } finally {
         await memoryManager.close();
+        await agent?.close();
+        if (mcpManager) {
+            await disconnectMcp();
+        }
     }
 }
 
