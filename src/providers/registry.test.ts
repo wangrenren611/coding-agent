@@ -122,6 +122,18 @@ describe('ProviderRegistry', () => {
             expect(provider.config.apiKey).toBe('override-key');
         });
 
+        it('should accept tool_stream override', () => {
+            process.env.GLM_API_KEY = 'test-key';
+
+            const provider = ProviderRegistry.createFromEnv('glm-4.7', {
+                temperature: 0.1,
+                tool_stream: true,
+            });
+
+            expect(provider.config.temperature).toBe(0.1);
+            expect(provider.config.tool_stream).toBe(true);
+        });
+
         it('should throw error for unknown modelId', () => {
             expect(() => {
                 ProviderRegistry.createFromEnv('unknown-model' as ModelId);

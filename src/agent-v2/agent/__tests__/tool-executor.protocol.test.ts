@@ -254,6 +254,92 @@ describe('ToolExecutor protocol events', () => {
         expect(registry.execute).toHaveBeenCalledTimes(1);
     });
 
+    it('should flag bash allowlist bypass in tool context after approved legacy bash ask', async () => {
+        const registry = {
+            validateToolCalls: vi.fn(),
+            execute: vi.fn(
+                async (
+                    _toolCalls: ToolCall[],
+                    context?: {
+                        isAllowlistBypassed?: (toolCallId: string, toolName: string) => boolean;
+                    }
+                ) => {
+                    const bypassed = context?.isAllowlistBypassed?.('call-8b', 'bash');
+                    expect(bypassed).toBe(true);
+                    return [
+                        {
+                            tool_call_id: 'call-8b',
+                            result: { success: true, output: 'ok-after-bash-approval' },
+                        },
+                    ];
+                }
+            ),
+        } as unknown as ToolRegistry;
+
+        const permissionEngine = createDefaultPermissionEngine({
+            useDefaultSources: false,
+            rules: [{ effect: 'ask', tool: 'bash', source: 'legacy_bash', reason: 'manual approval required' }],
+        });
+        const askSpy = vi.fn(async () => true);
+        const executor = new ToolExecutor({
+            toolRegistry: registry,
+            sessionId: 's-1',
+            enablePermissionEngine: true,
+            permissionEngine,
+            onPermissionAsk: askSpy,
+        });
+
+        await executor.execute([createToolCall('call-8b', 'bash', { command: 'custom-cli --help' })], 'msg-8b');
+
+        expect(askSpy).toHaveBeenCalledTimes(1);
+        expect(registry.execute).toHaveBeenCalledTimes(1);
+    });
+
+    it('should batch same ask decision in one execution and prompt once', async () => {
+        const registry = {
+            validateToolCalls: vi.fn(),
+            execute: vi.fn(
+                async (
+                    _toolCalls: ToolCall[],
+                    context?: {
+                        isAllowlistBypassed?: (toolCallId: string, toolName: string) => boolean;
+                    }
+                ) => {
+                    expect(context?.isAllowlistBypassed?.('call-b1', 'bash')).toBe(true);
+                    expect(context?.isAllowlistBypassed?.('call-b2', 'bash')).toBe(true);
+                    return [
+                        { tool_call_id: 'call-b1', result: { success: true, output: 'ok-1' } },
+                        { tool_call_id: 'call-b2', result: { success: true, output: 'ok-2' } },
+                    ];
+                }
+            ),
+        } as unknown as ToolRegistry;
+
+        const permissionEngine = createDefaultPermissionEngine({
+            useDefaultSources: false,
+            rules: [{ effect: 'ask', tool: 'bash', source: 'legacy_bash', reason: 'manual approval required' }],
+        });
+        const askSpy = vi.fn(async () => true);
+        const executor = new ToolExecutor({
+            toolRegistry: registry,
+            sessionId: 's-1',
+            enablePermissionEngine: true,
+            permissionEngine,
+            onPermissionAsk: askSpy,
+        });
+
+        await executor.execute(
+            [
+                createToolCall('call-b1', 'bash', { command: 'custom-cli-a --help' }),
+                createToolCall('call-b2', 'bash', { command: 'custom-cli-b --help' }),
+            ],
+            'msg-batch'
+        );
+
+        expect(askSpy).toHaveBeenCalledTimes(1);
+        expect(registry.execute).toHaveBeenCalledTimes(1);
+    });
+
     it('should abort execution when ask callback rejects', async () => {
         const registry = {
             validateToolCalls: vi.fn(),

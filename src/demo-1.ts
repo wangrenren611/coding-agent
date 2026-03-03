@@ -696,7 +696,9 @@ function handleSingleMessage(message: BaseAgentEvent, indent: string = '') {
                 process.stdout.write(`${indent}  ${COLORS.muted}${message.payload.language}${COLORS.reset}`);
             }
             break;
-
+        case AgentMessageType.PERMISSION_REQUEST:
+            queuePermissionDecision(message as PermissionRequestMessage);
+            break;
         default:
             break;
     }
@@ -940,7 +942,7 @@ async function demo1() {
     fs.accessSync(preferredMemoryPath, fs.constants.W_OK);
 
     const memoryManager = createMemoryManager({
-        type: 'mongodb',
+        type: 'file',
         // connectionString: preferredMemoryPath,
     });
 
@@ -983,6 +985,7 @@ async function demo1() {
         agent = new Agent({
             provider: ProviderRegistry.createFromEnv(model, {
                 temperature: 0.1,
+                tool_stream: true,
             }),
             systemPrompt: operatorPrompt({
                 directory: process.cwd(),
@@ -991,6 +994,7 @@ async function demo1() {
             requestTimeout: parseRequestTimeoutMs(process.env.AGENT_REQUEST_TIMEOUT_MS),
             ...(cliSessionId ? { sessionId: cliSessionId } : {}),
             stream: true,
+
             thinking: true,
             idleTimeout: 1000 * 60 * 5,
             enableCompaction: true,

@@ -73,6 +73,68 @@ describe('OpenAICompatibleProvider request options', () => {
         expect(requestBody.stream_options?.include_usage).toBe(false);
     });
 
+    it('should pass tool_stream through without enabling stream mode', async () => {
+        const provider = new OpenAICompatibleProvider({
+            apiKey: 'test-key',
+            baseURL: 'https://api.example.com',
+            model: 'gpt-4',
+            temperature: 0.7,
+            max_tokens: 2000,
+            LLMMAX_TOKENS: 8000,
+        });
+
+        const fetchSpy = vi.spyOn(provider.httpClient, 'fetch').mockResolvedValueOnce({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                id: 'test-id',
+                object: 'chat.completion',
+                created: 1234567890,
+                model: 'gpt-4',
+                choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+            }),
+        } as Response);
+
+        await provider.generate([{ role: 'user', content: 'hello' }], {
+            tool_stream: true,
+        });
+
+        const requestBody = JSON.parse(String(fetchSpy.mock.calls[0][1]?.body));
+        expect(requestBody.stream).toBe(false);
+        expect(requestBody.tool_stream).toBe(true);
+        expect(requestBody.stream_options).toBeUndefined();
+    });
+
+    it('should use provider config tool_stream by default', async () => {
+        const provider = new OpenAICompatibleProvider({
+            apiKey: 'test-key',
+            baseURL: 'https://api.example.com',
+            model: 'gpt-4',
+            temperature: 0.7,
+            max_tokens: 2000,
+            LLMMAX_TOKENS: 8000,
+            tool_stream: true,
+        });
+
+        const fetchSpy = vi.spyOn(provider.httpClient, 'fetch').mockResolvedValueOnce({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                id: 'test-id',
+                object: 'chat.completion',
+                created: 1234567890,
+                model: 'gpt-4',
+                choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+            }),
+        } as Response);
+
+        await provider.generate([{ role: 'user', content: 'hello' }]);
+
+        const requestBody = JSON.parse(String(fetchSpy.mock.calls[0][1]?.body));
+        expect(requestBody.stream).toBe(false);
+        expect(requestBody.tool_stream).toBe(true);
+    });
+
     it('should not send thinking flag in standard adapter request body', async () => {
         const provider = new OpenAICompatibleProvider({
             apiKey: 'test-key',

@@ -33,7 +33,7 @@ export class StandardAdapter extends BaseAPIAdapter {
      * 转换请求 - 基础实现
      */
     transformRequest(options?: LLMRequest): LLMRequest {
-        const { model, max_tokens, messages, temperature, stream, tools, thinking, abortSignal, ...rest } =
+        const { model, max_tokens, messages, temperature, stream, tool_stream, tools, thinking, abortSignal, ...rest } =
             options || ({} as LLMRequest & { abortSignal?: AbortSignal; thinking?: unknown });
         void thinking;
         void abortSignal;
@@ -48,6 +48,10 @@ export class StandardAdapter extends BaseAPIAdapter {
             temperature: temperature,
             stream: stream ?? false,
         };
+
+        if (tool_stream !== undefined) {
+            body.tool_stream = tool_stream;
+        }
 
         // 如果提供了工具，则添加
         if (tools && tools.length > 0) {

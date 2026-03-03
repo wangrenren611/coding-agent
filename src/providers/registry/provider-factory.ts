@@ -43,6 +43,7 @@ export class ProviderFactory {
             temperature: modelConfig.temperature || 0.1,
             max_tokens: modelConfig.max_tokens,
             LLMMAX_TOKENS: modelConfig.LLMMAX_TOKENS,
+            tool_stream: modelConfig.tool_stream,
             thinking: modelConfig.thinking,
         };
 

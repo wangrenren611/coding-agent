@@ -119,6 +119,38 @@ describe('PermissionEngine', () => {
         expect(decision.reason).toContain('blocked by security policy');
     });
 
+    it('should allow Windows dir command under guarded legacy bash policy', () => {
+        process.env.BASH_TOOL_POLICY = 'guarded';
+
+        const engine = new PermissionEngine();
+        const decision = engine.evaluate(createRequest('bash', { command: 'dir' }));
+
+        expect(decision.effect).toBe('allow');
+    });
+
+    it('should ask approval for non-allowlisted bash command under guarded legacy policy', () => {
+        process.env.BASH_TOOL_POLICY = 'guarded';
+
+        const engine = new PermissionEngine();
+        const decision = engine.evaluate(createRequest('bash', { command: 'custom-cli --version' }));
+
+        expect(decision.effect).toBe('ask');
+        expect(decision.source).toBe('legacy_bash');
+        expect(decision.reason).toContain('requires explicit approval');
+        expect(typeof decision.ticket?.id).toBe('string');
+    });
+
+    it('should ask approval for delete command under guarded legacy policy', () => {
+        process.env.BASH_TOOL_POLICY = 'guarded';
+
+        const engine = new PermissionEngine();
+        const decision = engine.evaluate(createRequest('bash', { command: 'del "D:\\work\\coding-agent\\x.txt"' }));
+
+        expect(decision.effect).toBe('ask');
+        expect(decision.source).toBe('legacy_bash');
+        expect(typeof decision.ticket?.id).toBe('string');
+    });
+
     it('should keep legacy plan-mode policy opt-in only', () => {
         const engineDefault = new PermissionEngine({ useDefaultSources: true });
         const defaultDecision = engineDefault.evaluate({

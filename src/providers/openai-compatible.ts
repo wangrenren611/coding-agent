@@ -50,6 +50,7 @@ const PROVIDER_DEFAULT_TIMEOUT = 1000 * 60 * 10; // 10分钟
  * - 各种兼容第三方服务（如 DeepSeek、Qwen、通义千问等）
  */
 export class OpenAICompatibleProvider extends LLMProvider {
+    declare config: OpenAICompatibleConfig;
     readonly httpClient: HTTPClient;
     readonly adapter: BaseAPIAdapter;
 
@@ -100,6 +101,7 @@ export class OpenAICompatibleProvider extends LLMProvider {
         }
 
         const resolvedOptions = this.resolveGenerateOptions(options);
+        const toolStream = (resolvedOptions?.tool_stream as boolean | undefined) ?? this.config.tool_stream;
 
         // 构建请求体
         const requestBody = this.adapter.transformRequest({
@@ -107,7 +109,9 @@ export class OpenAICompatibleProvider extends LLMProvider {
             max_tokens: resolvedOptions?.max_tokens,
             temperature: this.config.temperature,
             messages,
-            thinking: resolvedOptions?.thinking ?? this.config.thinking,
+            tool_stream: toolStream,
+            thinking:
+                (resolvedOptions?.thinking as boolean | undefined) ?? (this.config.thinking as boolean | undefined),
             ...(resolvedOptions ?? {}),
         });
 
@@ -120,7 +124,7 @@ export class OpenAICompatibleProvider extends LLMProvider {
         };
 
         // 根据是否流式选择处理方式
-        if (options?.stream) {
+        if (resolvedOptions?.stream) {
             return this._generateStream(requestParams);
         }
 

@@ -11,6 +11,7 @@
  */
 
 import { v4 as uuid } from 'uuid';
+import { createHash } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { ToolCallValidationError, ToolRegistry } from '../../tool/registry';
@@ -32,6 +33,10 @@ interface FileSnapshot {
     displayPath: string;
     existedBefore: boolean;
     beforeContent: string;
+}
+
+interface AuthorizationOutcome {
+    allowlistBypassedCallIds: Set<string>;
 }
 
 /**
@@ -94,6 +99,7 @@ export class ToolExecutor {
     private readonly config: ToolExecutorConfig;
     private readonly enablePermissionEngine: boolean;
     private readonly permissionEngine?: PermissionEngine;
+    private readonly approvedAskFingerprints = new Set<string>();
 
     constructor(config: ToolExecutorConfig) {
         this.config = config;
@@ -117,9 +123,9 @@ export class ToolExecutor {
             throw error;
         }
 
-        if (this.enablePermissionEngine) {
-            await this.authorizeToolCalls(toolCalls, messageId);
-        }
+        const authorizationOutcome = this.enablePermissionEngine
+            ? await this.authorizeToolCalls(toolCalls, messageId)
+            : { allowlistBypassedCallIds: new Set<string>() };
 
         // 触发工具调用创建回调
         this.config.onToolCallCreated?.(toolCalls, messageId, messageContent);
@@ -133,6 +139,8 @@ export class ToolExecutor {
         // 执行工具
         const results = await this.config.toolRegistry.execute(toolCalls, {
             ...toolContext,
+            isAllowlistBypassed: (toolCallId, toolName) =>
+                toolName === 'bash' && authorizationOutcome.allowlistBypassedCallIds.has(toolCallId),
             onToolStream: (toolCallId, _toolName, output) => {
                 if (!output) return;
                 streamedToolCallIds.add(toolCallId);
@@ -175,12 +183,14 @@ export class ToolExecutor {
         return context;
     }
 
-    private async authorizeToolCalls(toolCalls: ToolCall[], messageId: string): Promise<void> {
+    private async authorizeToolCalls(toolCalls: ToolCall[], messageId: string): Promise<AuthorizationOutcome> {
         if (!this.permissionEngine) {
-            return;
+            return { allowlistBypassedCallIds: new Set<string>() };
         }
 
         const deniedDecisions: Array<{ toolName: string; reason: string; source?: string }> = [];
+        const allowlistBypassedCallIds = new Set<string>();
+        const batchApprovalDecisions = new Map<string, boolean>();
 
         for (const toolCall of toolCalls) {
             const toolName = toolCall.function?.name || 'unknown';
@@ -198,6 +208,34 @@ export class ToolExecutor {
             if (decision.effect === 'ask') {
                 const ticketId = decision.ticket?.id || 'unknown-ticket';
                 const reason = decision.reason || `Tool "${toolName}" requires explicit approval`;
+                const askFingerprint = this.buildAskFingerprint(
+                    toolCall,
+                    decision.source,
+                    decision.ticket?.fingerprint
+                );
+                const batchKey = this.buildAskBatchKey(toolCall, decision.source, reason);
+
+                if (this.approvedAskFingerprints.has(askFingerprint)) {
+                    if (toolName === 'bash' && decision.source === 'legacy_bash') {
+                        allowlistBypassedCallIds.add(toolCall.id);
+                    }
+                    continue;
+                }
+
+                const batchApproval = batchApprovalDecisions.get(batchKey);
+                if (batchApproval === true) {
+                    this.approvedAskFingerprints.add(askFingerprint);
+                    if (toolName === 'bash' && decision.source === 'legacy_bash') {
+                        allowlistBypassedCallIds.add(toolCall.id);
+                    }
+                    continue;
+                }
+                if (batchApproval === false) {
+                    throw new AgentAbortedError(
+                        `Permission rejected by user for tool "${toolName}" (ticket=${ticketId})`
+                    );
+                }
+
                 if (this.config.onPermissionAsk) {
                     const approved = await this.config.onPermissionAsk({
                         ticketId,
@@ -207,7 +245,12 @@ export class ToolExecutor {
                         args: toolCall.function?.arguments || '',
                         messageId,
                     });
+                    batchApprovalDecisions.set(batchKey, approved);
                     if (approved) {
+                        this.approvedAskFingerprints.add(askFingerprint);
+                        if (toolName === 'bash' && decision.source === 'legacy_bash') {
+                            allowlistBypassedCallIds.add(toolCall.id);
+                        }
                         continue;
                     }
                     throw new AgentAbortedError(
@@ -245,6 +288,21 @@ export class ToolExecutor {
                 .join(' | ');
             throw new LLMResponseInvalidError(`PERMISSION_DENIED: ${details}`);
         }
+
+        return { allowlistBypassedCallIds };
+    }
+
+    private buildAskFingerprint(toolCall: ToolCall, source?: string, ticketFingerprint?: string): string {
+        if (ticketFingerprint && ticketFingerprint.trim().length > 0) {
+            return `${toolCall.function?.name || 'unknown'}:${source || 'rule'}:${ticketFingerprint}`;
+        }
+
+        const raw = `${toolCall.function?.name || 'unknown'}:${source || 'rule'}:${toolCall.function?.arguments || ''}`;
+        return createHash('sha256').update(raw).digest('hex').slice(0, 32);
+    }
+
+    private buildAskBatchKey(toolCall: ToolCall, source: string | undefined, reason: string): string {
+        return `${toolCall.function?.name || 'unknown'}:${source || 'rule'}:${reason}`;
     }
 
     /**

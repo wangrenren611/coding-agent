@@ -9,6 +9,8 @@ function sleep(ms: number): Promise<void> {
 describe('BashTool', () => {
     const backgroundPids: number[] = [];
     const backgroundLogs: string[] = [];
+    const originalBashPolicy = process.env.BASH_TOOL_POLICY;
+    const itIfNotWindows = process.platform === 'win32' ? it.skip : it;
 
     afterEach(async () => {
         for (const pid of backgroundPids) {
@@ -28,6 +30,12 @@ describe('BashTool', () => {
             }
         }
         backgroundLogs.length = 0;
+
+        if (originalBashPolicy === undefined) {
+            delete process.env.BASH_TOOL_POLICY;
+        } else {
+            process.env.BASH_TOOL_POLICY = originalBashPolicy;
+        }
     });
 
     it('should parse run_in_background from string "true"', () => {
@@ -69,30 +77,54 @@ describe('BashTool', () => {
         }
     });
 
-    it('should write background command output to log file', async () => {
-        const tool = new BashTool();
-        const result = await tool.execute({
-            command: 'echo background-log-check',
-            run_in_background: 'true' as unknown as boolean,
-        });
+    itIfNotWindows(
+        'should write background command output to log file',
+        async () => {
+            const tool = new BashTool();
+            const result = await tool.execute({
+                command: 'echo background-log-check',
+                run_in_background: 'true' as unknown as boolean,
+            });
 
-        expect(result.success).toBe(true);
-        const metadata = (result.metadata || {}) as { logPath?: unknown };
-        expect(typeof metadata.logPath).toBe('string');
-        if (typeof metadata.logPath !== 'string') return;
-        backgroundLogs.push(metadata.logPath);
+            expect(result.success).toBe(true);
+            const metadata = (result.metadata || {}) as { logPath?: unknown };
+            expect(typeof metadata.logPath).toBe('string');
+            if (typeof metadata.logPath !== 'string') return;
+            backgroundLogs.push(metadata.logPath);
 
-        let logContent = '';
-        for (let i = 0; i < 100; i += 1) {
-            if (fs.existsSync(metadata.logPath)) {
-                logContent = await fs.promises.readFile(metadata.logPath, 'utf8');
-                if (logContent.includes('background-log-check')) {
-                    break;
+            let logContent = '';
+            for (let i = 0; i < 100; i += 1) {
+                if (fs.existsSync(metadata.logPath)) {
+                    logContent = await fs.promises.readFile(metadata.logPath, 'utf8');
+                    if (logContent.includes('background-log-check')) {
+                        break;
+                    }
                 }
+                await sleep(50);
             }
-            await sleep(50);
-        }
 
-        expect(logContent).toContain('background-log-check');
+            expect(logContent).toContain('background-log-check');
+        },
+        10000
+    );
+
+    it('should bypass guarded allowlist when context marks command as approved', async () => {
+        process.env.BASH_TOOL_POLICY = 'guarded';
+        const tool = new BashTool();
+        const result = await tool.execute(
+            {
+                command: 'custom-cli --help',
+            },
+            {
+                environment: 'test',
+                platform: process.platform,
+                time: new Date().toISOString(),
+                workingDirectory: process.cwd(),
+                allowlistBypassed: true,
+            }
+        );
+
+        expect(result.success).toBe(false);
+        expect(String(result.output || '')).not.toContain('COMMAND_BLOCKED_BY_POLICY');
     });
 });

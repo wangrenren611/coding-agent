@@ -14,6 +14,7 @@ interface ExecutionContext {
     memoryManager?: ToolContext['memoryManager'];
     streamCallback?: ToolContext['streamCallback'];
     onToolStream?: (toolCallId: string, toolName: string, output: string) => void;
+    isAllowlistBypassed?: (toolCallId: string, toolName: string) => boolean;
 }
 
 /**
@@ -269,6 +270,7 @@ export class ToolRegistry {
                             ? await Promise.resolve(
                                   tool.execute(resultSchema.data, {
                                       ...toolContext,
+                                      allowlistBypassed: context?.isAllowlistBypassed?.(toolCall.id, name) === true,
                                       emitOutput: (chunk: string) => context?.onToolStream?.(toolCall.id, name, chunk),
                                   })
                               )
@@ -278,6 +280,8 @@ export class ToolRegistry {
                                       Promise.resolve(
                                           tool.execute(resultSchema.data, {
                                               ...toolContext,
+                                              allowlistBypassed:
+                                                  context?.isAllowlistBypassed?.(toolCall.id, name) === true,
                                               emitOutput: (chunk: string) =>
                                                   context?.onToolStream?.(toolCall.id, name, chunk),
                                           })

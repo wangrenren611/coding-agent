@@ -1,17 +1,16 @@
 /**
  * Bash Tool
  *
- * 执行 bash 命令的工具，提供：
- * - 语法验证和解析
- * - 安全分析
- * - 命令执行
+ * Executes shell commands with:
+ * - command validation and parsing
+ * - safety policy checks
+ * - command execution
  */
 
 import { BaseTool, ToolContext, ToolResult } from './base';
 import { z } from 'zod';
 import BASH_DESCRIPTION from './bash.description';
 import { execaCommand } from 'execa';
-import { parse } from 'shell-quote';
 import stripAnsi from 'strip-ansi';
 import iconv from 'iconv-lite';
 import { spawn } from 'child_process';
@@ -19,6 +18,8 @@ import { randomUUID } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { tmpdir } from 'os';
+import { evaluateBashPolicy } from '../security/bash-policy';
+import type { BashPolicyMode } from '../security/bash-policy';
 
 const runInBackgroundSchema = z.preprocess((value) => {
     if (typeof value === 'string') {
@@ -34,8 +35,6 @@ const schema = z.object({
     timeout: z.number().int().min(0).max(600000).describe('Command timeout in milliseconds').optional(),
     run_in_background: runInBackgroundSchema.optional().describe('Run command in background'),
 });
-
-type BashPolicyMode = 'guarded' | 'permissive';
 
 interface PolicyDecision {
     allowed: boolean;
@@ -62,149 +61,8 @@ interface BunRuntimeLike {
     ): BunProcessLike;
 }
 
-const DANGEROUS_COMMANDS = new Set([
-    'sudo',
-    'su',
-    'passwd',
-    'visudo',
-    'useradd',
-    'userdel',
-    'groupadd',
-    'groupdel',
-    'shutdown',
-    'reboot',
-    'halt',
-    'poweroff',
-    'mkfs',
-    'fdisk',
-    'diskutil',
-    'mount',
-    'umount',
-    'systemctl',
-    'service',
-    'launchctl',
-]);
-
-const ALLOWED_COMMANDS = new Set([
-    'agent-browser',
-    'ls',
-    'pwd',
-    'cat',
-    'head',
-    'tail',
-    'echo',
-    'printf',
-    'wc',
-    'sort',
-    'uniq',
-    'cut',
-    'awk',
-    'sed',
-    'grep',
-    'egrep',
-    'fgrep',
-    'rg',
-    'find',
-    'stat',
-    'du',
-    'df',
-    'tree',
-    'which',
-    'whereis',
-    'dirname',
-    'basename',
-    'realpath',
-    'readlink',
-    'file',
-    'env',
-    'printenv',
-    'date',
-    'uname',
-    'whoami',
-    'id',
-    'hostname',
-    'ps',
-    'top',
-    'uptime',
-    'git',
-    'npm',
-    'pnpm',
-    'yarn',
-    'bun',
-    'node',
-    'npx',
-    'tsx',
-    'ts-node',
-    'python',
-    'python3',
-    'pip',
-    'pip3',
-    'uv',
-    'poetry',
-    'pytest',
-    'go',
-    'cargo',
-    'rustc',
-    'javac',
-    'java',
-    'mvn',
-    'gradle',
-    'dotnet',
-    'docker',
-    'docker-compose',
-    'kubectl',
-    'helm',
-    'make',
-    'cmake',
-    'ninja',
-    'cp',
-    'mv',
-    'mkdir',
-    'touch',
-    'ln',
-    'rm',
-    'rmdir',
-    'chmod',
-    'chown',
-    // Windows 文件操作命令
-    'del',
-    'rd',
-    'erase',
-    'tar',
-    'zip',
-    'unzip',
-    'gzip',
-    'gunzip',
-    'sh',
-    'bash',
-    'zsh',
-    'true',
-    'false',
-    'test',
-    'cd',
-    'export',
-    'unset',
-    'set',
-    'source',
-]);
-
-const DANGEROUS_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
-    { pattern: /\brm\s+-rf\s+\/(\s|$)/i, reason: 'Refusing destructive root deletion command' },
-    { pattern: /\brm\s+-rf\s+--no-preserve-root\b/i, reason: 'Refusing destructive root deletion command' },
-    { pattern: /:\(\)\s*\{\s*:\|:&\s*\};:/, reason: 'Refusing fork bomb pattern' },
-    { pattern: /\b(curl|wget)[^|\n]*\|\s*(sh|bash|zsh)\b/i, reason: 'Refusing remote script pipe execution' },
-    { pattern: /\b(eval|source)\s+<\s*\((curl|wget)\b/i, reason: 'Refusing remote script evaluation' },
-    { pattern: /\b(dd)\s+[^|\n]*\bof=\/dev\/(sd|disk|nvme|rdisk)/i, reason: 'Refusing raw disk write command' },
-    {
-        pattern: />{1,2}\s*\/(etc|bin|sbin|usr|boot|dev|proc|sys)\b/i,
-        reason: 'Refusing write redirection to protected system path',
-    },
-    { pattern: /\btee\s+\/(etc|bin|sbin|usr|boot|dev|proc|sys)\b/i, reason: 'Refusing write to protected system path' },
-    { pattern: /\b(sh|bash|zsh)\s+-[lc]\b/i, reason: 'Nested shell execution is blocked by policy' },
-];
-
 // =============================================================================
-// BashTool 类
+// BashTool
 // =============================================================================
 
 export default class BashTool extends BaseTool<typeof schema> {
@@ -212,7 +70,7 @@ export default class BashTool extends BaseTool<typeof schema> {
     description = BASH_DESCRIPTION;
     schema = schema;
 
-    /** 命令执行超时时间（毫秒），默认 60 秒 */
+    /** Command timeout in milliseconds, default 60 seconds */
     timeout: number = 60000;
 
     private getPolicyMode(): BashPolicyMode {
@@ -365,83 +223,33 @@ export default class BashTool extends BaseTool<typeof schema> {
         return { pid: child.pid, logPath };
     }
 
-    private extractSegmentCommands(command: string): string[] {
-        const tokens = parse(command);
-        const commands: string[] = [];
-        let expectingCommand = true;
-
-        for (const token of tokens) {
-            if (typeof token === 'object' && token !== null && 'op' in token) {
-                const op = String(token.op || '');
-                if (op === '|' || op === '||' || op === '&&' || op === ';' || op === '&' || op === '\n') {
-                    expectingCommand = true;
-                }
-                continue;
-            }
-
-            if (typeof token !== 'string') {
-                continue;
-            }
-
-            if (!expectingCommand) {
-                continue;
-            }
-
-            // Environment variable assignments are not commands, e.g. FOO=bar cmd
-            if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(token)) {
-                continue;
-            }
-
-            commands.push(token);
-            expectingCommand = false;
-        }
-
-        return commands;
-    }
-
-    private validatePolicy(command: string): PolicyDecision {
+    private validatePolicy(command: string, context?: ToolContext): PolicyDecision {
         const normalized = command.trim();
         if (!normalized) {
             return { allowed: false, reason: 'Command is empty' };
         }
 
-        for (const rule of DANGEROUS_PATTERNS) {
-            if (rule.pattern.test(normalized)) {
-                return { allowed: false, reason: rule.reason };
-            }
+        const decision = evaluateBashPolicy(normalized, {
+            mode: this.getPolicyMode(),
+            allowlistMissEffect: 'deny',
+            allowlistBypassed: context?.allowlistBypassed === true,
+            allowlistMissReason: (cmd) =>
+                `Command "${cmd}" is not in allowed command list (set BASH_TOOL_POLICY=permissive to bypass)`,
+        });
+
+        if (decision.effect === 'allow') {
+            return { allowed: true };
         }
 
-        const commands = this.extractSegmentCommands(normalized);
-        if (commands.length === 0) {
-            return { allowed: false, reason: 'Unable to parse executable command' };
-        }
-
-        for (const cmd of commands) {
-            if (DANGEROUS_COMMANDS.has(cmd)) {
-                return { allowed: false, reason: `Command "${cmd}" is blocked by security policy` };
-            }
-        }
-
-        if (this.getPolicyMode() === 'guarded') {
-            for (const cmd of commands) {
-                if (!ALLOWED_COMMANDS.has(cmd)) {
-                    return {
-                        allowed: false,
-                        reason: `Command "${cmd}" is not in allowed command list (set BASH_TOOL_POLICY=permissive to bypass)`,
-                    };
-                }
-            }
-        }
-
-        return { allowed: true };
+        return { allowed: false, reason: decision.reason };
     }
 
     /**
-     * 执行 bash 命令
+     * Execute a shell command.
      *
-     * 错误分类：
-     * - 业务错误（参数验证、安全检查）→ return { success: false, error: ... }
-     * - 底层异常（执行失败）→ throw 供 Registry 捕获
+     * Error handling:
+     * - Business errors (validation/policy) return { success: false, ... }.
+     * - Runtime failures are wrapped as tool errors for the registry.
      */
     async execute(args: z.infer<typeof this.schema>, _context?: ToolContext): Promise<ToolResult> {
         const { command, timeout, run_in_background } = args;
@@ -454,7 +262,7 @@ export default class BashTool extends BaseTool<typeof schema> {
             });
         }
 
-        const policy = this.validatePolicy(command);
+        const policy = this.validatePolicy(command, _context);
         if (!policy.allowed) {
             return this.result({
                 success: false,

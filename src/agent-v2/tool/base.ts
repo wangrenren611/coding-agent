@@ -35,6 +35,8 @@ export type ToolContext = {
     streamCallback?: (message: AgentMessage) => void;
     /** 工具执行输出回调 */
     emitOutput?: (chunk: string) => void;
+    /** 当前工具调用是否已通过权限确认并允许放宽 allowlist 校验 */
+    allowlistBypassed?: boolean;
     /** 是否处于 Plan 模式（只读） */
     planMode?: boolean;
 };

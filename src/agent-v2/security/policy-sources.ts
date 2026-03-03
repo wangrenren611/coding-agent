@@ -1,146 +1,7 @@
-import { parse } from 'shell-quote';
 import { BLOCKED_TOOL_PATTERNS, READ_ONLY_TOOLS } from '../plan/plan-mode';
 import type { PermissionRule, PermissionRequest } from './permission-engine';
-
-const BASH_DANGEROUS_COMMANDS = new Set([
-    'sudo',
-    'su',
-    'passwd',
-    'visudo',
-    'useradd',
-    'userdel',
-    'groupadd',
-    'groupdel',
-    'shutdown',
-    'reboot',
-    'halt',
-    'poweroff',
-    'mkfs',
-    'fdisk',
-    'diskutil',
-    'mount',
-    'umount',
-    'systemctl',
-    'service',
-    'launchctl',
-]);
-
-const BASH_ALLOWED_COMMANDS = new Set([
-    'agent-browser',
-    'ls',
-    'pwd',
-    'cat',
-    'head',
-    'tail',
-    'echo',
-    'printf',
-    'wc',
-    'sort',
-    'uniq',
-    'cut',
-    'awk',
-    'sed',
-    'grep',
-    'egrep',
-    'fgrep',
-    'rg',
-    'find',
-    'stat',
-    'du',
-    'df',
-    'tree',
-    'which',
-    'whereis',
-    'dirname',
-    'basename',
-    'realpath',
-    'readlink',
-    'file',
-    'env',
-    'printenv',
-    'date',
-    'uname',
-    'whoami',
-    'id',
-    'hostname',
-    'ps',
-    'top',
-    'uptime',
-    'git',
-    'npm',
-    'pnpm',
-    'yarn',
-    'bun',
-    'node',
-    'npx',
-    'tsx',
-    'ts-node',
-    'python',
-    'python3',
-    'pip',
-    'pip3',
-    'uv',
-    'poetry',
-    'pytest',
-    'go',
-    'cargo',
-    'rustc',
-    'javac',
-    'java',
-    'mvn',
-    'gradle',
-    'dotnet',
-    'docker',
-    'docker-compose',
-    'kubectl',
-    'helm',
-    'make',
-    'cmake',
-    'ninja',
-    'cp',
-    'mv',
-    'mkdir',
-    'touch',
-    'ln',
-    'rm',
-    'rmdir',
-    'chmod',
-    'chown',
-    'del',
-    'rd',
-    'erase',
-    'tar',
-    'zip',
-    'unzip',
-    'gzip',
-    'gunzip',
-    'sh',
-    'bash',
-    'zsh',
-    'true',
-    'false',
-    'test',
-    'cd',
-    'export',
-    'unset',
-    'set',
-    'source',
-]);
-
-const BASH_DANGEROUS_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
-    { pattern: /\brm\s+-rf\s+\/(\s|$)/i, reason: 'Refusing destructive root deletion command' },
-    { pattern: /\brm\s+-rf\s+--no-preserve-root\b/i, reason: 'Refusing destructive root deletion command' },
-    { pattern: /:\(\)\s*\{\s*:\|:&\s*\};:/, reason: 'Refusing fork bomb pattern' },
-    { pattern: /\b(curl|wget)[^|\n]*\|\s*(sh|bash|zsh)\b/i, reason: 'Refusing remote script pipe execution' },
-    { pattern: /\b(eval|source)\s+<\s*\((curl|wget)\b/i, reason: 'Refusing remote script evaluation' },
-    { pattern: /\b(dd)\s+[^|\n]*\bof=\/dev\/(sd|disk|nvme|rdisk)/i, reason: 'Refusing raw disk write command' },
-    {
-        pattern: />{1,2}\s*\/(etc|bin|sbin|usr|boot|dev|proc|sys)\b/i,
-        reason: 'Refusing write redirection to protected system path',
-    },
-    { pattern: /\btee\s+\/(etc|bin|sbin|usr|boot|dev|proc|sys)\b/i, reason: 'Refusing write to protected system path' },
-    { pattern: /\b(sh|bash|zsh)\s+-[lc]\b/i, reason: 'Nested shell execution is blocked by policy' },
-];
+import { evaluateBashPolicy } from './bash-policy';
+import type { BashPolicyEffect } from './bash-policy';
 
 function parseToolList(value: string | undefined): string[] {
     if (!value) return [];
@@ -172,83 +33,31 @@ function getBashPolicyMode(): 'guarded' | 'permissive' {
     return (process.env.BASH_TOOL_POLICY || 'guarded').toLowerCase() === 'permissive' ? 'permissive' : 'guarded';
 }
 
-function extractSegmentCommands(command: string): string[] {
-    const tokens = parse(command);
-    const commands: string[] = [];
-    let expectingCommand = true;
-
-    for (const token of tokens) {
-        if (typeof token === 'object' && token !== null && 'op' in token) {
-            const op = String(token.op || '');
-            if (op === '|' || op === '||' || op === '&&' || op === ';' || op === '&' || op === '\n') {
-                expectingCommand = true;
-            }
-            continue;
-        }
-
-        if (typeof token !== 'string') {
-            continue;
-        }
-
-        if (!expectingCommand) {
-            continue;
-        }
-
-        if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(token)) {
-            continue;
-        }
-
-        commands.push(token);
-        expectingCommand = false;
-    }
-
-    return commands;
-}
-
-function evaluateLegacyBashPolicy(request: PermissionRequest): { deny: boolean; reason?: string } {
+function evaluateLegacyBashPolicy(request: PermissionRequest): { effect: BashPolicyEffect; reason?: string } {
     if (getToolName(request) !== 'bash') {
-        return { deny: false };
+        return { effect: 'allow' };
     }
 
     const args = parseToolCallArgs(request);
     if (!args) {
-        return { deny: true, reason: 'Invalid bash arguments payload' };
+        return { effect: 'deny', reason: 'Invalid bash arguments payload' };
     }
 
     const command = typeof args.command === 'string' ? args.command.trim() : '';
     if (!command) {
-        return { deny: false };
+        return { effect: 'allow' };
     }
 
-    for (const rule of BASH_DANGEROUS_PATTERNS) {
-        if (rule.pattern.test(command)) {
-            return { deny: true, reason: rule.reason };
-        }
-    }
+    const decision = evaluateBashPolicy(command, {
+        mode: getBashPolicyMode(),
+        allowlistMissEffect: 'ask',
+        allowlistMissReason: (cmd) => `Command "${cmd}" is not in guarded allowlist and requires explicit approval`,
+    });
 
-    const commands = extractSegmentCommands(command);
-    if (commands.length === 0) {
-        return { deny: true, reason: 'Unable to parse executable command' };
-    }
-
-    for (const cmd of commands) {
-        if (BASH_DANGEROUS_COMMANDS.has(cmd)) {
-            return { deny: true, reason: `Command "${cmd}" is blocked by security policy` };
-        }
-    }
-
-    if (getBashPolicyMode() === 'guarded') {
-        for (const cmd of commands) {
-            if (!BASH_ALLOWED_COMMANDS.has(cmd)) {
-                return {
-                    deny: true,
-                    reason: `Command "${cmd}" is not in allowed command list (set BASH_TOOL_POLICY=permissive to bypass)`,
-                };
-            }
-        }
-    }
-
-    return { deny: false };
+    return {
+        effect: decision.effect,
+        reason: decision.reason,
+    };
 }
 
 export interface DefaultPolicySourceOptions {
@@ -305,10 +114,17 @@ export function createEnvPermissionRules(): PermissionRule[] {
 export function createLegacyBashPermissionRules(): PermissionRule[] {
     return [
         {
+            effect: 'ask',
+            source: 'legacy_bash',
+            tool: 'bash',
+            when: (request) => evaluateLegacyBashPolicy(request).effect === 'ask',
+            reason: (request) => evaluateLegacyBashPolicy(request).reason || 'Bash command requires explicit approval',
+        },
+        {
             effect: 'deny',
             source: 'legacy_bash',
             tool: 'bash',
-            when: (request) => evaluateLegacyBashPolicy(request).deny,
+            when: (request) => evaluateLegacyBashPolicy(request).effect === 'deny',
             reason: (request) =>
                 evaluateLegacyBashPolicy(request).reason || 'Bash command is blocked by legacy policy source',
         },

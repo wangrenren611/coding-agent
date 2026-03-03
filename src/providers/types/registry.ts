@@ -62,6 +62,8 @@ export interface ModelConfig {
     apiKey?: string;
     /** 温度（可选） */
     temperature?: number;
+    /** 默认工具流式输出（可选） */
+    tool_stream?: boolean;
     thinking?: boolean;
     timeout?: number;
 }

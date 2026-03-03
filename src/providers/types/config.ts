@@ -46,4 +46,6 @@ export interface OpenAICompatibleConfig extends BaseProviderConfig {
     chatCompletionsPath?: string;
     /** 是否在流式请求中默认要求返回 usage（默认 true） */
     enableStreamUsage?: boolean;
+    /** 默认是否启用工具流式输出（请求级可被 generate options 覆盖） */
+    tool_stream?: boolean;
 }
