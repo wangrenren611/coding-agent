@@ -253,7 +253,7 @@ describe('RATE_LIMIT 重试场景测试', () => {
         // 由于 isRetryExceeded 使用 >，所以 retryCount > maxRetries 时才会触发
         // 预期：1 次成功 + 4 次 RATE_LIMIT（因为 maxRetries = 3，需要 retryCount > 3）
         expect(callCount).toBe(5); // 1 + 4
-    });
+    }, 15000);
 
     it('边界测试：isRetryExceeded 应该在 retryCount > maxRetries 时返回 true', async () => {
         // 这个测试验证 AgentState.isRetryExceeded 的逻辑

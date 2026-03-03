@@ -421,7 +421,7 @@ function printSubagentReport(buffer: SubagentBuffer) {
 
     // 头部 - 更简洁的设计
     console.log('');
-    console.log(
+    process.stdout.write(
         `${COLORS.muted}┌─ 子任务 #${taskNum}${COLORS.reset} ${color}${buffer.subagentType}${COLORS.reset} ${statusIcon}${COLORS.reset} ${COLORS.muted}${elapsed}${COLORS.reset}`
     );
 

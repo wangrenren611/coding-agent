@@ -484,6 +484,178 @@ describe('Session Compaction', () => {
             expect(tokenInfo.estimatedTotal).toBe(0);
             expect(tokenInfo.shouldCompact).toBe(false);
         });
+
+        it('没有配置 getTools 时 tools token 为 0', async () => {
+            const provider = new MockSummaryProvider();
+            const session = new Session({
+                systemPrompt: 'system',
+                enableCompaction: true,
+                provider,
+                compactionConfig: {
+                    maxTokens: 1000,
+                    maxOutputTokens: 200,
+                    keepMessagesNum: 10,
+                    triggerRatio: 0.8,
+                },
+            });
+
+            const compaction = session.getCompaction();
+            const tokenInfo = compaction!.getTokenInfo(session.getMessages());
+
+            // 没有 getTools 回调，tools token 应该为 0
+            expect(tokenInfo.totalUsed).toBe(tokenInfo.estimatedTotal);
+        });
+
+        it('配置 getTools 后应该计算 tools schema 的 token', async () => {
+            const provider = new MockSummaryProvider();
+            const mockTools = [
+                {
+                    type: 'function' as const,
+                    function: {
+                        name: 'read_file',
+                        description: '读取文件内容',
+                        parameters: {
+                            type: 'object',
+                            properties: {
+                                filePath: { type: 'string', description: '文件路径' },
+                            },
+                            required: ['filePath'],
+                        },
+                    },
+                },
+                {
+                    type: 'function' as const,
+                    function: {
+                        name: 'write_file',
+                        description: '写入文件内容',
+                        parameters: {
+                            type: 'object',
+                            properties: {
+                                filePath: { type: 'string', description: '文件路径' },
+                                content: { type: 'string', description: '文件内容' },
+                            },
+                            required: ['filePath', 'content'],
+                        },
+                    },
+                },
+            ];
+
+            const session = new Session({
+                systemPrompt: 'system',
+                enableCompaction: true,
+                provider,
+                compactionConfig: {
+                    maxTokens: 1000,
+                    maxOutputTokens: 200,
+                    keepMessagesNum: 10,
+                    triggerRatio: 0.8,
+                },
+                getTools: () => mockTools,
+            });
+
+            const compaction = session.getCompaction();
+            const tokenInfo = compaction!.getTokenInfo(session.getMessages());
+
+            // tools schema 应该被计算
+            const toolsJsonLength = JSON.stringify(mockTools).length;
+            // 工具 schema 包含英文和符号，按 0.25 token/字符估算
+            const expectedMinToolsTokens = Math.ceil(toolsJsonLength * 0.25);
+
+            expect(tokenInfo.totalUsed).toBeGreaterThan(expectedMinToolsTokens);
+        });
+
+        it('空 tools 列表时 token 为 0', async () => {
+            const provider = new MockSummaryProvider();
+            const session = new Session({
+                systemPrompt: 'system',
+                enableCompaction: true,
+                provider,
+                compactionConfig: {
+                    maxTokens: 1000,
+                    maxOutputTokens: 200,
+                    keepMessagesNum: 10,
+                    triggerRatio: 0.8,
+                },
+                getTools: () => [],
+            });
+
+            const compaction = session.getCompaction();
+            const tokenInfo = compaction!.getTokenInfo(session.getMessages());
+
+            // 空 tools 列表，tools token 应该为 0
+            expect(tokenInfo.totalUsed).toBe(tokenInfo.estimatedTotal);
+        });
+
+        it('复杂 tools schema 应该正确计算 token', async () => {
+            const provider = new MockSummaryProvider();
+            const complexTools = [
+                {
+                    type: 'function' as const,
+                    function: {
+                        name: 'complex_tool',
+                        description: '这是一个复杂的工具，用于测试 token 计算',
+                        parameters: {
+                            type: 'object',
+                            properties: {
+                                param1: { type: 'string', description: '参数 1 描述' },
+                                param2: { type: 'number', description: '参数 2 描述' },
+                                param3: {
+                                    type: 'array',
+                                    items: { type: 'string' },
+                                    description: '数组参数',
+                                },
+                                nested: {
+                                    type: 'object',
+                                    properties: {
+                                        nestedParam: { type: 'boolean' },
+                                    },
+                                },
+                            },
+                            required: ['param1', 'param2'],
+                        },
+                    },
+                },
+            ];
+
+            const session = new Session({
+                systemPrompt: 'system',
+                enableCompaction: true,
+                provider,
+                compactionConfig: {
+                    maxTokens: 1000,
+                    maxOutputTokens: 200,
+                    keepMessagesNum: 10,
+                    triggerRatio: 0.8,
+                },
+                getTools: () => complexTools,
+            });
+
+            const compaction = session.getCompaction();
+            const tokenInfoWithTools = compaction!.getTokenInfo(session.getMessages());
+
+            // 创建没有 tools 的 session 进行对比
+            const sessionWithoutTools = new Session({
+                systemPrompt: 'system',
+                enableCompaction: true,
+                provider,
+                compactionConfig: {
+                    maxTokens: 1000,
+                    maxOutputTokens: 200,
+                    keepMessagesNum: 10,
+                    triggerRatio: 0.8,
+                },
+            });
+
+            const compactionWithoutTools = sessionWithoutTools.getCompaction();
+            const tokenInfoWithoutTools = compactionWithoutTools!.getTokenInfo(sessionWithoutTools.getMessages());
+
+            // 有 tools 的 token 应该大于没有 tools 的
+            expect(tokenInfoWithTools.totalUsed).toBeGreaterThan(tokenInfoWithoutTools.totalUsed);
+
+            // 差值应该是 tools schema 的 token
+            const diff = tokenInfoWithTools.totalUsed - tokenInfoWithoutTools.totalUsed;
+            expect(diff).toBeGreaterThan(0);
+        });
     });
 
     describe('Token 估算算法', () => {

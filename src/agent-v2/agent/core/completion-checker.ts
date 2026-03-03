@@ -9,6 +9,7 @@ export interface CompletionCheckResult {
     blockedByTasks?: {
         inProgressCount: number;
         pendingCount: number;
+        taskSignature: string;
     };
 }
 
@@ -61,6 +62,11 @@ export async function checkComplete(params: CompletionCheckParams): Promise<Comp
         return { done: true };
     }
 
+    const taskSignature = pendingManagedTasks
+        .slice()
+        .sort((a, b) => a.taskId.localeCompare(b.taskId))
+        .map((task) => `${task.taskId}:${task.status}:${task.updatedAt ?? ''}`)
+        .join('|');
     const inProgressCount = pendingManagedTasks.filter((task) => task.status === 'in_progress').length;
     const pendingCount = pendingManagedTasks.length - inProgressCount;
     return {
@@ -68,6 +74,7 @@ export async function checkComplete(params: CompletionCheckParams): Promise<Comp
         blockedByTasks: {
             inProgressCount,
             pendingCount,
+            taskSignature,
         },
     };
 }
@@ -83,6 +90,24 @@ function checkAssistantComplete(message: Message): boolean {
             }
             case 'tool_calls':
                 return false;
+            case 'stop': {
+                // finish_reason=stop 时，检查是否有实际内容
+                const hasTools = Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
+                if (hasTools) {
+                    return false;
+                }
+                // 只有 reasoning_content 而没有 content 时，不认为已完成
+                const hasOnlyReasoning =
+                    !hasContent(message.content) && message.reasoning_content && hasContent(message.reasoning_content);
+                if (hasOnlyReasoning) {
+                    return false;
+                }
+                // 没有 content 时认为未完成（需要继续生成）
+                if (!hasContent(message.content)) {
+                    return false;
+                }
+                return true;
+            }
         }
 
         if (Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {

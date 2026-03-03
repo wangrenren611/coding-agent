@@ -38,6 +38,11 @@ export interface CompactionConfig {
     triggerRatio?: number;
     /** 日志器（可选，不提供则使用默认日志器） */
     logger?: Logger;
+    /** 获取工具 Schema 的回调（用于计算 tools 定义的 token） */
+    getTools?: () => Array<{
+        type: string;
+        function: { name: string; description: string; parameters: Record<string, unknown> };
+    }>;
 }
 
 export interface TokenInfo {
@@ -100,6 +105,10 @@ export class Compaction {
     private readonly keepMessagesNum: number;
     private readonly llmProvider: LLMProvider;
     private readonly logger: Logger;
+    private readonly getTools?: () => Array<{
+        type: string;
+        function: { name: string; description: string; parameters: Record<string, unknown> };
+    }>;
 
     constructor(config: CompactionConfig) {
         this.maxTokens = config.maxTokens;
@@ -109,6 +118,7 @@ export class Compaction {
         this.keepMessagesNum = config.keepMessagesNum ?? 40;
         this.triggerRatio = config.triggerRatio ?? 0.9;
         this.logger = config.logger ?? getLogger();
+        this.getTools = config.getTools;
     }
 
     /**
@@ -398,26 +408,40 @@ export class Compaction {
         estimatedTotal: number;
         hasReliableUsage: boolean;
     } {
-        // 方法1（优先）：使用最后一条 assistant 消息的 usage.prompt_tokens
-        // usage.prompt_tokens 是当前请求的完整上下文大小，已经包含 system prompt 和所有历史消息
-        // 注意：不能累加，因为每条消息的 prompt_tokens 都是当时完整的上下文大小
-        // const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant' && m.usage?.prompt_tokens);
-        // const latestUsage = lastAssistant?.usage?.prompt_tokens ?? 0;
-
-        // 方法2（备用）：基于内容估算
-        const estimatedTotal = messages.reduce((acc, m) => {
+        // 计算消息内容的 token
+        const messagesEstimatedTotal = messages.reduce((acc, m) => {
             return acc + this.estimateTokens(JSON.stringify(m)) + 4;
         }, 0);
 
-        // 判断 usage 是否可靠
-        // 压缩后产生的 summary 消息没有 usage，此时应该使用估算
-        //  const hasSummary = messages.some((m) => m.type === 'summary');
+        // 计算 tools schema 的 token
+        const toolsEstimatedTotal = this.calculateToolsTokenCount();
+
+        // 总计：消息 + tools 定义
+        const estimatedTotal = messagesEstimatedTotal + toolsEstimatedTotal;
 
         return {
             totalUsed: estimatedTotal,
             estimatedTotal,
             hasReliableUsage: false,
         };
+    }
+
+    /**
+     * 计算 Tools Schema 的 Token 使用量
+     */
+    private calculateToolsTokenCount(): number {
+        if (!this.getTools) {
+            return 0;
+        }
+
+        const tools = this.getTools();
+        if (!tools || tools.length === 0) {
+            return 0;
+        }
+
+        // 序列化所有 tools schema 并估算 token
+        const toolsText = JSON.stringify(tools);
+        return this.estimateTokens(toolsText);
     }
 
     /**

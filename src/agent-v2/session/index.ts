@@ -13,11 +13,16 @@ export interface SessionConfig {
     /** 是否启用自动压缩 */
     enableCompaction?: boolean;
     /** 压缩配置 */
-    compactionConfig?: Partial<Omit<CompactionConfig, 'llmProvider'>>;
+    compactionConfig?: Partial<Omit<CompactionConfig, 'llmProvider' | 'getTools'>>;
     /** LLM Provider（启用压缩时需要） */
     provider?: LLMProvider;
     /** 日志器（可选，不提供则使用默认日志器） */
     logger?: Logger;
+    /** 获取工具 Schema 的回调（用于计算 tools 定义的 token） */
+    getTools?: () => Array<{
+        type: string;
+        function: { name: string; description: string; parameters: Record<string, unknown> };
+    }>;
 }
 
 export type { Message, SessionOptions } from './types';
@@ -62,6 +67,7 @@ export class Session {
                 keepMessagesNum: options.compactionConfig?.keepMessagesNum ?? 40,
                 triggerRatio: options.compactionConfig?.triggerRatio ?? 0.9,
                 logger: this.logger,
+                getTools: options.getTools,
             });
         }
 
