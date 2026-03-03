@@ -638,6 +638,7 @@ export const { Provider: AgentProvider, use: useAgent } = createSimpleContext<Ag
                         handleStreamMessage(msg, assistantMessage.id);
                     },
                 });
+                await agentRef.current.initialize();
 
                 // 监听重试事件
                 // agentRef.current.on(EventType.TASK_RETRY, (data) => {

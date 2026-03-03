@@ -6,6 +6,14 @@
 
 import { EventEmitter } from 'events';
 import { spawn, ChildProcess } from 'child_process';
+import {
+    ConnectionState,
+    DEFAULT_REQUEST_TIMEOUT,
+    MCP_CLIENT_CAPABILITIES,
+    MCP_CLIENT_INFO,
+    MCP_PROTOCOL_VERSION,
+    McpClientEvent,
+} from './types';
 import type {
     JsonRpcRequest,
     JsonRpcResponse,
@@ -17,9 +25,7 @@ import type {
     ToolCallResponse,
     McpServerConfig,
     McpTool,
-    ConnectionState,
 } from './types';
-import { McpClientEvent } from './types';
 import { getLogger, Logger } from '../logger';
 
 /**
@@ -44,7 +50,7 @@ export class McpClient extends EventEmitter {
     private process: ChildProcess | null = null;
 
     /** 连接状态 */
-    private _state: ConnectionState = 'disconnected' as ConnectionState;
+    private _state: ConnectionState = ConnectionState.DISCONNECTED;
 
     /** 请求 ID 计数器 */
     private requestId = 0;
@@ -68,7 +74,7 @@ export class McpClient extends EventEmitter {
         super();
         this.config = config;
         this.logger = getLogger();
-        this.requestTimeout = config.timeout ?? 120000; // DEFAULT_REQUEST_TIMEOUT
+        this.requestTimeout = config.timeout ?? DEFAULT_REQUEST_TIMEOUT;
     }
 
     /**
@@ -89,23 +95,23 @@ export class McpClient extends EventEmitter {
      * 建立连接
      */
     async connect(): Promise<void> {
-        if (this._state !== ('disconnected' as ConnectionState)) {
+        if (this._state !== ConnectionState.DISCONNECTED) {
             throw new Error(`Cannot connect: current state is ${this._state}`);
         }
 
-        this.setState('connecting' as ConnectionState);
+        this.setState(ConnectionState.CONNECTING);
 
         try {
             await this.spawnProcess();
-            this.setState('connected' as ConnectionState);
+            this.setState(ConnectionState.CONNECTED);
 
             await this.initialize();
-            this.setState('ready' as ConnectionState);
+            this.setState(ConnectionState.READY);
 
             // 获取工具列表
             await this.refreshTools();
         } catch (error) {
-            this.setState('error' as ConnectionState);
+            this.setState(ConnectionState.ERROR);
             throw error;
         }
     }
@@ -132,7 +138,10 @@ export class McpClient extends EventEmitter {
         this.rejectAllPendingRequests(new Error('Connection closed'));
         this.buffer = '';
         this._tools = [];
-        this.setState('disconnected' as ConnectionState);
+        this.setState(ConnectionState.DISCONNECTED);
+
+        // 移除所有事件监听器，确保进程可以退出
+        this.removeAllListeners();
     }
 
     /**
@@ -230,20 +239,12 @@ export class McpClient extends EventEmitter {
      * 执行初始化握手
      */
     private async initialize(): Promise<InitializeResult> {
-        this.setState('initializing' as ConnectionState);
+        this.setState(ConnectionState.INITIALIZING);
 
         const params: InitializeParams = {
-            protocolVersion: '2024-11-05', // MCP_PROTOCOL_VERSION
-            capabilities: {
-                roots: {
-                    listChanged: true,
-                },
-                sampling: false,
-            },
-            clientInfo: {
-                name: 'coding-agent',
-                version: '1.0.0',
-            },
+            protocolVersion: MCP_PROTOCOL_VERSION,
+            capabilities: MCP_CLIENT_CAPABILITIES,
+            clientInfo: MCP_CLIENT_INFO,
         };
 
         const response = await this.sendRequest<InitializeResult>('initialize', params);
@@ -430,7 +431,7 @@ export class McpClient extends EventEmitter {
 
         // 如果是进程错误，设置错误状态
         if (context === 'process') {
-            this.setState('error' as ConnectionState);
+            this.setState(ConnectionState.ERROR);
             this.rejectAllPendingRequests(error);
         }
     }
@@ -445,7 +446,7 @@ export class McpClient extends EventEmitter {
 
         // 清理状态
         this.process = null;
-        this.setState('disconnected' as ConnectionState);
+        this.setState(ConnectionState.DISCONNECTED);
         this.rejectAllPendingRequests(new Error('MCP server process closed'));
     }
 

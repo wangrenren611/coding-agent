@@ -31,7 +31,6 @@ import { EventBus, EventType } from '../eventbus';
 import { Message } from '../session/types';
 import { createDefaultToolRegistry, createPlanModeToolRegistry } from '../tool';
 import { createLogger, getLogger, Logger, createEventLoggerMiddleware } from '../logger';
-import { initializeMcp, disconnectMcp } from '../mcp';
 
 import {
     AgentAbortedError,
@@ -93,7 +92,6 @@ export class Agent {
     private readonly logger: Logger;
     private readonly ownsLogger: boolean;
     private unsubscribeEventLogger?: () => void;
-    private mcpInitialized = false;
 
     // 配置
     private readonly stream: boolean;
@@ -111,6 +109,7 @@ export class Agent {
     private readonly emitter: AgentEmitter;
     private readonly inputValidator: InputValidator;
     private readonly errorClassifier: ErrorClassifier;
+    private initializePromise?: Promise<void>;
 
     constructor(config: AgentOptions) {
         this.provider = this.validateAndGetProvider(config);
@@ -119,6 +118,7 @@ export class Agent {
         this.thinking = config.thinking;
         this.requestTimeoutMs = this.normalizeMs(config.requestTimeout);
         this.idleTimeoutMs = this.normalizeMs(config.idleTimeout) ?? AGENT_DEFAULTS.IDLE_TIMEOUT_MS;
+        const mcpManager = config.mcpManager;
 
         this.timeProvider = config.timeProvider ?? new DefaultTimeProvider();
         this.eventBus = new EventBus();
@@ -171,19 +171,6 @@ export class Agent {
                 this.provider
             );
         }
-
-        // 初始化 MCP（如果配置了 MCP 服务器）
-        if (config.enableMcp !== false) {
-            this.logger.info('[Agent] Initializing MCP...');
-            this.initializeMcp().catch((error) => {
-                this.logger.warn('[Agent] MCP initialization failed', {
-                    error: error instanceof Error ? error.message : String(error),
-                });
-            });
-        } else {
-            this.logger.info('[Agent] MCP is disabled');
-        }
-
         this.session = new Session({
             systemPrompt,
             memoryManager: config.memoryManager,
@@ -195,6 +182,7 @@ export class Agent {
             getTools: () => this.toolRegistry.toLLMTools(),
         });
         this.configureToolEventBridge();
+        mcpManager?.setToolRegistry(this.toolRegistry);
 
         this.agentState = new AgentState({
             maxLoops: config.maxLoops ?? AGENT_DEFAULTS.LOOP_MAX,
@@ -253,50 +241,31 @@ export class Agent {
                 this.emitter.emitCodePatch(filePath, diff, messageId, language),
             onMessageAdd: (msg) => this.session.addMessage(msg),
         });
-    }
 
-    // ==================== 私有方法：MCP 初始化 ====================
-
-    /**
-     * 初始化 MCP，将 MCP 工具注册到 ToolRegistry
-     */
-    private async initializeMcp(): Promise<void> {
-        try {
-            const manager = await initializeMcp(this.toolRegistry);
-            this.mcpInitialized = true;
-
-            // 获取连接信息并记录
-            const connectionInfo = manager.getConnectionInfo();
-            const totalTools = manager.getTotalToolsCount();
-            const connectedServers = manager.getConnectedServers();
-
-            this.logger.info('[Agent] MCP initialized', {
-                connectedServers,
-                totalTools,
-                connections: connectionInfo.map((info) => ({
-                    serverName: info.serverName,
-                    state: info.state,
-                    toolsCount: info.toolsCount,
-                })),
-            });
-        } catch (error) {
-            // MCP 初始化失败不影响 Agent 启动，仅记录警告
-            this.logger.warn('[Agent] MCP initialization failed', {
-                error: error instanceof Error ? error.message : String(error),
-            });
-        }
+        // 构造时启动初始化流程；execute 阶段仅等待初始化完成。
+        this.startInitialization();
     }
 
     // ==================== 公共 API ====================
 
+    async initialize(): Promise<void> {
+        this.startInitialization();
+        if (this.initializePromise) {
+            await this.initializePromise;
+        }
+    }
+
     async execute(query: MessageContent, options?: LLMGenerateOptions): Promise<Message> {
         this.validateInput(query);
+        if (!this.initializePromise) {
+            throw new AgentConfigurationError('Agent initialization is unavailable.');
+        }
+        await this.initializePromise;
         this.ensureIdle();
         this.agentState.startTask();
         this.pendingRetryReason = null;
 
         try {
-            await this.session.initialize();
             this.eventBus.emit(EventType.TASK_START, {
                 timestamp: this.timeProvider.getCurrentTime(),
                 query: contentToText(query),
@@ -355,24 +324,13 @@ export class Agent {
      * 关闭 Agent，释放资源
      */
     async close(): Promise<void> {
-        // 断开 MCP 连接
-        if (this.mcpInitialized) {
-            try {
-                await disconnectMcp();
-                this.mcpInitialized = false;
-                this.logger.info('[Agent] MCP disconnected');
-            } catch (error) {
-                this.logger.warn('[Agent] MCP disconnect failed', {
-                    error: error instanceof Error ? error.message : String(error),
-                });
-            }
-        }
-
         // 取消事件日志订阅
         if (this.unsubscribeEventLogger) {
             this.unsubscribeEventLogger();
             this.unsubscribeEventLogger = undefined;
         }
+        // 清理事件总线监听器
+        this.eventBus.clear();
         // 关闭日志器（清理定时器等资源）
         if (this.ownsLogger) {
             await this.logger.close();
@@ -489,6 +447,18 @@ export class Agent {
             return undefined;
         }
         return value;
+    }
+
+    private startInitialization(): void {
+        if (this.initializePromise) {
+            return;
+        }
+
+        this.initializePromise = (async () => {
+            await this.session.initialize();
+        })();
+        // 防止调用方未等待 initialize 时产生未处理拒绝；真实错误会在后续 await 时抛出。
+        void this.initializePromise.catch(() => {});
     }
 
     // ==================== 内部方法：主循环 ====================

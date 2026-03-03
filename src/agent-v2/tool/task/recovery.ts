@@ -157,6 +157,7 @@ export async function recoverTask(task: InterruptedTask, options: RecoveryOption
             memoryManager,
             sessionId,
         });
+        await subagent.initialize();
 
         // 执行任务
         const result = await subagent.executeWithResult(task.prompt);

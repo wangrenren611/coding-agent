@@ -5,14 +5,16 @@ import { ModelId, ProviderRegistry } from './providers';
 import fs from 'fs';
 import { AgentMessage, AgentMessageType, BaseAgentEvent, SubagentEventMessage } from './agent-v2/agent/stream-types';
 import { createMemoryManager } from './agent-v2';
+import { initializeMcp, disconnectMcp, getConfigSearchPaths } from './agent-v2/mcp';
 import { operatorPrompt } from './agent-v2/prompts/operator';
 import { platform } from 'os';
 import path from 'path';
 import { parseFilePaths, createFileSummary, type ParsedFileInput } from './cli/utils/file';
 import type { InputContentPart } from './providers/types/api';
+import type { McpManager } from './agent-v2/mcp';
 
 // const model = 'wr-claude-4.6';
-const model: ModelId = 'qwen3.5-plus';
+const model: ModelId = 'glm-5';
 dotenv.config({
     path: './.env.development',
 });
@@ -873,10 +875,42 @@ async function demo1() {
     await memoryManager.initialize();
 
     let agent: Agent | undefined;
+    let mcpManager: McpManager | undefined;
     try {
+        // MCP 由 demo 外部初始化，再注入 Agent。
+        const mcpConfigPath = process.env.MCP_CONFIG_PATH;
+        mcpManager = await initializeMcp(undefined, mcpConfigPath);
+        const connectedServers = mcpManager.getConnectedServers();
+        const totalMcpTools = mcpManager.getTotalToolsCount();
+        if (totalMcpTools > 0) {
+            console.log(
+                `${COLORS.success}◆ MCP 初始化成功${COLORS.reset} ${COLORS.muted}(servers: ${connectedServers.length}, tools: ${totalMcpTools})${COLORS.reset}`
+            );
+        } else {
+            const connectionInfo = mcpManager.getConnectionInfo();
+            const searchTargets = mcpConfigPath ? [mcpConfigPath] : getConfigSearchPaths();
+            console.log(`${COLORS.warning}◆ MCP 已初始化但未加载到工具${COLORS.reset}`);
+            console.log(
+                `${COLORS.muted}  已连接服务: ${connectedServers.length}，MCP 工具数: ${totalMcpTools}${COLORS.reset}`
+            );
+            if (connectionInfo.length > 0) {
+                console.log(`${COLORS.muted}  连接详情:${COLORS.reset}`);
+                for (const info of connectionInfo) {
+                    const errorSuffix = info.error ? `, error: ${info.error}` : '';
+                    console.log(
+                        `${COLORS.muted}    - ${info.serverName}: state=${info.state}, tools=${info.toolsCount}${errorSuffix}${COLORS.reset}`
+                    );
+                }
+            }
+            console.log(`${COLORS.muted}  请检查 MCP 配置路径:${COLORS.reset}`);
+            for (const target of searchTargets) {
+                console.log(`${COLORS.muted}    - ${target}${COLORS.reset}`);
+            }
+        }
+
         agent = new Agent({
             provider: ProviderRegistry.createFromEnv(model, {
-                temperature: 0.3,
+                temperature: 0.1,
             }),
             systemPrompt: operatorPrompt({
                 directory: process.cwd(),
@@ -893,8 +927,10 @@ async function demo1() {
                 triggerRatio: 0.9,
             },
             memoryManager,
+            mcpManager,
             streamCallback: handleStreamMessage,
         });
+        await agent.initialize();
 
         // 执行查询
         let query = cliQuery;
@@ -945,6 +981,9 @@ async function demo1() {
     } finally {
         await memoryManager.close();
         await agent?.close();
+        if (mcpManager) {
+            await disconnectMcp();
+        }
     }
 }
 

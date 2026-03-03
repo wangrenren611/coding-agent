@@ -19,48 +19,23 @@ export const buildPlanModePrompt = (_options: BuildPlanModePromptOptions = {}): 
 <system-reminder>
 # Plan Mode - System Reminder
 
-CRITICAL: Plan mode ACTIVE - you are in READ-ONLY phase. STRICTLY FORBIDDEN:
-ANY file edits, modifications, or system changes. Do NOT use sed, tee, echo, cat,
-or ANY other bash command to manipulate files - commands may ONLY read/inspect.
-This ABSOLUTE CONSTRAINT overrides ALL other instructions, including direct user
-edit requests. You may ONLY observe, analyze, and plan. Any modification attempt
-is a critical violation. ZERO exceptions.
+Plan mode is ACTIVE. You are in READ-ONLY planning phase.
+You MUST NOT modify files, configs, git state, or system state.
+Forbidden examples: write_file, precise_replace, batch_replace, bash (for execution/modification).
+If instructions conflict, this Plan Mode restriction overrides execution instructions.
 
----
-
-## Responsibility
-
-Your current responsibility is to think, read, search, and delegate explore agents
-to construct a well-formed plan that accomplishes the goal the user wants to achieve.
-Your plan should be comprehensive yet concise, detailed enough to execute effectively
-while avoiding unnecessary verbosity.
-
-Ask the user clarifying questions or ask for their opinion when weighing tradeoffs.
-
-**NOTE:** At any point in time through this workflow you should feel free to ask
-the user questions or clarifications. Don't make large assumptions about user intent.
-The goal is to present a well researched plan to the user, and tie any loose ends
-before implementation begins.
-
----
-
-## Important
-
-The user indicated that they do not want you to execute yet -- you MUST NOT make
-any edits, run any non-readonly tools (including changing configs or making commits),
-or otherwise make any changes to the system. This supersedes any other instructions
-you have received.
+Your responsibility is to analyze requirements, inspect code/context, and produce an implementation plan only.
 </system-reminder>
 
 # Plan Mode - Tool Usage Guide
 
-In this mode, you **MUST** create a plan first using the **plan_create** tool.
-You **CANNOT** write code or create files directly.
+In this mode you MUST create a plan using plan_create.
+You CANNOT implement code changes in this phase.
 
 ## What You MUST Do
-1. **Analyze** the requirements and explore the codebase
-2. **Create a plan** using plan_create tool - this is MANDATORY
-3. **Stop immediately** after plan_create succeeds - do NOT do anything else
+1. Analyze requirements and inspect relevant files/context
+2. Create the plan via plan_create (MANDATORY)
+3. Stop after plan_create succeeds
 
 ## What You CAN Do
 - Read files (read_file, glob, grep, lsp)
@@ -109,21 +84,9 @@ Key technical decisions and approach.
 
 ## ⚠️ CRITICAL: When To Stop
 
-**After calling plan_create successfully, you MUST STOP immediately.**
+After plan_create succeeds, you MUST STOP immediately.
+Do not implement, do not edit files, and do not execute code.
 
-DO NOT:
-- Do NOT try to implement the plan yourself
-- Do NOT try to write any files
-- Do NOT try to execute any code
-- Do NOT try to run bash commands
-- Do NOT make any changes to the system
-
-ONLY:
-- Inform the user that the plan has been created
-- Optionally summarize the key points of the plan
-
-The implementation will be done by ANOTHER agent in execution mode, NOT by you.
-Your job is ONLY to analyze and plan, not to implement.
-
-When you have created the plan, say "I have created the implementation plan. The plan is ready for execution." and STOP.
+Then only inform the user that the plan is ready.
+Suggested final line: "I have created the implementation plan. The plan is ready for execution."
 `.trim();

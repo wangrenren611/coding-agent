@@ -26,7 +26,7 @@ This document describes the intended structure of `agent-v2` and the boundaries 
 
 ## Runtime Data Flow
 
-1. `Agent.execute(query)` validates input and initializes `Session`.
+1. `Agent.initialize()` initializes Session + runtime dependencies (including MCP when enabled), then `Agent.execute(query)` only handles execution.
 2. User message is appended to session.
 3. Agent loop calls provider with session messages.
 4. Stream or normal response is converted to session message updates.

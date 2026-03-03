@@ -24,6 +24,8 @@
     "bench:agent:adapter": "tsx test-agent/agent-adapter.ts",
     "bench:agent:ts-bench": "tsx test-agent/run-ts-bench.ts",
     "bench:multi-swe": "tsx test-agent/multi-swe-bench-adapter.ts",
+    "bench:prompt": "tsx src/agent-v2/prompts/benchmark.ts",
+    "bench:prompt:ab": "tsx src/agent-v2/prompts/benchmark-ab.ts",
     "batch:test": "tsx test-agent/batch-test-direct.ts",
     "batch:test:skip-agent": "tsx test-agent/batch-test-direct.ts --skip-agent",
     "lint": "eslint .",
