@@ -162,10 +162,7 @@ export class PermissionEngine {
     private createTicket(request: PermissionRequest, reason: string): PermissionTicket {
         const toolName = getToolName(request.toolCall);
         const args = normalizeArguments(request.toolCall.function?.arguments || '');
-        const fingerprint = createHash('sha256')
-            .update(`${toolName}:${args}`)
-            .digest('hex')
-            .slice(0, 16);
+        const fingerprint = createHash('sha256').update(`${toolName}:${args}`).digest('hex').slice(0, 16);
 
         return {
             id: randomUUID(),

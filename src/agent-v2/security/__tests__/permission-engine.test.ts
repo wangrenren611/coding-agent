@@ -74,8 +74,12 @@ describe('PermissionEngine', () => {
             rules: [{ effect: 'ask', tool: 'write_file', source: 'test', reason: 'manual approval' }],
         });
 
-        const decisionA = engine.evaluate(createRequest('write_file', { filePath: 'a.txt', content: 'x', mode: 0o644 }));
-        const decisionB = engine.evaluate(createRequest('write_file', { mode: 0o644, content: 'x', filePath: 'a.txt' }));
+        const decisionA = engine.evaluate(
+            createRequest('write_file', { filePath: 'a.txt', content: 'x', mode: 0o644 })
+        );
+        const decisionB = engine.evaluate(
+            createRequest('write_file', { mode: 0o644, content: 'x', filePath: 'a.txt' })
+        );
 
         expect(decisionA.effect).toBe('ask');
         expect(decisionB.effect).toBe('ask');

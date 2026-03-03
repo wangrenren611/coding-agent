@@ -32,6 +32,7 @@ import { Message } from '../session/types';
 import { createDefaultToolRegistry, createPlanModeToolRegistry } from '../tool';
 import { createLogger, getLogger, Logger, createEventLoggerMiddleware } from '../logger';
 import { createDefaultPermissionEngine } from '../security';
+import { getSubtaskNotifierRevision, waitForSubtaskChange } from '../tool/task/subtask-notifier';
 
 import {
     AgentError,
@@ -84,8 +85,8 @@ const AGENT_DEFAULTS = {
     BUFFER_SIZE: 100000,
     /** 默认空闲超时（毫秒）- 3 分钟，用于流式请求 */
     IDLE_TIMEOUT_MS: 3 * 60 * 1000,
-    /** 后台子任务轮询间隔（毫秒） */
-    SUBTASK_POLL_MS: 1000,
+    /** 后台子任务等待兜底轮询间隔（毫秒） */
+    SUBTASK_FALLBACK_POLL_MS: 3000,
 } as const;
 
 // ==================== Agent 类 ====================
@@ -490,6 +491,7 @@ export class Agent {
         let pendingTaskReminderSent = false;
         let lastBlockedTaskSignature: string | null = null;
         let lastBlockedSubtaskSignature: string | null = null;
+        let subtaskNotifierRevision = getSubtaskNotifierRevision(this.session.getSessionId());
 
         while (true) {
             if (this.agentState.isAborted()) {
@@ -547,7 +549,16 @@ export class Agent {
                     );
                     lastBlockedSubtaskSignature = currentSubtaskSignature;
                 }
-                await this.sleepWithAbort(AGENT_DEFAULTS.SUBTASK_POLL_MS);
+                const waitResult = await waitForSubtaskChange({
+                    parentSessionId: this.session.getSessionId(),
+                    sinceRevision: subtaskNotifierRevision,
+                    timeoutMs: AGENT_DEFAULTS.SUBTASK_FALLBACK_POLL_MS,
+                    signal: this.agentState.abortController?.signal,
+                });
+                subtaskNotifierRevision = waitResult.revision;
+                if (waitResult.aborted || this.agentState.isAborted()) {
+                    break;
+                }
                 continue;
             } else {
                 pendingTaskReminderSent = false;

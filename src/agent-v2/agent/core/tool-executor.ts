@@ -214,7 +214,9 @@ export class ToolExecutor {
 
         if (deniedDecisions.length > 1) {
             const details = deniedDecisions
-                .map((item) => `Tool "${item.toolName}": ${item.reason}${item.source ? ` [source=${item.source}]` : ''}`)
+                .map(
+                    (item) => `Tool "${item.toolName}": ${item.reason}${item.source ? ` [source=${item.source}]` : ''}`
+                )
                 .join(' | ');
             throw new LLMResponseInvalidError(`PERMISSION_DENIED: ${details}`);
         }
