@@ -70,6 +70,13 @@ export default class BashTool extends BaseTool<typeof schema> {
     description = BASH_DESCRIPTION;
     schema = schema;
 
+    /**
+     * 公开 sanitizeOutput 方法用于测试
+     */
+    public sanitizeOutputForTest(output: string): string {
+        return this.sanitizeOutput(output);
+    }
+
     /** Command timeout in milliseconds, default 60 seconds */
     timeout: number = 60000;
 
@@ -87,8 +94,85 @@ export default class BashTool extends BaseTool<typeof schema> {
     }
 
     private decodeOutputChunk(chunk: Buffer): string {
-        const decoded = process.platform === 'win32' ? iconv.decode(chunk, 'gbk') : iconv.decode(chunk, 'utf8');
+        // Windows 上使用 UTF-8（代码页 65001）以正确处理 Unicode 字符
+        const encoding = process.platform === 'win32' ? 'utf8' : 'utf8';
+        const decoded = iconv.decode(chunk, encoding);
         return stripAnsi(decoded || '');
+    }
+
+    /**
+     * 获取用于执行命令的环境变量
+     * 在 Windows 上设置代码页为 UTF-8 (65001) 以正确处理 Unicode 字符
+     */
+    private getExecutionEnv(): NodeJS.ProcessEnv {
+        const env = { ...process.env };
+
+        if (process.platform === 'win32') {
+            // 设置代码页为 UTF-8
+            env['CHCP'] = '65001';
+            // 禁用 ANSI 转义序列解析，避免与 iconv 冲突
+            env['ANSICON'] = '';
+            env['ConEmuANSI'] = 'OFF';
+            env['TERM'] = 'dumb';
+        }
+
+        return env;
+    }
+
+    /**
+     * 清理输出中的乱码字符
+     *
+     * Windows 环境下执行命令时，控制台输出可能包含无法正确解码的字符
+     * 这些字符会被转换为乱码（如 "閴侊拷" 代替 "✓"）
+     * 此函数清理这些乱码字符，确保输出是有效的 UTF-8 文本
+     */
+    private sanitizeOutput(output: string): string {
+        if (!output) return output;
+
+        // 1. 移除 Unicode 替换字符
+        let sanitized = output.replace(/\uFFFD/g, '');
+
+        // 2. 移除常见的 Windows 控制台乱码模式
+        // 这些模式是 GBK 解码失败产生的
+        // 匹配连续的乱码字符（通常是 3 字节的 UTF-8 字符被错误解读）
+        sanitized = sanitized.replace(/[\u0080-\uFFFF]{2,}/g, (match) => {
+            // 检查是否全是乱码字符（高位为 8x 或 9x）
+            const isGibberish = [...match].every((char) => char.charCodeAt(0) >= 0x80 && !this.isValidUtf8Char(char));
+            return isGibberish ? '' : match;
+        });
+
+        // 3. 移除行首的行号标记（如 "[2m" 等残留的 ANSI 代码）
+        sanitized = sanitized.replace(/^\[[\d;]*m/gm, '');
+
+        // 4. 规范化空白字符
+        sanitized = sanitized.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+        // 5. 移除空行
+        sanitized = sanitized.replace(/\n{3,}/g, '\n\n');
+
+        return sanitized.trim();
+    }
+
+    /**
+     * 检查字符是否是有效的 UTF-8 字符
+     */
+    private isValidUtf8Char(char: string): boolean {
+        const code = char.charCodeAt(0);
+
+        // ASCII 字符是有效的
+        if (code < 0x80) return true;
+
+        // 常见的中文 Unicode 范围
+        if (code >= 0x4e00 && code <= 0x9fff) return true; // CJK 统一表意文字
+        if (code >= 0x3400 && code <= 0x4dbf) return true; // CJK 统一表意文字扩展 A
+        if (code >= 0x20000 && code <= 0x2a6df) return true; // CJK 统一表意文字扩展 B-F
+
+        // 常见符号（✓, ✗, →, ← 等）
+        if (code >= 0x2700 && code <= 0x27bf) return true; // 装饰符号
+        if (code >= 0x2190 && code <= 0x21ff) return true; // 箭头符号
+        if (code >= 0x2600 && code <= 0x26ff) return true; // 符号
+
+        return false;
     }
 
     private async runWithNode(
@@ -104,6 +188,7 @@ export default class BashTool extends BaseTool<typeof schema> {
             windowsHide: true,
             encoding: 'buffer',
             timeout: timeoutMs,
+            env: this.getExecutionEnv(),
         });
 
         let streamed = false;
@@ -152,7 +237,7 @@ export default class BashTool extends BaseTool<typeof schema> {
 
         const child = bun.spawn(shellCommand, {
             cwd: process.cwd(),
-            env: process.env,
+            env: this.getExecutionEnv(),
             stdin: 'ignore',
             stdout: 'pipe',
             stderr: 'pipe',
@@ -300,10 +385,13 @@ export default class BashTool extends BaseTool<typeof schema> {
                 ? await this.runWithBun(command, timeoutMs)
                 : await this.runWithNode(command, timeoutMs, (chunk) => _context?.emitOutput?.(chunk));
 
-            const rawStr =
-                process.platform === 'win32' ? iconv.decode(result.all, 'gbk') : iconv.decode(result.all, 'utf8');
+            // 现在使用 UTF-8 解码，因为已经设置了 CHCP=65001
+            const rawStr = iconv.decode(result.all, 'utf8');
 
             let finalOutput = stripAnsi(rawStr || '');
+
+            // 清理乱码字符，确保输出是有效的 UTF-8 文本
+            finalOutput = this.sanitizeOutput(finalOutput);
 
             const isTruncated = finalOutput.length > 10000;
 

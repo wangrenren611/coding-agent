@@ -127,4 +127,63 @@ describe('BashTool', () => {
         expect(result.success).toBe(false);
         expect(String(result.output || '')).not.toContain('COMMAND_BLOCKED_BY_POLICY');
     });
+
+    describe('sanitizeOutput', () => {
+        it('should remove replacement characters', () => {
+            const tool = new BashTool();
+            const input = 'Hello\uFFFDWorld';
+            const output = tool.sanitizeOutputForTest(input);
+            expect(output).not.toContain('\uFFFD');
+        });
+
+        it('should remove Unicode replacement characters', () => {
+            const tool = new BashTool();
+            // GBK 解码失败时会产生 Unicode 替换字符
+            const input = 'Test passed\uFFFD\uFFFDHello';
+            const output = tool.sanitizeOutputForTest(input);
+            expect(output).not.toContain('\uFFFD');
+        });
+
+        it('should preserve valid Chinese and symbols', () => {
+            const tool = new BashTool();
+            const input = '测试通过: ✓ Hello 世界';
+            const output = tool.sanitizeOutputForTest(input);
+            expect(output).toContain('测试通过');
+            expect(output).toContain('✓');
+            expect(output).toContain('世界');
+        });
+
+        it('should preserve valid Chinese characters', () => {
+            const tool = new BashTool();
+            const input = '测试通过: ✓ Hello';
+            const output = tool.sanitizeOutputForTest(input);
+            expect(output).toContain('测试通过');
+            expect(output).toContain('✓');
+        });
+
+        it('should preserve valid symbols', () => {
+            const tool = new BashTool();
+            const input = '✓ passed ✗ failed → success ← back';
+            const output = tool.sanitizeOutputForTest(input);
+            expect(output).toContain('✓');
+            expect(output).toContain('✗');
+            expect(output).toContain('→');
+            expect(output).toContain('←');
+        });
+
+        it('should normalize line endings', () => {
+            const tool = new BashTool();
+            const input = 'Line1\r\nLine2\rLine3\n\n\nLine4';
+            const output = tool.sanitizeOutputForTest(input);
+            expect(output).toContain('Line1\nLine2\nLine3\n\nLine4');
+        });
+
+        it('should remove excessive blank lines', () => {
+            const tool = new BashTool();
+            const input = 'Line1\n\n\n\n\nLine2';
+            const output = tool.sanitizeOutputForTest(input);
+            expect(output).toContain('Line1\n\nLine2');
+            expect(output).not.toContain('\n\n\n');
+        });
+    });
 });

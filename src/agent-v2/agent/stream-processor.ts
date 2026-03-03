@@ -149,6 +149,13 @@ export class StreamProcessor {
     private processedChars = 0;
     private readonly logger: Logger;
 
+    /**
+     * 公开 appendToBuffer 方法用于测试
+     */
+    public appendToBufferForTest(type: 'reasoning' | 'content', content: string): boolean {
+        return this.appendToBuffer(type, content);
+    }
+
     constructor(options: StreamProcessorOptions) {
         this.options = options;
         this.maxBufferSize = options.maxBufferSize;
@@ -501,10 +508,14 @@ export class StreamProcessor {
 
     /**
      * 追加内容到缓冲区
+     *
+     * 注意：maxBufferSize 以字节为单位，需要使用 Buffer.byteLength 计算
+     * 而非字符串 length（字符数），否则中文/emoji 等多字节字符会导致缓冲区超出预期大小
      */
     private appendToBuffer(type: 'reasoning' | 'content', content: string): boolean {
-        const currentSize = this.buffers.reasoning.length + this.buffers.content.length;
-        const projectedSize = currentSize + content.length;
+        const currentSize =
+            Buffer.byteLength(this.buffers.reasoning, 'utf8') + Buffer.byteLength(this.buffers.content, 'utf8');
+        const projectedSize = currentSize + Buffer.byteLength(content, 'utf8');
 
         if (projectedSize > this.maxBufferSize) {
             this.state.aborted = true;

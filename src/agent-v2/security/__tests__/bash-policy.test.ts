@@ -37,4 +37,21 @@ describe('bash-policy', () => {
         });
         expect(decision.effect).toBe('ask');
     });
+
+    it('should allow redirects to safe /dev pseudo-files', () => {
+        const decision = evaluateBashPolicy('echo ok > /dev/null', {
+            mode: 'guarded',
+            allowlistMissEffect: 'ask',
+        });
+        expect(decision.effect).toBe('allow');
+    });
+
+    it('should deny redirects to other /dev targets', () => {
+        const decision = evaluateBashPolicy('echo x > /dev/random', {
+            mode: 'guarded',
+            allowlistMissEffect: 'ask',
+        });
+        expect(decision.effect).toBe('deny');
+        expect(decision.reason).toContain('protected system path');
+    });
 });

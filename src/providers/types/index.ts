@@ -58,7 +58,10 @@ export {
     isRetryableError,
     isPermanentError,
     isAbortedError,
+    calculateBackoff,
+    DEFAULT_BACKOFF_CONFIG,
 } from './errors';
+export type { BackoffConfig } from './errors';
 
 // Registry 相关类型
 export type { ProviderType, ModelId, ModelConfig } from './registry';

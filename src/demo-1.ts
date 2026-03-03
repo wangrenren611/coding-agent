@@ -22,7 +22,7 @@ import type { McpManager } from './agent-v2/mcp';
 import type { PermissionAskContext } from './agent-v2/agent/types';
 
 // const model = 'wr-claude-4.6';
-const model: ModelId = 'glm-5';
+const model: ModelId = 'minimax-2.5';
 dotenv.config({
     path: './.env.development',
 });
@@ -951,7 +951,7 @@ async function demo1() {
     fs.accessSync(preferredMemoryPath, fs.constants.W_OK);
 
     const memoryManager = createMemoryManager({
-        type: 'file',
+        type: 'mongodb',
         // connectionString: preferredMemoryPath,
     });
 

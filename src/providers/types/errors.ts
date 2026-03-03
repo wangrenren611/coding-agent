@@ -19,10 +19,78 @@ export class LLMError extends Error {
 }
 
 // =============================================================================
+// 指数退避配置
+// =============================================================================
+
+/**
+ * 指数退避配置
+ */
+export interface BackoffConfig {
+    /** 初始延迟（毫秒） */
+    initialDelayMs?: number;
+    /** 最大延迟（毫秒） */
+    maxDelayMs?: number;
+    /** 退避基数（默认 2） */
+    base?: number;
+    /** 是否启用 jitter（默认 true） */
+    jitter?: boolean;
+    /** 最大重试次数（用于计算最大退避） */
+    maxRetries?: number;
+}
+
+/**
+ * 默认退避配置
+ */
+export const DEFAULT_BACKOFF_CONFIG: Required<BackoffConfig> = {
+    initialDelayMs: 1000,
+    maxDelayMs: 60000,
+    base: 2,
+    jitter: true,
+    maxRetries: 20,
+};
+
+/**
+ * 计算带 jitter 的指数退避延迟
+ *
+ * 算法：min(maxDelay, initialDelay * (base ^ retryCount)) * random(0.5, 1.5)
+ * - 优先使用 retryAfter（服务器指定）
+ * - 支持指数增长
+ * - 添加 jitter 避免雷鸣羊群问题
+ */
+export function calculateBackoff(retryCount: number, retryAfterMs?: number, config: BackoffConfig = {}): number {
+    const cfg = { ...DEFAULT_BACKOFF_CONFIG, ...config };
+
+    // 1. 如果服务器指定了 retry-after，优先使用（但不超过最大延迟）
+    if (typeof retryAfterMs === 'number' && retryAfterMs > 0) {
+        return Math.min(retryAfterMs, cfg.maxDelayMs);
+    }
+
+    // 2. 计算指数退避
+    const exponentialDelay = cfg.initialDelayMs * Math.pow(cfg.base, retryCount);
+    const cappedDelay = Math.min(exponentialDelay, cfg.maxDelayMs);
+
+    // 3. 添加 jitter（如果启用）
+    if (cfg.jitter) {
+        // 随机因子范围: [0.5, 1.5]，即 ±50%
+        const jitterFactor = 0.5 + Math.random();
+        return Math.floor(cappedDelay * jitterFactor);
+    }
+
+    return cappedDelay;
+}
+
+// =============================================================================
 // 可重试错误
 // =============================================================================
 
 export class LLMRetryableError extends LLMError {
+    /**
+     * @deprecated 请使用 calculateBackoff() 函数
+     */
+    getBackoff(retryCount: number): number {
+        return calculateBackoff(retryCount, this.retryAfter);
+    }
+
     constructor(
         message: string,
         public retryAfter?: number,
@@ -30,11 +98,6 @@ export class LLMRetryableError extends LLMError {
     ) {
         super(message, code);
         this.name = 'LLMRetryableError';
-    }
-
-    getBackoff(retryCount: number): number {
-        if (this.retryAfter) return this.retryAfter;
-        return Math.pow(2, retryCount) * 1000;
     }
 }
 

@@ -15,6 +15,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { Agent } from '../agent';
 import { AgentState } from '../core/agent-state';
+import { DefaultTimeProvider } from '../time-provider';
 import { EventType } from '../../eventbus';
 import { createMemoryManager } from '../../memory';
 import type { LLMGenerateOptions, LLMResponse } from '../../../providers/types';
@@ -207,10 +208,39 @@ describe('AgentState 重试机制测试', () => {
             expect(state.nextRetryDelayMs).toBe(3000);
         });
 
-        it('recordRetryableError 不传延迟时使用默认值', () => {
+        it('recordRetryableError 不传延迟时使用指数退避', () => {
             state.startTask();
             state.recordRetryableError();
-            expect(state.nextRetryDelayMs).toBe(defaultConfig.defaultRetryDelayMs);
+            // 默认使用指数退避，retryCount=1, initialDelayMs=1000
+            // 由于 jitter 启用，值在 [1000, 3000] 范围内
+            expect(state.nextRetryDelayMs).toBeGreaterThanOrEqual(1000);
+            expect(state.nextRetryDelayMs).toBeLessThanOrEqual(3000);
+        });
+
+        it('recordRetryableError 连续重试应该指数增长', () => {
+            state.startTask();
+            state.recordRetryableError(); // retryCount=1: [1000, 3000]
+            const firstDelay = state.nextRetryDelayMs;
+
+            state.recordRetryableError(); // retryCount=2: [2000, 6000]
+            const secondDelay = state.nextRetryDelayMs;
+
+            expect(secondDelay).toBeGreaterThan(firstDelay);
+        });
+
+        it('recordRetryableError 禁用 jitter 时使用固定延迟', () => {
+            const stateWithNoJitter = new AgentState({
+                maxLoops: 100,
+                maxRetries: 5,
+                defaultRetryDelayMs: 1000,
+                backoffConfig: { jitter: false },
+                timeProvider: new DefaultTimeProvider(),
+            });
+
+            stateWithNoJitter.startTask();
+            stateWithNoJitter.recordRetryableError();
+            // 无 jitter: 1000 * 2^1 = 2000
+            expect(stateWithNoJitter.nextRetryDelayMs).toBe(2000);
         });
     });
 });

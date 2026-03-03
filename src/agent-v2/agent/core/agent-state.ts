@@ -13,6 +13,7 @@
 import { AgentStatus, AgentFailure } from '../types';
 import type { ITimeProvider } from '../core-types';
 import { DefaultTimeProvider } from '../time-provider';
+import { calculateBackoff, type BackoffConfig } from '../../../providers/types/errors';
 
 /**
  * 状态管理器配置
@@ -22,8 +23,10 @@ export interface AgentStateConfig {
     maxLoops: number;
     /** 最大重试次数 */
     maxRetries: number;
-    /** 默认重试延迟（毫秒） */
+    /** 默认重试延迟（毫秒）- 初始延迟，用于指数退避 */
     defaultRetryDelayMs: number;
+    /** 指数退避配置 */
+    backoffConfig?: BackoffConfig;
     /** 时间提供者 */
     timeProvider?: ITimeProvider;
 }
@@ -175,11 +178,17 @@ export class AgentState {
 
     /**
      * 记录可重试错误
+     *
+     * 使用指数退避 + jitter 计算延迟：
+     * - 如果传入了 retryDelayMs（来自服务器 retry-after），优先使用
+     * - 否则使用指数退避算法计算延迟
      */
     recordRetryableError(retryDelayMs?: number): void {
         this._retryCount++;
         this._totalRetryCount++;
-        this._nextRetryDelayMs = retryDelayMs ?? this.config.defaultRetryDelayMs;
+
+        // 使用指数退避计算延迟
+        this._nextRetryDelayMs = calculateBackoff(this._retryCount, retryDelayMs, this.config.backoffConfig);
     }
 
     /**

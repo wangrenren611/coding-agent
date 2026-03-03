@@ -23,6 +23,7 @@ import {
     isRetryableError,
     isPermanentError,
     isAbortedError,
+    calculateBackoff,
 } from './types';
 
 describe('LLMError', () => {
@@ -52,14 +53,88 @@ describe('LLMRetryableError', () => {
 
     it('should calculate backoff with retryAfter', () => {
         const error = new LLMRetryableError('Rate limited', 3000);
-        expect(error.getBackoff(1)).toBe(3000);
+        // 当有 retryAfter 时，返回值应该等于 retryAfter（不超过 maxDelay）
+        const backoff = error.getBackoff(1);
+        expect(backoff).toBe(3000);
     });
 
     it('should calculate exponential backoff without retryAfter', () => {
         const error = new LLMRetryableError('Server error');
-        expect(error.getBackoff(1)).toBe(2000); // 2^1 * 1000
-        expect(error.getBackoff(2)).toBe(4000); // 2^2 * 1000
-        expect(error.getBackoff(3)).toBe(8000); // 2^3 * 1000
+        // 无 jitter 时，backoff = initialDelayMs * (base ^ retryCount)
+        // initialDelayMs = 1000, base = 2
+        // retryCount=1: 1000 * 2^1 = 2000
+        // 由于默认启用 jitter，实际值会在 [1000, 3000] 范围内
+        const backoff1 = error.getBackoff(1);
+        expect(backoff1).toBeGreaterThanOrEqual(1000);
+        expect(backoff1).toBeLessThanOrEqual(3000);
+
+        // retryCount=2: 1000 * 2^2 = 4000
+        const backoff2 = error.getBackoff(2);
+        expect(backoff2).toBeGreaterThanOrEqual(2000);
+        expect(backoff2).toBeLessThanOrEqual(6000);
+
+        // retryCount=3: 1000 * 2^3 = 8000，但不超过 maxDelayMs=60000
+        const backoff3 = error.getBackoff(3);
+        expect(backoff3).toBeGreaterThanOrEqual(4000);
+        expect(backoff3).toBeLessThanOrEqual(12000);
+    });
+});
+
+describe('calculateBackoff', () => {
+    it('should use retryAfter when provided', () => {
+        const delay = calculateBackoff(5, 5000);
+        expect(delay).toBe(5000);
+    });
+
+    it('should cap retryAfter at maxDelayMs', () => {
+        const delay = calculateBackoff(1, 100000, { maxDelayMs: 60000 });
+        expect(delay).toBe(60000);
+    });
+
+    it('should calculate exponential backoff without retryAfter', () => {
+        // 无 jitter 时: 1000 * 2^1 = 2000
+        const delay = calculateBackoff(1, undefined, { jitter: false });
+        expect(delay).toBe(2000);
+
+        // 无 jitter 时: 1000 * 2^2 = 4000
+        const delay2 = calculateBackoff(2, undefined, { jitter: false });
+        expect(delay2).toBe(4000);
+    });
+
+    it('should respect maxDelayMs', () => {
+        // 指数退避会超过最大值，应该被限制
+        const delay = calculateBackoff(10, undefined, { initialDelayMs: 1000, maxDelayMs: 5000, jitter: false });
+        expect(delay).toBe(5000);
+    });
+
+    it('should apply jitter when enabled', () => {
+        // 运行多次来验证 jitter 范围
+        const delays: number[] = [];
+        for (let i = 0; i < 100; i++) {
+            delays.push(calculateBackoff(1, undefined, { jitter: true }));
+        }
+
+        // jitter 范围应该是 [0.5, 1.5] * 2000 = [1000, 3000]
+        const min = Math.min(...delays);
+        const max = Math.max(...delays);
+
+        expect(min).toBeGreaterThanOrEqual(1000);
+        expect(max).toBeLessThanOrEqual(3000);
+
+        // 验证不是所有值都相同（即确实有 jitter）
+        const uniqueValues = new Set(delays);
+        expect(uniqueValues.size).toBeGreaterThan(1);
+    });
+
+    it('should respect custom config', () => {
+        const delay = calculateBackoff(1, undefined, {
+            initialDelayMs: 500,
+            base: 3,
+            maxDelayMs: 10000,
+            jitter: false,
+        });
+        // 500 * 3^1 = 1500
+        expect(delay).toBe(1500);
     });
 });
 

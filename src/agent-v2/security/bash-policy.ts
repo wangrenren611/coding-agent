@@ -171,10 +171,15 @@ const COMMON_DANGEROUS_PATTERNS: BashDangerousPattern[] = [
     { pattern: /\b(eval|source)\s+<\s*\((curl|wget)\b/i, reason: 'Refusing remote script evaluation' },
     { pattern: /\b(dd)\s+[^|\n]*\bof=\/dev\/(sd|disk|nvme|rdisk)/i, reason: 'Refusing raw disk write command' },
     {
-        pattern: />{1,2}\s*\/(etc|bin|sbin|usr|boot|dev|proc|sys)\b/i,
+        pattern:
+            />{1,2}\s*\/(etc|bin|sbin|usr|boot|proc|sys)\b|>{1,2}\s*\/dev(?:\/(?!null\b|stdout\b|stderr\b)[^\s;|&]+|(?=[\s;|&]|$))/i,
         reason: 'Refusing write redirection to protected system path',
     },
-    { pattern: /\btee\s+\/(etc|bin|sbin|usr|boot|dev|proc|sys)\b/i, reason: 'Refusing write to protected system path' },
+    {
+        pattern:
+            /\btee\s+\/(etc|bin|sbin|usr|boot|proc|sys)\b|\btee\s+\/dev(?:\/(?!null\b|stdout\b|stderr\b)[^\s;|&]+|(?=[\s;|&]|$))/i,
+        reason: 'Refusing write to protected system path',
+    },
     { pattern: /\b(sh|bash|zsh)\s+-[lc]\b/i, reason: 'Nested shell execution is blocked by policy' },
 ];
 
