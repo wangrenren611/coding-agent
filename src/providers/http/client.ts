@@ -131,27 +131,32 @@ export class HTTPClient {
      * @see https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Retry-After
      */
     private extractRetryAfterMs(response: Response): number | undefined {
+        const retryAfterMsHeader = response.headers.get('retry-after-ms');
+        if (retryAfterMsHeader) {
+            const ms = Number(retryAfterMsHeader);
+            if (Number.isFinite(ms) && ms > 0) {
+                return ms;
+            }
+        }
+
         const retryAfter = response.headers.get('Retry-After');
         if (!retryAfter) {
             return undefined;
         }
 
-        // 尝试解析为秒数
-        const seconds = parseInt(retryAfter, 10);
-        if (!isNaN(seconds) && seconds > 0) {
-            return seconds * 1000;
+        // 尝试解析为秒数（支持小数，避免精度损失）
+        const seconds = Number(retryAfter);
+        if (Number.isFinite(seconds) && seconds > 0) {
+            return Math.ceil(seconds * 1000);
         }
 
         // 尝试解析为日期字符串
-        try {
-            const date = new Date(retryAfter);
-            const now = new Date();
-            const diffMs = date.getTime() - now.getTime();
+        const dateMs = Date.parse(retryAfter);
+        if (Number.isFinite(dateMs)) {
+            const diffMs = dateMs - Date.now();
             if (diffMs > 0) {
-                return diffMs;
+                return Math.ceil(diffMs);
             }
-        } catch {
-            // 忽略解析错误
         }
 
         return undefined;

@@ -230,6 +230,44 @@ describe('HTTPClient timeout behavior', () => {
         expect(response.ok).toBe(true);
     });
 
+    it('should honor Retry-After header with sub-second precision', async () => {
+        vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+            return new Response('rate limited', {
+                status: 429,
+                statusText: 'Too Many Requests',
+                headers: { 'Retry-After': '0.25' },
+            });
+        });
+
+        const client = new HTTPClient();
+        const error = await client.fetch('https://example.test/rate-limit').then(
+            () => null,
+            (err) => err
+        );
+
+        expect(error).toBeInstanceOf(LLMRetryableError);
+        expect((error as LLMRetryableError).retryAfter).toBe(250);
+    });
+
+    it('should honor retry-after-ms header when provided', async () => {
+        vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+            return new Response('server busy', {
+                status: 503,
+                statusText: 'Service Unavailable',
+                headers: { 'retry-after-ms': '1350' },
+            });
+        });
+
+        const client = new HTTPClient();
+        const error = await client.fetch('https://example.test/server-busy').then(
+            () => null,
+            (err) => err
+        );
+
+        expect(error).toBeInstanceOf(LLMRetryableError);
+        expect((error as LLMRetryableError).retryAfter).toBe(1350);
+    });
+
     it('should normalize network errors to LLMRetryableError', async () => {
         vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
             const error = new Error('connect ECONNREFUSED');

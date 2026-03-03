@@ -11,6 +11,12 @@ export interface CompletionCheckResult {
         pendingCount: number;
         taskSignature: string;
     };
+    blockedBySubtasks?: {
+        queuedCount: number;
+        runningCount: number;
+        cancellingCount: number;
+        taskSignature: string;
+    };
 }
 
 export interface CompletionCheckParams {
@@ -58,25 +64,52 @@ export async function checkComplete(params: CompletionCheckParams): Promise<Comp
         parentTaskId: MANAGED_TASK_PARENT_ID,
     });
     const pendingManagedTasks = tasks.filter((task) => task.status === 'pending' || task.status === 'in_progress');
-    if (pendingManagedTasks.length === 0) {
-        return { done: true };
-    }
 
-    const taskSignature = pendingManagedTasks
-        .slice()
-        .sort((a, b) => a.taskId.localeCompare(b.taskId))
-        .map((task) => `${task.taskId}:${task.status}`)
-        .join('|');
-    const inProgressCount = pendingManagedTasks.filter((task) => task.status === 'in_progress').length;
-    const pendingCount = pendingManagedTasks.length - inProgressCount;
-    return {
-        done: false,
-        blockedByTasks: {
+    const subTaskRuns = await memoryManager.querySubTaskRuns({
+        parentSessionId: sessionId,
+        mode: 'background',
+    });
+    const pendingSubTaskRuns = subTaskRuns.filter(
+        (run) => run.status === 'queued' || run.status === 'running' || run.status === 'cancelling'
+    );
+
+    const result: CompletionCheckResult = { done: true };
+
+    if (pendingManagedTasks.length > 0) {
+        const taskSignature = pendingManagedTasks
+            .slice()
+            .sort((a, b) => a.taskId.localeCompare(b.taskId))
+            .map((task) => `${task.taskId}:${task.status}`)
+            .join('|');
+        const inProgressCount = pendingManagedTasks.filter((task) => task.status === 'in_progress').length;
+        const pendingCount = pendingManagedTasks.length - inProgressCount;
+        result.done = false;
+        result.blockedByTasks = {
             inProgressCount,
             pendingCount,
             taskSignature,
-        },
-    };
+        };
+    }
+
+    if (pendingSubTaskRuns.length > 0) {
+        const taskSignature = pendingSubTaskRuns
+            .slice()
+            .sort((a, b) => a.runId.localeCompare(b.runId))
+            .map((run) => `${run.runId}:${run.status}`)
+            .join('|');
+        const runningCount = pendingSubTaskRuns.filter((run) => run.status === 'running').length;
+        const queuedCount = pendingSubTaskRuns.filter((run) => run.status === 'queued').length;
+        const cancellingCount = pendingSubTaskRuns.length - runningCount - queuedCount;
+        result.done = false;
+        result.blockedBySubtasks = {
+            queuedCount,
+            runningCount,
+            cancellingCount,
+            taskSignature,
+        };
+    }
+
+    return result;
 }
 
 function checkAssistantComplete(message: Message): boolean {

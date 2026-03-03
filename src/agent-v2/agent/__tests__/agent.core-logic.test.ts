@@ -672,6 +672,105 @@ describe('Agent 重试机制测试', () => {
             const result = await agent.executeWithResult('Keep looping');
             expect(['failed', 'completed']).toContain(result.status);
         }, 30000);
+
+        it('连续重复相同工具调用应先尝试恢复，恢复失败后再终止', async () => {
+            let callCount = 0;
+            mockProvider.generate = async () => {
+                callCount++;
+                return {
+                    id: `doom-loop-${callCount}`,
+                    choices: [
+                        {
+                            index: 0,
+                            message: {
+                                role: 'assistant',
+                                content: '',
+                                tool_calls: [
+                                    {
+                                        id: `tool-call-${callCount}`,
+                                        type: 'function',
+                                        function: {
+                                            name: 'glob',
+                                            arguments: '{"pattern":"src/**/*.ts"}',
+                                        },
+                                    },
+                                ],
+                            },
+                            finish_reason: 'tool_calls',
+                        },
+                    ],
+                } as LLMResponse;
+            };
+
+            const agent = new Agent({
+                provider: mockProvider as unknown as LLMProvider,
+                systemPrompt: 'Test',
+                stream: false,
+                memoryManager,
+                maxLoops: 20,
+            });
+
+            const result = await agent.executeWithResult('Trigger repeated tool calls');
+            expect(result.status).toBe('failed');
+            expect(result.failure?.code).toBe('AGENT_LOOP_EXCEEDED');
+            expect(callCount).toBeGreaterThan(3);
+        }, 30000);
+
+        it('连续重复工具调用在压缩重试后恢复成功时应完成任务', async () => {
+            let callCount = 0;
+            mockProvider.generate = async () => {
+                callCount++;
+                if (callCount <= 3) {
+                    return {
+                        id: `doom-loop-recover-${callCount}`,
+                        choices: [
+                            {
+                                index: 0,
+                                message: {
+                                    role: 'assistant',
+                                    content: '',
+                                    tool_calls: [
+                                        {
+                                            id: `tool-call-${callCount}`,
+                                            type: 'function',
+                                            function: {
+                                                name: 'glob',
+                                                arguments: '{"pattern":"src/**/*.ts"}',
+                                            },
+                                        },
+                                    ],
+                                },
+                                finish_reason: 'tool_calls',
+                            },
+                        ],
+                    } as LLMResponse;
+                }
+
+                return {
+                    id: `recover-success-${callCount}`,
+                    choices: [
+                        {
+                            index: 0,
+                            message: { role: 'assistant', content: 'Recovered and finished.' },
+                            finish_reason: 'stop',
+                        },
+                    ],
+                } as LLMResponse;
+            };
+
+            const agent = new Agent({
+                provider: mockProvider as unknown as LLMProvider,
+                systemPrompt: 'Test',
+                stream: false,
+                memoryManager,
+                maxLoops: 20,
+            });
+
+            const result = await agent.executeWithResult('Recover repeated tool calls');
+            expect(result.status).toBe('completed');
+            expect(result.finalMessage?.content).toContain('Recovered and finished');
+            expect(callCount).toBe(4);
+        }, 30000);
     });
 
     describe('API 错误重试', () => {

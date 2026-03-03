@@ -1,6 +1,8 @@
 import { buildSystemPrompt } from './system';
 import { getDefaultTools, getPlanModeTools } from '../tool';
 import type { ToolRegistry } from '../tool/registry';
+import * as fs from 'fs';
+import * as path from 'path';
 
 export interface OperatorPromptOptions {
     /** 工作目录 */
@@ -29,6 +31,84 @@ export interface OperatorPromptOptions {
     isSubagent?: boolean;
     /** 子代理额外角色说明 */
     subagentRoleAdditional?: string;
+}
+
+const INSTRUCTION_FILE_NAMES = ['AGENTS.md', 'CLAUDE.md'] as const;
+const MAX_INSTRUCTION_FILE_CHARS = 20_000;
+const MAX_INSTRUCTION_TOTAL_CHARS = 60_000;
+
+function findRepoRoot(startDirectory: string): string {
+    let current = path.resolve(startDirectory);
+    while (true) {
+        if (fs.existsSync(path.join(current, '.git'))) {
+            return current;
+        }
+        const parent = path.dirname(current);
+        if (parent === current) {
+            return path.resolve(startDirectory);
+        }
+        current = parent;
+    }
+}
+
+function collectInstructionFiles(directory: string): string[] {
+    const repoRoot = findRepoRoot(directory);
+    const found: string[] = [];
+    let current = path.resolve(directory);
+
+    while (true) {
+        for (const fileName of INSTRUCTION_FILE_NAMES) {
+            const fullPath = path.join(current, fileName);
+            if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
+                found.push(fullPath);
+            }
+        }
+        if (current === repoRoot) {
+            break;
+        }
+        const parent = path.dirname(current);
+        if (parent === current) {
+            break;
+        }
+        current = parent;
+    }
+
+    return found;
+}
+
+function loadInstructionContent(directory: string): string | undefined {
+    const files = collectInstructionFiles(directory);
+    if (files.length === 0) {
+        return undefined;
+    }
+
+    const blocks: string[] = [];
+    let totalChars = 0;
+
+    for (const filePath of files) {
+        if (totalChars >= MAX_INSTRUCTION_TOTAL_CHARS) {
+            break;
+        }
+        try {
+            const raw = fs.readFileSync(filePath, 'utf-8').trim();
+            if (!raw) {
+                continue;
+            }
+            const remaining = MAX_INSTRUCTION_TOTAL_CHARS - totalChars;
+            const maxForThisFile = Math.min(MAX_INSTRUCTION_FILE_CHARS, remaining);
+            const content = raw.length > maxForThisFile ? `${raw.slice(0, maxForThisFile)}\n...[truncated]` : raw;
+            blocks.push(`Instructions from: ${filePath}\n${content}`);
+            totalChars += content.length;
+        } catch {
+            // Ignore unreadable instruction files and keep building prompt.
+        }
+    }
+
+    if (blocks.length === 0) {
+        return undefined;
+    }
+
+    return blocks.join('\n\n');
 }
 
 /**
@@ -82,15 +162,19 @@ export function getRuntimeToolNamesFromRegistry(toolRegistry: Pick<ToolRegistry,
  */
 export const operatorPrompt = (options: OperatorPromptOptions): string => {
     const inferredPolicies = inferRuntimePolicies();
+    const resolvedDirectory = path.resolve(options.directory);
     const runtimeToolNames =
         options.runtimeToolNames ??
         (options.toolRegistry
             ? getRuntimeToolNamesFromRegistry(options.toolRegistry)
             : inferRuntimeToolNames(!!options.planMode));
+    const agentsMd = options.agentsMd ?? loadInstructionContent(resolvedDirectory);
 
     // 调用系统提示词构建函数，并注入运行时能力信息（可被调用方显式覆盖）
     return buildSystemPrompt({
         ...options,
+        directory: resolvedDirectory,
+        agentsMd,
         sandboxMode: options.sandboxMode ?? inferredPolicies.sandboxMode,
         networkPolicy: options.networkPolicy ?? inferredPolicies.networkPolicy,
         runtimeToolNames,

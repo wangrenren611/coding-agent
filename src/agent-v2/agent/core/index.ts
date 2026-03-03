@@ -8,3 +8,4 @@ export { AgentState, AgentStateConfig, AgentStateSnapshot } from './agent-state'
 export { LLMCaller, LLMCallerConfig, LLMCallResult } from './llm-caller';
 export { ToolExecutor, ToolExecutorConfig, ToolExecutionOutput } from './tool-executor';
 export { checkComplete, CompletionCheckParams, CompletionCheckResult } from './completion-checker';
+export { ToolLoopDetector, ToolLoopDetectorOptions, ToolLoopDetectionResult } from './tool-loop-detector';

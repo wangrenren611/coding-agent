@@ -148,6 +148,7 @@ export class ToolExecutor {
             platform: process.platform,
             time: new Date().toISOString(),
             workingDirectory: process.cwd(),
+            planMode: this.config.planMode === true,
         };
 
         if (this.config.memoryManager) {

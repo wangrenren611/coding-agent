@@ -868,7 +868,7 @@ async function demo1() {
     fs.accessSync(preferredMemoryPath, fs.constants.W_OK);
 
     const memoryManager = createMemoryManager({
-        type: 'file',
+        type: 'mongodb',
         connectionString: preferredMemoryPath,
     });
 

@@ -221,6 +221,30 @@ describe('Agent completed and exception scenarios', () => {
         });
     }
 
+    async function createBackgroundSubtaskRun(
+        memoryManager: Awaited<ReturnType<typeof createReadyMemoryManager>>,
+        sessionId: string,
+        runId: string,
+        status: 'queued' | 'running' | 'cancelling' | 'cancelled' | 'completed' | 'failed'
+    ) {
+        const now = Date.now();
+        await memoryManager.saveSubTaskRun({
+            id: runId,
+            runId,
+            parentSessionId: sessionId,
+            childSessionId: `${sessionId}::subtask::${runId}`,
+            mode: 'background',
+            status,
+            description: `background subtask ${runId}`,
+            prompt: 'background subtask prompt',
+            subagentType: 'explore',
+            startedAt: now - 1000,
+            ...(status === 'completed' || status === 'failed' || status === 'cancelled' ? { finishedAt: now } : {}),
+            toolsUsed: [],
+            output: status === 'completed' ? 'background done' : undefined,
+        });
+    }
+
     it('stream=true fallback (non-stream response) should still emit text events before completed', async () => {
         const provider = new SequenceProvider([createTextResponse('fallback content')]);
         const memoryManager = await createReadyMemoryManager('stream-fallback');
@@ -661,7 +685,7 @@ describe('Agent completed and exception scenarios', () => {
             .getMessages()
             .filter(
                 (message) =>
-                    message.role === 'user' &&
+                    message.role === 'assistant' &&
                     typeof message.content === 'string' &&
                     message.content.includes('[SYSTEM REMINDER]') &&
                     message.content.includes('There are still unfinished tasks')
@@ -696,6 +720,32 @@ describe('Agent completed and exception scenarios', () => {
         expect(result.status).toBe('completed');
         expect(result.finalMessage?.content).toBe('final answer after task done');
         expect(provider.callCount).toBe(2);
+    });
+
+    it('background-subtask gate should wait for run completion and avoid extra llm calls', async () => {
+        const provider = new SequenceProvider([createTextResponse('final answer after background run')]);
+        const memoryManager = await createReadyMemoryManager('background-subtask-wait');
+        const sessionId = `background-wait-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        const runId = `task_bg_wait_${Date.now()}`;
+        await createBackgroundSubtaskRun(memoryManager, sessionId, runId, 'running');
+
+        setTimeout(() => {
+            void createBackgroundSubtaskRun(memoryManager, sessionId, runId, 'completed');
+        }, 50);
+
+        const agent = new Agent({
+            provider: provider as unknown as LLMProvider,
+            systemPrompt: 'test',
+            stream: false,
+            memoryManager,
+            sessionId,
+            maxLoops: 10,
+        });
+
+        const result = await agent.executeWithResult('继续');
+        expect(result.status).toBe('completed');
+        expect(result.finalMessage?.content).toBe('final answer after background run');
+        expect(provider.callCount).toBe(1);
     });
 
     it('retryable errors should fail with max-retries-exceeded and keep detailed retry reason in status', async () => {

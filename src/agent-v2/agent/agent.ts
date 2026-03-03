@@ -33,12 +33,15 @@ import { createDefaultToolRegistry, createPlanModeToolRegistry } from '../tool';
 import { createLogger, getLogger, Logger, createEventLoggerMiddleware } from '../logger';
 
 import {
+    AgentError,
+    AgentErrorCode,
     AgentAbortedError,
     AgentBusyError,
     AgentLoopExceededError,
     AgentMaxRetriesExceededError,
     AgentConfigurationError,
     AgentValidationError,
+    LLMContextCompressionError,
     LLMRequestError,
     LLMResponseInvalidError,
     isLLMContextCompressionError,
@@ -47,6 +50,7 @@ import { AgentExecutionResult, AgentOptions, AgentStatus, StreamCallback } from 
 import { AgentState } from './core/agent-state';
 import { LLMCaller } from './core/llm-caller';
 import { ToolExecutor } from './core/tool-executor';
+import { ToolLoopDetector } from './core/tool-loop-detector';
 import { checkComplete as evaluateCompletion } from './core/completion-checker';
 import { DefaultTimeProvider } from './time-provider';
 import { InputValidator } from './input-validator';
@@ -79,6 +83,8 @@ const AGENT_DEFAULTS = {
     BUFFER_SIZE: 100000,
     /** 默认空闲超时（毫秒）- 3 分钟，用于流式请求 */
     IDLE_TIMEOUT_MS: 3 * 60 * 1000,
+    /** 后台子任务轮询间隔（毫秒） */
+    SUBTASK_POLL_MS: 1000,
 } as const;
 
 // ==================== Agent 类 ====================
@@ -100,6 +106,8 @@ export class Agent {
     private readonly requestTimeoutMs?: number;
     private pendingRetryReason: string | null = null;
     private readonly idleTimeoutMs: number;
+    private readonly toolLoopDetector = new ToolLoopDetector();
+    private toolLoopRecoveryAttempts = 0;
 
     // 内部组件
     private readonly agentState: AgentState;
@@ -264,6 +272,8 @@ export class Agent {
         this.ensureIdle();
         this.agentState.startTask();
         this.pendingRetryReason = null;
+        this.toolLoopDetector.reset();
+        this.toolLoopRecoveryAttempts = 0;
 
         try {
             this.eventBus.emit(EventType.TASK_START, {
@@ -470,6 +480,7 @@ export class Agent {
         });
         let pendingTaskReminderSent = false;
         let lastBlockedTaskSignature: string | null = null;
+        let lastBlockedSubtaskSignature: string | null = null;
 
         while (true) {
             if (this.agentState.isAborted()) {
@@ -488,6 +499,7 @@ export class Agent {
                     lastBlockedTaskSignature = currentSignature;
                     pendingTaskReminderSent = false;
                 }
+                lastBlockedSubtaskSignature = null;
                 this.emitter.emitStatus(
                     AgentStatus.RUNNING,
                     `Task list still has unfinished items (in_progress: ${completion.blockedByTasks.inProgressCount}, pending: ${completion.blockedByTasks.pendingCount}), continuing...`,
@@ -500,7 +512,7 @@ export class Agent {
                 if (!pendingTaskReminderSent) {
                     this.session.addMessage({
                         messageId: uuid(),
-                        role: 'user',
+                        role: 'assistant',
                         content: this.buildPendingTaskReminder(
                             completion.blockedByTasks.inProgressCount,
                             completion.blockedByTasks.pendingCount
@@ -510,9 +522,28 @@ export class Agent {
                 } else if (hasSameBlockedTasks) {
                     throw new AgentLoopExceededError(this.agentState.loopCount);
                 }
+            } else if (completion.blockedBySubtasks) {
+                pendingTaskReminderSent = false;
+                lastBlockedTaskSignature = null;
+                const currentSubtaskSignature = completion.blockedBySubtasks.taskSignature;
+                if (currentSubtaskSignature !== lastBlockedSubtaskSignature) {
+                    this.emitter.emitStatus(
+                        AgentStatus.RUNNING,
+                        `Waiting for background subtasks (running: ${completion.blockedBySubtasks.runningCount}, queued: ${completion.blockedBySubtasks.queuedCount}, cancelling: ${completion.blockedBySubtasks.cancellingCount})...`,
+                        undefined,
+                        {
+                            source: 'agent',
+                            phase: 'lifecycle',
+                        }
+                    );
+                    lastBlockedSubtaskSignature = currentSubtaskSignature;
+                }
+                await this.sleepWithAbort(AGENT_DEFAULTS.SUBTASK_POLL_MS);
+                continue;
             } else {
                 pendingTaskReminderSent = false;
                 lastBlockedTaskSignature = null;
+                lastBlockedSubtaskSignature = null;
             }
             if (completion.done) {
                 break;
@@ -629,10 +660,48 @@ Do not output a completion summary until all managed tasks are marked completed.
     }
 
     private resolveRetryDelay(error: unknown): number {
-        if (error instanceof LLMRetryableError && typeof error.retryAfter === 'number' && error.retryAfter > 0) {
-            return error.retryAfter;
+        const retryAfterMs = this.extractRetryAfterMs(error);
+        if (typeof retryAfterMs === 'number' && retryAfterMs > 0) {
+            return retryAfterMs;
         }
         return this.agentState.nextRetryDelayMs;
+    }
+
+    private extractRetryAfterMs(error: unknown): number | undefined {
+        const visited = new Set<object>();
+
+        const pickPositiveNumber = (value: unknown): number | undefined => {
+            if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+                return value;
+            }
+            if (typeof value === 'string' && value.trim().length > 0) {
+                const parsed = Number(value);
+                if (Number.isFinite(parsed) && parsed > 0) {
+                    return parsed;
+                }
+            }
+            return undefined;
+        };
+
+        const walk = (current: unknown): number | undefined => {
+            if (!current || typeof current !== 'object') return undefined;
+            if (visited.has(current as object)) return undefined;
+            visited.add(current as object);
+
+            const obj = current as Record<string, unknown>;
+            const direct =
+                pickPositiveNumber(obj.retryAfter) ??
+                pickPositiveNumber(obj.retryAfterMs) ??
+                pickPositiveNumber((obj.context as Record<string, unknown> | undefined)?.retryAfter) ??
+                pickPositiveNumber((obj.context as Record<string, unknown> | undefined)?.retryAfterMs);
+            if (direct !== undefined) {
+                return direct;
+            }
+
+            return walk(obj.cause);
+        };
+
+        return walk(error);
     }
 
     private async sleepWithAbort(ms: number): Promise<void> {
@@ -807,6 +876,8 @@ Do not output a completion summary until all managed tasks are marked completed.
     }
 
     private handleTextResponse(response: LLMResponse, messageId: string, usage?: Usage): void {
+        this.toolLoopDetector.reset();
+        this.toolLoopRecoveryAttempts = 0;
         const rawContent = response.choices?.[0]?.message?.content || '';
         const reasoningContent = response.choices?.[0]?.message?.reasoning_content;
         const resolvedContent = this.resolveAssistantContent(rawContent);
@@ -866,6 +937,58 @@ Do not output a completion summary until all managed tasks are marked completed.
     private async handleToolCallResponse(response: LLMResponse, messageId: string, usage?: Usage): Promise<void> {
         const toolCalls = getResponseToolCalls(response);
         const finishReason = getResponseFinishReason(response);
+        const loopDetection = this.toolLoopDetector.record(toolCalls);
+        if (loopDetection.repeated) {
+            const toolLabel = loopDetection.toolNames.length > 0 ? loopDetection.toolNames.join(', ') : 'unknown';
+
+            if (this.toolLoopRecoveryAttempts < 1) {
+                this.toolLoopRecoveryAttempts += 1;
+                this.toolLoopDetector.reset();
+                this.logger.warn('[Agent] Detected repeated tool call loop, trying recovery via compaction', {
+                    phase: 'tool-loop-detection',
+                    threshold: loopDetection.threshold,
+                    toolNames: loopDetection.toolNames,
+                    recoveryAttempt: this.toolLoopRecoveryAttempts,
+                    sessionId: this.session.getSessionId(),
+                });
+
+                throw new LLMContextCompressionError(
+                    `Detected repeated tool calls (${loopDetection.threshold}x) for "${toolLabel}", trying context compaction before retry.`,
+                    {
+                        context: {
+                            threshold: loopDetection.threshold,
+                            toolCalls: toolCalls.map((toolCall) => ({
+                                toolName: toolCall.function?.name || '',
+                                arguments: toolCall.function?.arguments || '',
+                            })),
+                            recoveryAttempt: this.toolLoopRecoveryAttempts,
+                        },
+                    }
+                );
+            }
+
+            this.logger.warn('[Agent] Detected repeated tool call loop, aborting', {
+                phase: 'tool-loop-detection',
+                threshold: loopDetection.threshold,
+                toolNames: loopDetection.toolNames,
+                recoveryAttempt: this.toolLoopRecoveryAttempts,
+                sessionId: this.session.getSessionId(),
+            });
+
+            throw new AgentError(
+                `Detected repeated tool calls (${loopDetection.threshold}x) for "${toolLabel}". Stopping to avoid an infinite tool loop.`,
+                {
+                    code: AgentErrorCode.LOOP_EXCEEDED,
+                    context: {
+                        threshold: loopDetection.threshold,
+                        toolCalls: toolCalls.map((toolCall) => ({
+                            toolName: toolCall.function?.name || '',
+                            arguments: toolCall.function?.arguments || '',
+                        })),
+                    },
+                }
+            );
+        }
 
         if (this.stream) {
             // 流式模式下消息已通过 onMessageCreate 创建

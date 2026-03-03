@@ -86,6 +86,8 @@ const taskRunSchema = z
     })
     .strict();
 
+const PLAN_MODE_ALLOWED_SUBAGENT_TYPES: readonly SubagentType[] = [SubagentType.Explore, SubagentType.Plan];
+
 export class TaskTool extends BaseTool<typeof taskRunSchema> {
     name = 'task';
     description = TASK_TOOL_DESCRIPTION;
@@ -104,6 +106,17 @@ export class TaskTool extends BaseTool<typeof taskRunSchema> {
 
     async execute(args: z.infer<typeof this.schema>, context?: ToolContext): Promise<ToolResult> {
         const { subagent_type, prompt, description, run_in_background, model, resume } = args;
+        if (context?.planMode && !PLAN_MODE_ALLOWED_SUBAGENT_TYPES.includes(subagent_type)) {
+            return this.result({
+                success: false,
+                metadata: {
+                    error: 'PLAN_MODE_SUBAGENT_NOT_ALLOWED',
+                    subagent_type,
+                    allowed_subagent_types: PLAN_MODE_ALLOWED_SUBAGENT_TYPES,
+                },
+                output: `Plan Mode only allows read-only subagents: ${PLAN_MODE_ALLOWED_SUBAGENT_TYPES.join(', ')}. Received: ${subagent_type}`,
+            });
+        }
         const config = AGENT_CONFIGS[subagent_type];
         if (!config) {
             return this.result({
@@ -856,6 +869,9 @@ const taskOutputSchema = z
     })
     .strict();
 
+const MANAGED_TASK_ID_PATTERN = /^\d+$/;
+const BACKGROUND_TASK_SUGGESTION_LIMIT = 5;
+
 export class TaskOutputTool extends BaseTool<typeof taskOutputSchema> {
     name = 'task_output';
     description = TASK_OUTPUT_DESCRIPTION;
@@ -864,19 +880,19 @@ export class TaskOutputTool extends BaseTool<typeof taskOutputSchema> {
     executionTimeoutMs = null;
 
     async execute(args: z.infer<typeof this.schema>, context?: ToolContext): Promise<ToolResult> {
-        const { task_id, block, timeout } = args;
+        const { block, timeout } = args;
+        const taskId = args.task_id.trim();
+        if (!taskId) {
+            return this.buildTaskNotFoundResult('<empty>', context);
+        }
 
         // 获取内存中的后台执行状态
-        const execution = getBackgroundExecution(task_id);
+        const execution = getBackgroundExecution(taskId);
         // 获取持久化的运行记录
-        const runRecord = await getSubTaskRunRecord(context?.memoryManager, task_id);
+        const runRecord = await getSubTaskRunRecord(context?.memoryManager, taskId);
 
         if (!execution && !runRecord) {
-            return this.result({
-                success: false,
-                metadata: { error: 'TASK_NOT_FOUND' },
-                output: `Task not found: ${task_id}`,
-            });
+            return this.buildTaskNotFoundResult(taskId, context);
         }
 
         // 如果任务正在运行且 block=true，等待完成
@@ -898,7 +914,9 @@ export class TaskOutputTool extends BaseTool<typeof taskOutputSchema> {
                             tools_used: execution.toolsUsed,
                             message_count: getMessageCount(execution.messages),
                         },
-                        output: execution.output || `Task ${task_id} is still running after ${timeout}ms timeout`,
+                        output: execution.output
+                            ? `Task ${taskId} result: ${execution.output}`
+                            : `Task ${taskId} is still running after ${timeout}ms timeout`,
                     });
                 }
             }
@@ -923,7 +941,7 @@ export class TaskOutputTool extends BaseTool<typeof taskOutputSchema> {
                     finished_at: execution.finishedAt,
                     last_activity_at: execution.lastActivityAt,
                 },
-                output: execution.output || `Task ${task_id} status: ${execution.status}`,
+                output: execution.output || `Task ${taskId} status: ${execution.status}`,
             });
         }
 
@@ -946,15 +964,72 @@ export class TaskOutputTool extends BaseTool<typeof taskOutputSchema> {
                     started_at: runRecord.metadata?.startedAtIso,
                     finished_at: runRecord.metadata?.finishedAtIso,
                 },
-                output: runRecord.output || `Task ${task_id} status: ${runRecord.status}`,
+                output: runRecord.output || `Task ${taskId} status: ${runRecord.status}`,
             });
         }
 
+        return this.buildTaskNotFoundResult(taskId, context);
+    }
+
+    private async buildTaskNotFoundResult(taskId: string, context?: ToolContext): Promise<ToolResult> {
+        const suggestedTaskIds = await this.suggestBackgroundTaskIds(context);
+        const likelyManagedTaskId = MANAGED_TASK_ID_PATTERN.test(taskId);
+        const formatHint = likelyManagedTaskId
+            ? 'task_output expects background task IDs in the form task_xxx returned by task(run_in_background=true), not managed task IDs from task_list/task_create/task_update.'
+            : 'task_output expects a background task ID in the form task_xxx returned by task(run_in_background=true).';
+        const suggestionHint =
+            suggestedTaskIds.length > 0
+                ? ` Recent background task IDs in this session: ${suggestedTaskIds.join(', ')}`
+                : '';
+
         return this.result({
             success: false,
-            metadata: { error: 'TASK_NOT_FOUND' },
-            output: `Task not found: ${task_id}`,
+            metadata: {
+                error: 'TASK_NOT_FOUND',
+                requested_task_id: taskId,
+                expected_task_id_format: 'task_*',
+                likely_managed_task_id: likelyManagedTaskId,
+                suggested_task_ids: suggestedTaskIds,
+            },
+            output: `Task not found: ${taskId}. ${formatHint}${suggestionHint}`,
         });
+    }
+
+    private async suggestBackgroundTaskIds(context?: ToolContext): Promise<string[]> {
+        const memoryManager = context?.memoryManager;
+        if (!memoryManager || !context?.sessionId) {
+            return [];
+        }
+
+        try {
+            if (memoryManager.waitForInitialization) {
+                await memoryManager.waitForInitialization();
+            }
+            const runs = await memoryManager.querySubTaskRuns(
+                {
+                    parentSessionId: context.sessionId,
+                    mode: 'background',
+                },
+                {
+                    orderBy: 'updatedAt',
+                    orderDirection: 'desc',
+                    limit: BACKGROUND_TASK_SUGGESTION_LIMIT,
+                }
+            );
+            const uniqueIds = new Set<string>();
+            for (const run of runs) {
+                if (!run.runId) {
+                    continue;
+                }
+                uniqueIds.add(run.runId);
+                if (uniqueIds.size >= BACKGROUND_TASK_SUGGESTION_LIMIT) {
+                    break;
+                }
+            }
+            return Array.from(uniqueIds);
+        } catch {
+            return [];
+        }
     }
 }
 

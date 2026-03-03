@@ -822,6 +822,45 @@ describe('Agent 重试延迟测试', () => {
         expect(elapsed).toBeGreaterThanOrEqual(250);
     }, 10000);
 
+    it('包装错误链中的 retryAfter 也应生效', async () => {
+        const { LLMRetryableError } = await import('../../../providers');
+        let failCount = 0;
+
+        mockProvider.generate = async () => {
+            if (failCount < 1) {
+                failCount++;
+                const outer = new LLMRetryableError('Transient upstream wrapper', undefined, 'WRAPPED_RETRY');
+                const inner = new LLMRetryableError('Rate limited by header', 220, 'RATE_LIMIT');
+                (outer as Error & { cause?: unknown }).cause = inner;
+                throw outer;
+            }
+            return {
+                id: 'success',
+                choices: [
+                    {
+                        index: 0,
+                        message: { role: 'assistant', content: 'OK' },
+                        finish_reason: 'stop',
+                    },
+                ],
+            } as LLMResponse;
+        };
+
+        const startTime = Date.now();
+        const agent = new Agent({
+            provider: mockProvider as unknown as LLMProvider,
+            systemPrompt: 'Test',
+            stream: false,
+            memoryManager,
+            maxRetries: 3,
+            retryDelayMs: 50,
+        });
+
+        await agent.execute('Hello');
+        const elapsed = Date.now() - startTime;
+        expect(elapsed).toBeGreaterThanOrEqual(180);
+    }, 10000);
+
     it('多次重试应该保持相同的延迟（非指数退避）', async () => {
         const { LLMRetryableError } = await import('../../../providers');
         let failCount = 0;

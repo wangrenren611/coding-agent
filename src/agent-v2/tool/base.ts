@@ -35,6 +35,8 @@ export type ToolContext = {
     streamCallback?: (message: AgentMessage) => void;
     /** 工具执行输出回调 */
     emitOutput?: (chunk: string) => void;
+    /** 是否处于 Plan 模式（只读） */
+    planMode?: boolean;
 };
 
 /**

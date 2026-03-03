@@ -154,9 +154,8 @@ Usage notes:
 - Always include a short description (3-5 words) summarizing what the agent will do.
 - Launch multiple agents concurrently for maximum performance.
 - If you want to read a specific file path, use the Read or Glob tool instead.
-- When NOT to use the Task tool: Direct file operations, single-file code searches.
-- IMPORTANT: When searching for a keyword or file and you are not confident you will find
-  the right match in the first few tries, use the Task tool.
+- For precise "needle" queries (known symbol/file/pattern), prefer direct tools first: lsp/grep/glob/read.
+- Use Task tool mainly for open-ended exploration, broad discovery, or parallel research branches.
 
 IMPORTANT: Use the Task tool with subagent_type=explore instead of running search commands
 directly when exploring the codebase to gather context or answer questions that are not a
@@ -302,6 +301,8 @@ Set up task dependencies:
 {"taskId": "2", "addBlockedBy": ["1"]}`;
 export const TASK_STOP_DESCRIPTION = `- Stops a running background task by its ID
 - Takes a task_id parameter identifying the task
+- task_id must be a background run ID returned by task(run_in_background=true), e.g. task_123...
+- Do not pass managed task IDs from task_list/task_create (e.g. "1", "2")
 - Returns a success or failure status
 - Use this tool when you need to terminate a long-running task`;
 
@@ -313,7 +314,8 @@ export const TASK_OUTPUT_DESCRIPTION = `Retrieves output from a running or compl
 - Returns the task output along with status information
 - Use block=true (default) to wait for task completion
 - Use block=false for non-blocking check of current status
-- Task IDs can be found using the task_list tool
+- task_id must be a background run ID returned by task(run_in_background=true), e.g. task_123...
+- Do not pass managed task IDs from task_list/task_create/task_update (e.g. "1", "2")
 - Works with all task types: background shells, async agents, and remote sessions
 
 ## Parameters

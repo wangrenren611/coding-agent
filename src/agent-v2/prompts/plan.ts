@@ -40,7 +40,8 @@ You CANNOT implement code changes in this phase.
 ## What You CAN Do
 - Read files (read_file, glob, grep, lsp)
 - Search the web (web_search, web_fetch)
-- Use tasks to delegate exploration (task, task_create, task_get, task_list, task_update, task_stop)
+- Use tasks to delegate exploration (task, task_create, task_get, task_list, task_update, task_stop, task_output)
+- In Plan Mode, task subagents are read-only constrained (allowed types: explore, plan)
 
 ## What You CANNOT Do
 - write_file - FORBIDDEN

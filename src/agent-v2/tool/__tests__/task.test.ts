@@ -202,6 +202,7 @@ interface TaskToolMetadata {
     storage?: string;
     error?: string;
     timed_out?: boolean;
+    allowed_subagent_types?: string[];
 }
 
 interface TaskStopMetadata {
@@ -213,6 +214,9 @@ interface TaskOutputMetadata {
     status: string;
     timed_out?: boolean;
     error?: string;
+    expected_task_id_format?: string;
+    likely_managed_task_id?: boolean;
+    suggested_task_ids?: string[];
 }
 
 describe('Task tools', () => {
@@ -722,6 +726,47 @@ describe('Task tools', () => {
             }
         }
     });
+
+    it('should block write-capable subagents when task is called in Plan Mode', async () => {
+        const taskTool = new TaskTool(new MockProvider('should not run'));
+        const result = await taskTool.execute(
+            {
+                description: 'Plan mode blocked subagent',
+                prompt: 'Try to run general-purpose subagent',
+                subagent_type: SubagentType.GeneralPurpose,
+                run_in_background: false,
+            },
+            {
+                ...toolContext,
+                planMode: true,
+            }
+        );
+
+        const resultMeta = result.metadata as TaskToolMetadata | undefined;
+
+        expect(result.success).toBe(false);
+        expect(resultMeta?.error).toBe('PLAN_MODE_SUBAGENT_NOT_ALLOWED');
+        expect(resultMeta?.allowed_subagent_types).toEqual([SubagentType.Explore, SubagentType.Plan]);
+        expect(result.output).toContain('Plan Mode only allows read-only subagents');
+    });
+
+    it('should allow read-only subagents when task is called in Plan Mode', async () => {
+        const taskTool = new TaskTool(new MockProvider('plan mode explore done'));
+        const result = await taskTool.execute(
+            {
+                description: 'Plan mode allowed subagent',
+                prompt: 'Explore files in read-only way',
+                subagent_type: SubagentType.Explore,
+                run_in_background: false,
+            },
+            {
+                ...toolContext,
+                planMode: true,
+            }
+        );
+
+        expect(result.success).toBe(true);
+    });
 });
 
 describe('TaskOutputTool', () => {
@@ -763,6 +808,34 @@ describe('TaskOutputTool', () => {
         expect(result.success).toBe(false);
         expect(resultMeta?.error).toBe('TASK_NOT_FOUND');
         expect(result.output).toContain('Task not found');
+    });
+
+    it('should return actionable hint when task_id looks like managed task id', async () => {
+        const runId = `task_hint_${Date.now()}`;
+        await memoryManager.saveSubTaskRun({
+            id: runId,
+            runId,
+            parentSessionId: sessionId,
+            childSessionId: `${sessionId}::subtask::${runId}`,
+            mode: 'background',
+            status: 'running',
+            description: 'Hint background task',
+            prompt: 'Hint prompt',
+            subagentType: SubagentType.Explore,
+            startedAt: Date.now(),
+            toolsUsed: [],
+        });
+
+        const tool = new TaskOutputTool();
+        const result = await tool.execute({ task_id: '1', block: true, timeout: 30000 }, toolContext);
+        const resultMeta = result.metadata as TaskOutputMetadata | undefined;
+
+        expect(result.success).toBe(false);
+        expect(resultMeta?.error).toBe('TASK_NOT_FOUND');
+        expect(resultMeta?.expected_task_id_format).toBe('task_*');
+        expect(resultMeta?.likely_managed_task_id).toBe(true);
+        expect(resultMeta?.suggested_task_ids).toContain(runId);
+        expect(result.output).toContain('expects background task IDs');
     });
 
     it('should get output from completed background task', async () => {
