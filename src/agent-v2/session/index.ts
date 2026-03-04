@@ -2,7 +2,7 @@ import { v4 as uuid } from 'uuid';
 import { Message } from './types';
 import type { ContextExclusionReason, IMemoryManager } from '../memory/types';
 import { Compaction, CompactionConfig } from './compaction';
-import { LLMProvider, type MessageContent, type ToolCall } from '../../providers';
+import { LLMProvider, type MessageContent, type Tool, type ToolCall } from '../../providers';
 import { ToolCallRepairer } from './tool-call-repairer';
 import { getLogger, type Logger } from '../logger';
 
@@ -19,10 +19,7 @@ export interface SessionConfig {
     /** 日志器（可选，不提供则使用默认日志器） */
     logger?: Logger;
     /** 获取工具 Schema 的回调（用于计算 tools 定义的 token） */
-    getTools?: () => Array<{
-        type: string;
-        function: { name: string; description: string; parameters: Record<string, unknown> };
-    }>;
+    getTools?: () => Tool[];
 }
 
 export type { Message, SessionOptions } from './types';
@@ -66,6 +63,7 @@ export class Session {
                 llmProvider: options.provider,
                 keepMessagesNum: options.compactionConfig?.keepMessagesNum ?? 40,
                 triggerRatio: options.compactionConfig?.triggerRatio ?? 0.9,
+                language: options.compactionConfig?.language,
                 logger: this.logger,
                 getTools: options.getTools,
             });

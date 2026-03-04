@@ -13,6 +13,7 @@ import type { ResponseValidatorOptions, ValidationResult } from './response-vali
 import type { Logger, LoggerConfig } from '../logger';
 import type { McpManager } from '../mcp/manager';
 import type { PermissionRule } from '../security/permission-engine';
+import type { PromptCacheOptions } from './core/prompt-cache';
 
 export interface PermissionAskContext {
     ticketId: string;
@@ -161,4 +162,6 @@ export interface AgentOptions {
     enableEventLogging?: boolean;
     /** 外部注入的 MCP 管理器（Agent 不负责初始化其连接） */
     mcpManager?: McpManager;
+    /** Prompt cache v2.1 策略（前缀稳定化、命中监控、可选动态提醒与模型亲和） */
+    promptCache?: PromptCacheOptions;
 }

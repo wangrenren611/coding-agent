@@ -29,6 +29,7 @@ class MockSummaryProvider extends LLMProvider {
     public generateCallCount = 0;
     public lastSummaryInput = '';
     public lastOptions?: LLMGenerateOptions;
+    public lastMessages: LLMRequestMessage[] = [];
 
     constructor() {
         super({
@@ -46,6 +47,7 @@ class MockSummaryProvider extends LLMProvider {
         _options?: LLMGenerateOptions
     ): Promise<LLMResponse | null> | AsyncGenerator<Chunk> {
         this.generateCallCount++;
+        this.lastMessages = _messages;
         this.lastOptions = _options;
         const first = _messages[0];
         this.lastSummaryInput = typeof first?.content === 'string' ? first.content : JSON.stringify(first?.content);
@@ -351,7 +353,53 @@ describe('Session Compaction', () => {
             const compacted = await session.compactBeforeLLMCall();
             expect(compacted).toBe(true);
             expect(provider.generateCallCount).toBe(1);
-            expect(provider.lastSummaryInput).toContain('仅推理内容也应进入压缩摘要');
+            const reasoningMessage = provider.lastMessages.find(
+                (message) => message.reasoning_content === '仅推理内容也应进入压缩摘要'
+            );
+            expect(reasoningMessage).toBeDefined();
+        });
+
+        it('压缩摘要应默认使用 cache_safe_fork 并附带 tools + compaction message', async () => {
+            const provider = new MockSummaryProvider();
+            const tools = [
+                {
+                    type: 'function' as const,
+                    function: {
+                        name: 'read_file',
+                        description: '读取文件',
+                        parameters: {
+                            type: 'object',
+                            properties: {
+                                filePath: { type: 'string' },
+                            },
+                            required: ['filePath'],
+                        },
+                    },
+                },
+            ];
+            const session = new Session({
+                systemPrompt: '你是测试助手',
+                enableCompaction: true,
+                provider,
+                compactionConfig: {
+                    maxTokens: 260,
+                    maxOutputTokens: 120,
+                    keepMessagesNum: 3,
+                    triggerRatio: 0.9,
+                },
+                getTools: () => tools,
+            });
+
+            seedSession(session);
+            const compacted = await session.compactBeforeLLMCall();
+
+            expect(compacted).toBe(true);
+            expect(provider.generateCallCount).toBe(1);
+            expect(provider.lastOptions?.tools).toEqual(tools);
+            const lastMessage = provider.lastMessages[provider.lastMessages.length - 1];
+            expect(lastMessage?.role).toBe('user');
+            expect(typeof lastMessage?.content).toBe('string');
+            expect(String(lastMessage?.content)).toContain('<compaction-message>');
         });
     });
 

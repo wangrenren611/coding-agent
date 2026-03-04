@@ -1,6 +1,13 @@
 import { v4 as uuid } from 'uuid';
 import { Message } from './types';
-import { InputContentPart, LLMProvider, LLMResponse } from '../../providers';
+import {
+    InputContentPart,
+    LLMProvider,
+    LLMResponse,
+    type LLMGenerateOptions,
+    type LLMRequestMessage,
+    type Tool,
+} from '../../providers';
 import { IMemoryManager, CompactionRecord } from '../memory/types';
 import { getLogger, type Logger } from '../logger';
 
@@ -39,10 +46,7 @@ export interface CompactionConfig {
     /** 日志器（可选，不提供则使用默认日志器） */
     logger?: Logger;
     /** 获取工具 Schema 的回调（用于计算 tools 定义的 token） */
-    getTools?: () => Array<{
-        type: string;
-        function: { name: string; description: string; parameters: Record<string, unknown> };
-    }>;
+    getTools?: () => Tool[];
     /** 摘要语言，跟随主 agent language 配置（默认 'English'） */
     language?: string;
 }
@@ -109,10 +113,7 @@ export class Compaction {
     private readonly keepMessagesNum: number;
     private readonly llmProvider: LLMProvider;
     private readonly logger: Logger;
-    private readonly getTools?: () => Array<{
-        type: string;
-        function: { name: string; description: string; parameters: Record<string, unknown> };
-    }>;
+    private readonly getTools?: () => Tool[];
     private readonly language: string;
 
     constructor(config: CompactionConfig) {
@@ -179,7 +180,11 @@ export class Compaction {
         const { pending: finalPending, active: finalActive } = this.processToolCallPairs(pending, active);
 
         // 生成摘要
-        const summaryContent = await this.generateSummary(finalPending);
+        const summaryContent = await this.generateSummary({
+            pendingMessages: finalPending,
+            sourceMessages: messages,
+            activeMessages: finalActive,
+        });
 
         const summaryMessage: Message = {
             messageId: uuid(),
@@ -353,45 +358,114 @@ export class Compaction {
         return { pending: newPending, active: newActive };
     }
 
+    private async generateSummary(input: {
+        pendingMessages: Message[];
+        sourceMessages: Message[];
+        activeMessages: Message[];
+    }): Promise<string> {
+        const cacheSafe = await this.generateSummaryWithCacheSafeFork(input);
+        if (cacheSafe) {
+            return cacheSafe;
+        }
+        this.logger.warn('[Compaction] cache_safe_fork summary returned empty output');
+        return this.extractPreviousSummary(input.pendingMessages) || 'Summary generation failed.';
+    }
+
     /**
-     * 生成摘要
+     * 生成摘要（cache-safe fork）
+     * - 复用主会话消息前缀
+     * - 追加 compaction message 触发摘要
+     * - 复用同一工具定义，避免独立摘要请求导致缓存失效
      */
-    private async generateSummary(pendingMessages: Message[]): Promise<string> {
-        // 提取之前的摘要
+    private async generateSummaryWithCacheSafeFork(input: {
+        pendingMessages: Message[];
+        sourceMessages: Message[];
+        activeMessages: Message[];
+    }): Promise<string | null> {
+        const { pendingMessages, sourceMessages, activeMessages } = input;
+        if (pendingMessages.length === 0) {
+            return null;
+        }
+
         let previousSummary = '';
-        let messages = pendingMessages;
-
-        if (messages.length > 0 && messages[0].type === 'summary') {
-            previousSummary = this.contentToText(messages[0].content);
-            messages = messages.slice(1);
+        if (pendingMessages[0]?.type === 'summary') {
+            previousSummary = this.contentToText(pendingMessages[0].content);
         }
 
-        if (messages.length === 0) {
-            return previousSummary || 'No messages to summarize.';
-        }
-
-        this.logger.debug('[Compaction] Generating summary...');
-
-        const historyText = this.serializeMessages(messages);
-        const summaryPrompt = buildSummaryPrompt(this.language);
-        const userContent = previousSummary
-            ? `${summaryPrompt}\n\n<previous_summary>\n${previousSummary}\n</previous_summary>\n\n<current_message_history>\n${historyText}\n</current_message_history>`
-            : `${summaryPrompt}\n\n<current_message_history>\n${historyText}\n</current_message_history>`;
+        const pendingBoundaryMessageId = pendingMessages[pendingMessages.length - 1]?.messageId;
+        const requestMessages: LLMRequestMessage[] = [
+            ...sourceMessages,
+            {
+                role: 'user',
+                content: this.buildCacheSafeCompactionMessage(
+                    pendingBoundaryMessageId,
+                    activeMessages.length,
+                    previousSummary
+                ),
+            },
+        ];
 
         const summaryAbortSignal = this.createSummaryAbortSignal();
-        const response = await this.llmProvider.generate(
-            [{ role: 'user', content: userContent }],
-            summaryAbortSignal ? { abortSignal: summaryAbortSignal } : undefined
-        );
+        const options: LLMGenerateOptions = {
+            ...(summaryAbortSignal ? { abortSignal: summaryAbortSignal } : {}),
+            max_tokens: Math.min(1024, this.maxOutputTokens),
+        };
 
-        this.logger.debug('[Compaction] Summary generated');
-
-        if (!response || typeof response !== 'object' || !('choices' in response)) {
-            return previousSummary || 'Summary generation failed.';
+        const configuredModel = this.llmProvider.config?.model;
+        if (typeof configuredModel === 'string' && configuredModel.trim().length > 0) {
+            options.model = configuredModel;
         }
 
-        const content = (response as LLMResponse).choices?.[0]?.message?.content;
-        return this.contentToText(content || '');
+        const tools = this.getTools?.();
+        if (tools && tools.length > 0) {
+            options.tools = tools;
+        }
+
+        const response = await this.llmProvider.generate(requestMessages, options);
+        if (!response || typeof response !== 'object' || !('choices' in response)) {
+            return null;
+        }
+
+        const choice = (response as LLMResponse).choices?.[0];
+        const hasToolCalls = Array.isArray(choice?.message?.tool_calls) && choice.message.tool_calls.length > 0;
+        if (hasToolCalls) {
+            return null;
+        }
+
+        const content = this.contentToText(choice?.message?.content || '').trim();
+        return content || null;
+    }
+
+    private extractPreviousSummary(pendingMessages: Message[]): string {
+        if (pendingMessages[0]?.type === 'summary') {
+            return this.contentToText(pendingMessages[0].content);
+        }
+        return '';
+    }
+
+    private buildCacheSafeCompactionMessage(
+        pendingBoundaryMessageId: string | undefined,
+        activeMessagesCount: number,
+        previousSummary: string
+    ): string {
+        const summaryPrompt = buildSummaryPrompt(this.language);
+        const boundaryLine = pendingBoundaryMessageId
+            ? `Summarize historical context up to and including messageId "${pendingBoundaryMessageId}".`
+            : 'Summarize earlier historical context in this conversation.';
+        const previousSummaryBlock = previousSummary
+            ? `\n<previous_summary>\n${previousSummary}\n</previous_summary>\n`
+            : '';
+
+        return `<compaction-message>
+${summaryPrompt}
+
+Compaction constraints:
+- ${boundaryLine}
+- Keep the most recent ${activeMessagesCount} messages untouched (they remain in active context).
+- Return plain summary text only; do NOT call tools.
+- Preserve key decisions, file paths, unresolved tasks, and user constraints.
+${previousSummaryBlock}
+</compaction-message>`;
     }
 
     /**
@@ -498,31 +572,6 @@ export class Compaction {
             return undefined;
         }
         return value;
-    }
-
-    /**
-     * 序列化消息用于摘要
-     */
-    private serializeMessages(messages: Message[]): string {
-        return messages
-            .map((m) => {
-                const prefix = m.type ? `[${m.role}:${m.type}]` : `[${m.role}]`;
-                const content = this.resolveMessageText(m);
-                const truncated = content.length > 2000 ? content.slice(0, 1000) + '...(省略)...' : content;
-                return `${prefix}: ${truncated}`;
-            })
-            .join('\n');
-    }
-
-    /**
-     * 提取消息文本：优先 content，若为空则回退 reasoning_content
-     */
-    private resolveMessageText(message: Message): string {
-        const contentText = this.contentToText(message.content);
-        if (contentText) return contentText;
-
-        const reasoning = (message as Message & { reasoning_content?: unknown }).reasoning_content;
-        return typeof reasoning === 'string' ? reasoning : '';
     }
 
     /**

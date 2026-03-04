@@ -1003,7 +1003,9 @@ async function demo1() {
             requestTimeout: parseRequestTimeoutMs(process.env.AGENT_REQUEST_TIMEOUT_MS),
             ...(cliSessionId ? { sessionId: cliSessionId } : {}),
             stream: true,
-
+            promptCache: {
+                logPrefixChanges: true,
+            },
             thinking: true,
             idleTimeout: 1000 * 60 * 5,
             enableCompaction: true,

@@ -21,6 +21,7 @@ import {
     LLMResponse,
     LLMRetryableError,
     type ToolCall,
+    type Tool,
     isRetryableError,
     MessageContent,
     Usage,
@@ -54,6 +55,11 @@ import { LLMCaller } from './core/llm-caller';
 import { ToolExecutor } from './core/tool-executor';
 import { ToolLoopDetector } from './core/tool-loop-detector';
 import { checkComplete as evaluateCompletion } from './core/completion-checker';
+import {
+    PromptCacheMonitorV2,
+    normalizeToolsForPromptCacheV2,
+    type PromptCacheMetricsSnapshot,
+} from './core/prompt-cache';
 import { DefaultTimeProvider } from './time-provider';
 import { InputValidator } from './input-validator';
 import { ErrorClassifier } from './error-classifier';
@@ -123,6 +129,12 @@ export class Agent {
     private readonly idleTimeoutMs: number;
     private readonly toolLoopDetector = new ToolLoopDetector();
     private toolLoopRecoveryAttempts = 0;
+    private readonly promptCacheMonitor: PromptCacheMonitorV2;
+    private readonly promptCacheLogPrefixChanges: boolean;
+    private readonly promptCacheSystemReminderProvider?: () => string | undefined;
+    private readonly promptCacheEnforceModelAffinity: boolean;
+    private lastInjectedSystemReminder: string | null = null;
+    private readonly baseModel?: string;
 
     // 内部组件
     private readonly agentState: AgentState;
@@ -142,6 +154,11 @@ export class Agent {
         this.thinking = config.thinking;
         this.permissionDecisionMode = config.permissionDecisionMode ?? 'callback';
         this.onPermissionAsk = config.onPermissionAsk;
+        this.promptCacheMonitor = new PromptCacheMonitorV2();
+        this.promptCacheLogPrefixChanges = config.promptCache?.logPrefixChanges ?? true;
+        this.promptCacheSystemReminderProvider = config.promptCache?.systemReminderProvider;
+        this.promptCacheEnforceModelAffinity = config.promptCache?.enforceModelAffinity ?? false;
+        this.baseModel = typeof this.provider.config?.model === 'string' ? this.provider.config.model : undefined;
         this.requestTimeoutMs = this.normalizeMs(config.requestTimeout);
         this.idleTimeoutMs = this.normalizeMs(config.idleTimeout) ?? AGENT_DEFAULTS.IDLE_TIMEOUT_MS;
         const mcpManager = config.mcpManager;
@@ -197,15 +214,19 @@ export class Agent {
                 this.provider
             );
         }
+        const resolvedCompactionConfig = {
+            ...config.compactionConfig,
+        };
+
         this.session = new Session({
             systemPrompt,
             memoryManager: config.memoryManager,
             sessionId: config.sessionId,
             enableCompaction: config.enableCompaction,
-            compactionConfig: config.compactionConfig,
+            compactionConfig: resolvedCompactionConfig,
             provider: this.provider,
             logger: this.logger,
-            getTools: () => this.toolRegistry.toLLMTools(),
+            getTools: () => this.getToolsForCompaction(),
         });
         this.configureToolEventBridge();
         mcpManager?.setToolRegistry(this.toolRegistry);
@@ -310,6 +331,7 @@ export class Agent {
                 timestamp: this.timeProvider.getCurrentTime(),
                 query: contentToText(query),
             });
+            this.injectSystemReminderIfNeeded();
             this.session.addMessage({ messageId: uuid(), role: 'user', content: query });
 
             await this.runLoop(options);
@@ -469,6 +491,13 @@ export class Agent {
 
     getSessionId(): string {
         return this.session.getSessionId();
+    }
+
+    /**
+     * 获取 prompt cache 监控快照（v2.1）
+     */
+    getPromptCacheMetrics(): PromptCacheMetricsSnapshot {
+        return this.promptCacheMonitor.getSnapshot();
     }
 
     // ==================== 内部方法：初始化与验证 ====================
@@ -847,13 +876,14 @@ Do not output a completion summary until all managed tasks are marked completed.
             throw new LLMRequestError('No valid messages to send to LLM');
         }
 
-        const tools = this.toolRegistry.toLLMTools();
+        const resolvedOptions = this.applyModelAffinityPolicy(options);
+        const tools = this.prepareToolsForLLM(messages, resolvedOptions);
         const abortSignal = this.createAbortSignal();
         let messageId: string | undefined;
 
         try {
             // 传递 options 给 llmCaller，允许动态覆盖配置
-            const callResult = await this.llmCaller.execute(messages, tools, abortSignal, options);
+            const callResult = await this.llmCaller.execute(messages, tools, abortSignal, resolvedOptions);
             messageId = callResult.messageId;
             const { response } = callResult;
 
@@ -863,6 +893,7 @@ Do not output a completion summary until all managed tasks are marked completed.
                 }
 
                 await this.handleResponse(response, messageId);
+                this.recordPromptCacheUsage(response.usage);
 
                 // 基于原始响应判定空响应，避免依赖 session 中是否已经写入 assistant 消息。
                 if (this.isEmptyAssistantChoice(response)) {
@@ -889,6 +920,97 @@ Do not output a completion summary until all managed tasks are marked completed.
             throw error;
         } finally {
             // LLMCaller 内部已清理
+        }
+    }
+
+    private prepareToolsForLLM(messages: Message[], options?: LLMGenerateOptions): Tool[] {
+        const tools = this.toolRegistry.toLLMTools();
+        const model = typeof options?.model === 'string' ? options.model : this.provider.config?.model;
+        const prepared = this.promptCacheMonitor.prepare(model, messages, tools);
+
+        if (prepared.prefixChanged && this.promptCacheLogPrefixChanges) {
+            this.logger.warn('[PromptCache:v2.1] Prefix hash changed', undefined, {
+                sessionId: this.session.getSessionId(),
+                prefixHash: prepared.prefixHash.slice(0, 16),
+                prefixChurnRate: prepared.prefixChurnRate,
+            });
+        }
+
+        return prepared.tools;
+    }
+
+    private getToolsForCompaction(): Tool[] {
+        return normalizeToolsForPromptCacheV2(this.toolRegistry.toLLMTools());
+    }
+
+    private applyModelAffinityPolicy(options?: LLMGenerateOptions): LLMGenerateOptions | undefined {
+        if (!options || !this.promptCacheEnforceModelAffinity) {
+            return options;
+        }
+
+        const requestedModel = typeof options.model === 'string' ? options.model.trim() : '';
+        const baseModel = this.baseModel?.trim() || '';
+        if (!requestedModel || !baseModel || requestedModel === baseModel) {
+            return options;
+        }
+
+        // 短会话允许灵活切换；长会话优先维持缓存亲和性。
+        if (this.session.getMessageCount() <= 10) {
+            return options;
+        }
+
+        const nextOptions: LLMGenerateOptions = { ...options };
+        delete nextOptions.model;
+
+        this.logger.warn('[PromptCache:v2.1] Blocked in-session model switch to preserve cache affinity', undefined, {
+            sessionId: this.session.getSessionId(),
+            requestedModel,
+            baseModel,
+            suggestion: 'Use task subagent handoff for cross-model execution',
+        });
+
+        return nextOptions;
+    }
+
+    private injectSystemReminderIfNeeded(): void {
+        if (!this.promptCacheSystemReminderProvider) {
+            return;
+        }
+        const reminder = this.promptCacheSystemReminderProvider()?.trim();
+        if (!reminder) {
+            return;
+        }
+        if (this.lastInjectedSystemReminder === reminder) {
+            return;
+        }
+
+        this.session.addMessage({
+            messageId: uuid(),
+            role: 'user',
+            content: `<system-reminder>\n${reminder}\n</system-reminder>`,
+            type: 'text',
+        });
+        this.lastInjectedSystemReminder = reminder;
+    }
+
+    private recordPromptCacheUsage(usage?: Usage): void {
+        const metrics = this.promptCacheMonitor.recordUsage(usage);
+        const hasCacheUsage =
+            typeof usage?.prompt_cache_hit_tokens === 'number' || typeof usage?.prompt_cache_miss_tokens === 'number';
+        if (!hasCacheUsage) {
+            return;
+        }
+
+        // 控制日志频率，避免高频请求刷屏。
+        if (metrics.requestCount % 20 === 0) {
+            this.logger.info('[PromptCache:v2.1] Usage snapshot', undefined, {
+                sessionId: this.session.getSessionId(),
+                requestCount: metrics.requestCount,
+                prefixChurnRate: metrics.prefixChurnRate,
+                promptCacheHitRate: metrics.promptCacheHitRate,
+                promptCacheHitTokensTotal: metrics.promptCacheHitTokensTotal,
+                promptCacheMissTokensTotal: metrics.promptCacheMissTokensTotal,
+            });
         }
     }
 
