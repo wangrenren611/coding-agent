@@ -2,9 +2,18 @@ import fs from 'fs';
 import { z } from 'zod';
 import { BaseTool, ToolContext, ToolResult } from './base';
 import { resolveAndValidatePath, PathTraversalError } from './file';
+import { atomicWriteFileSync } from './atomic-write';
+import { containsOldTextPlaceholder, invalidateReadSnapshot, validateEditPreconditions } from './edit-guard';
 
 const schema = z.object({
     filePath: z.string().describe('Path to the file to modify'),
+    expectedHash: z.string().optional().describe('Optional optimistic-lock hash from read_file metadata.contentHash'),
+    expectedVersion: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe('Optional optimistic-lock version from read_file metadata.snapshotVersion'),
     replacements: z
         .array(
             z.object({
@@ -59,8 +68,8 @@ WORKFLOW:
     schema = schema;
 
     async execute(
-        { filePath, replacements }: z.infer<typeof this.schema>,
-        _context?: ToolContext
+        { filePath, expectedHash, expectedVersion, replacements }: z.infer<typeof this.schema>,
+        context?: ToolContext
     ): Promise<ToolResult> {
         // === 边界条件：空替换数组 ===
         if (replacements.length === 0) {
@@ -69,6 +78,16 @@ WORKFLOW:
                 metadata: { error: 'EMPTY_REPLACEMENTS', filePath, code: 'EMPTY_REPLACEMENTS' },
                 output: 'EMPTY_REPLACEMENTS: No replacements provided',
             });
+        }
+
+        for (const [idx, repl] of replacements.entries()) {
+            if (containsOldTextPlaceholder(repl.oldText)) {
+                return this.result({
+                    success: false,
+                    metadata: { error: 'INVALID_OLD_TEXT_PLACEHOLDER', filePath, line: repl.line, index: idx },
+                    output: `INVALID_OLD_TEXT_PLACEHOLDER: replacements[${idx}].oldText contains placeholder content.`,
+                });
+            }
         }
 
         let fullPath: string;
@@ -94,6 +113,8 @@ WORKFLOW:
             });
         }
 
+        const fileMode = fs.statSync(fullPath).mode;
+
         // === 读取文件并检测换行符类型 ===
         let content: string;
         try {
@@ -103,6 +124,22 @@ WORKFLOW:
                 success: false,
                 metadata: { error: 'READ_FAILED', filePath },
                 output: `READ_FAILED: Failed to read file: ${error}`,
+            });
+        }
+
+        const guard = validateEditPreconditions({
+            sessionId: context?.sessionId,
+            filePath: fullPath,
+            currentContent: content,
+            expectedHash,
+            expectedVersion,
+            requireReadSnapshot: true,
+        });
+        if (!guard.ok) {
+            return this.result({
+                success: false,
+                metadata: { error: guard.code, filePath },
+                output: `${guard.code}: ${guard.message}`,
             });
         }
 
@@ -218,7 +255,8 @@ WORKFLOW:
         if (modifiedCount > 0) {
             try {
                 const newContent = lines.join(lineBreak);
-                fs.writeFileSync(fullPath, newContent, 'utf-8');
+                atomicWriteFileSync(fullPath, newContent, { mode: fileMode });
+                invalidateReadSnapshot(context?.sessionId, fullPath);
             } catch (error) {
                 return this.result({
                     success: false,

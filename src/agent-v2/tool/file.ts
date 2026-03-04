@@ -3,6 +3,8 @@ import path from 'path';
 import { isBinaryFile } from 'isbinaryfile';
 import { z } from 'zod';
 import { BaseTool, ToolContext, ToolResult } from './base';
+import { atomicWriteFileSync } from './atomic-write';
+import { invalidateReadSnapshot, recordReadSnapshot, validateEditPreconditions } from './edit-guard';
 
 /**
  * 安全路径解析错误
@@ -254,7 +256,7 @@ Usage:
 
     async execute(
         args: { filePath: string; startLine?: number; endLine?: number },
-        _context?: ToolContext
+        context?: ToolContext
     ): Promise<ToolResult> {
         const { filePath, startLine, endLine } = args;
         const fullPath = this.resolvePath(filePath);
@@ -294,6 +296,7 @@ Usage:
         } catch (error) {
             throw new Error(`Failed to read file: ${error}`);
         }
+        const snapshot = recordReadSnapshot(context?.sessionId, fullPath, content);
 
         // 特殊处理：空文件直接返回
         if (content === '') {
@@ -303,6 +306,8 @@ Usage:
                     filePath,
                     content: '',
                     range: { startLine: 0, endLine: 0 },
+                    contentHash: snapshot?.hash,
+                    snapshotVersion: snapshot?.version,
                 },
                 output: `Content from ${filePath}: (empty file)`,
             });
@@ -357,6 +362,8 @@ Usage:
                 range: { startLine: startIndex + 1, endLine: endIndex },
                 truncated,
                 originalLength: fileContent.length,
+                contentHash: snapshot?.hash,
+                snapshotVersion: snapshot?.version,
             },
             output: truncated
                 ? `Content from ${filePath} (lines ${startIndex + 1}-${endIndex}):\n\n${returnedContent}\n\n[... Content truncated for brevity ...]`
@@ -385,9 +392,8 @@ const writeFileSchema = z
         content: z
             .string()
             .describe(
-                'Required. The complete file content as a plain string. ' +
-                    'IMPORTANT: Provide the raw content directly, NOT wrapped in markdown code blocks or backticks. ' +
-                    'All newlines, quotes, and special characters will be properly handled automatically.'
+                'The complete file content as a plain string. IMPORTANT: Provide the raw content directly, ' +
+                    'NOT wrapped in markdown code blocks or backticks.'
             ),
     })
     .strict();
@@ -415,8 +421,11 @@ When the user provides a path to a file assume that path is valid.`;
 
     schema = writeFileSchema;
 
-    async execute({ filePath, content }: z.infer<typeof writeFileSchema>, _context?: ToolContext): Promise<ToolResult> {
+    async execute({ filePath, content }: z.infer<typeof writeFileSchema>, context?: ToolContext): Promise<ToolResult> {
         const fullPath = this.resolvePath(filePath);
+        let targetMode: number | undefined;
+        let originalContent: string | undefined;
+        const resolvedContent = content;
 
         // === 业务错误：路径是目录 ===
         if (fs.existsSync(fullPath)) {
@@ -428,6 +437,7 @@ When the user provides a path to a file assume that path is valid.`;
                     output: 'PATH_IS_DIRECTORY: Cannot write to directory',
                 });
             }
+            targetMode = stats.mode;
             // === 业务错误：二进制文件 ===
             if (await isBinaryFile(fullPath)) {
                 return this.result({
@@ -436,12 +446,34 @@ When the user provides a path to a file assume that path is valid.`;
                     output: 'CANNOT_WRITE_BINARY_FILE: Cannot write binary file',
                 });
             }
+
+            try {
+                originalContent = fs.readFileSync(fullPath, 'utf-8');
+            } catch (error) {
+                throw new Error(`Failed to read file before write: ${error}`);
+            }
+
+            const guard = validateEditPreconditions({
+                sessionId: context?.sessionId,
+                filePath: fullPath,
+                currentContent: originalContent,
+                requireReadSnapshot: true,
+            });
+
+            if (!guard.ok) {
+                return this.result({
+                    success: false,
+                    metadata: { error: guard.code, filePath },
+                    output: `${guard.code}: ${guard.message}`,
+                });
+            }
         }
 
         // === 底层异常：写入文件失败 ===
         try {
             fs.mkdirSync(path.dirname(fullPath), { recursive: true });
-            fs.writeFileSync(fullPath, content);
+            atomicWriteFileSync(fullPath, resolvedContent, { mode: targetMode });
+            invalidateReadSnapshot(context?.sessionId, fullPath);
         } catch (error) {
             throw new Error(`Failed to write file: ${error}`);
         }
@@ -449,7 +481,7 @@ When the user provides a path to a file assume that path is valid.`;
         return this.result({
             success: true,
             metadata: { success: true, filePath },
-            output: `Successfully wrote ${content.length} bytes to ${filePath}`,
+            output: `Successfully wrote ${Buffer.byteLength(resolvedContent, 'utf8')} bytes to ${filePath}`,
         });
     }
 

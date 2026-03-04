@@ -26,7 +26,7 @@ import {
     MessageContent,
     Usage,
 } from '../../providers';
-import { Session } from '../session';
+import { Session, type SessionCheckpoint } from '../session';
 import { ToolRegistry } from '../tool/registry';
 import { EventBus, EventType } from '../eventbus';
 import { Message } from '../session/types';
@@ -52,7 +52,7 @@ import {
 import { AgentExecutionResult, AgentOptions, AgentStatus, PermissionAskContext, StreamCallback } from './types';
 import { AgentState } from './core/agent-state';
 import { LLMCaller } from './core/llm-caller';
-import { ToolExecutor } from './core/tool-executor';
+import { ToolExecutor, type ToolExecutionOutput } from './core/tool-executor';
 import { ToolLoopDetector } from './core/tool-loop-detector';
 import { checkComplete as evaluateCompletion } from './core/completion-checker';
 import {
@@ -94,7 +94,6 @@ const AGENT_DEFAULTS = {
     /** 后台子任务等待兜底轮询间隔（毫秒） */
     SUBTASK_FALLBACK_POLL_MS: 3000,
 } as const;
-
 const PERMISSION_ENGINE_ENABLE_ENV_KEY = 'AGENT_ENABLE_PERMISSION_ENGINE';
 
 function parseOptionalBooleanEnv(value: string | undefined): boolean | undefined {
@@ -299,6 +298,13 @@ export class Agent {
             onCodePatch: (filePath, diff, messageId, language) =>
                 this.emitter.emitCodePatch(filePath, diff, messageId, language),
             onMessageAdd: (msg) => this.session.addMessage(msg),
+            onInvalidInputDiagnostic: (diagnostic) => {
+                this.logger.warn('[ToolExecutor] invalid_input intercepted', {
+                    phase: 'tool-preflight',
+                    sessionId: this.session.getSessionId(),
+                    ...diagnostic,
+                });
+            },
         });
 
         // 构造时启动初始化流程；execute 阶段仅等待初始化完成。
@@ -868,6 +874,7 @@ Do not output a completion summary until all managed tasks are marked completed.
     private async executeLLMCall(options?: LLMGenerateOptions): Promise<void> {
         await this.session.compactBeforeLLMCall();
         this.agentState.prepareLLMCall();
+        const llmTurnCheckpoint = this.session.createCheckpoint('before-llm-call');
 
         const messages = this.getMessagesForLLM();
 
@@ -892,7 +899,7 @@ Do not output a completion summary until all managed tasks are marked completed.
                     throw new LLMResponseInvalidError('LLM returned no response');
                 }
 
-                await this.handleResponse(response, messageId);
+                await this.handleResponse(response, messageId, llmTurnCheckpoint);
                 this.recordPromptCacheUsage(response.usage);
 
                 // 基于原始响应判定空响应，避免依赖 session 中是否已经写入 assistant 消息。
@@ -904,9 +911,12 @@ Do not output a completion summary until all managed tasks are marked completed.
                         'EMPTY_RESPONSE'
                     );
                 }
+
+                this.session.markCheckpointCommitted(llmTurnCheckpoint);
             } catch (error) {
                 if (error instanceof LLMResponseInvalidError) {
-                    await this.removeAssistantMessageFromContext(messageId, 'invalid_response');
+                    const reason = error.message.includes('INVALID_INPUT') ? 'invalid_input' : 'invalid_response';
+                    await this.session.rollbackToCheckpoint(llmTurnCheckpoint, reason);
                 }
                 throw error;
             }
@@ -1028,7 +1038,11 @@ Do not output a completion summary until all managed tasks are marked completed.
 
     // ==================== 内部方法：响应处理 ====================
 
-    private async handleResponse(response: LLMResponse, messageId: string): Promise<void> {
+    private async handleResponse(
+        response: LLMResponse,
+        messageId: string,
+        checkpoint: SessionCheckpoint
+    ): Promise<void> {
         const choice = response.choices?.[0];
         if (!choice) {
             throw new LLMResponseInvalidError('LLM response missing choices');
@@ -1042,7 +1056,7 @@ Do not output a completion summary until all managed tasks are marked completed.
         }
 
         if (responseHasToolCalls(response)) {
-            await this.handleToolCallResponse(response, messageId, response.usage);
+            await this.handleToolCallResponse(response, messageId, response.usage, checkpoint);
         } else {
             this.handleTextResponse(response, messageId, response.usage);
         }
@@ -1107,7 +1121,12 @@ Do not output a completion summary until all managed tasks are marked completed.
         this.session.addMessage(message);
     }
 
-    private async handleToolCallResponse(response: LLMResponse, messageId: string, usage?: Usage): Promise<void> {
+    private async handleToolCallResponse(
+        response: LLMResponse,
+        messageId: string,
+        usage: Usage | undefined,
+        checkpoint: SessionCheckpoint
+    ): Promise<void> {
         const toolCalls = getResponseToolCalls(response);
         const finishReason = getResponseFinishReason(response);
         const loopDetection = this.toolLoopDetector.record(toolCalls);
@@ -1185,7 +1204,29 @@ Do not output a completion summary until all managed tasks are marked completed.
         const content = currentMessage ? contentToText(currentMessage.content) : '';
 
         // 委托给 ToolExecutor 执行工具
-        const executionResult = await this.toolExecutor.execute(toolCalls, messageId, content);
+        let executionResult: ToolExecutionOutput;
+        try {
+            executionResult = await this.toolExecutor.execute(toolCalls, messageId, content);
+        } catch (error) {
+            if (error instanceof LLMResponseInvalidError && error.message.includes('INVALID_INPUT')) {
+                await this.session.rollbackToCheckpoint(checkpoint, 'invalid_input');
+                throw new LLMRetryableError(
+                    `INVALID_TOOL_INPUT: ${error.message}`,
+                    AGENT_DEFAULTS.EMPTY_RESPONSE_RETRY_DELAY_MS,
+                    'INVALID_TOOL_INPUT'
+                );
+            }
+            throw error;
+        }
+        if (executionResult.invalidInputDetected) {
+            const diagnostic = executionResult.invalidDiagnostics[0];
+            await this.session.rollbackToCheckpoint(checkpoint, 'invalid_input');
+            throw new LLMRetryableError(
+                `INVALID_TOOL_INPUT: ${diagnostic?.errorCode || 'UNKNOWN'} ${diagnostic?.reason || ''}`.trim(),
+                AGENT_DEFAULTS.EMPTY_RESPONSE_RETRY_DELAY_MS,
+                'INVALID_TOOL_INPUT'
+            );
+        }
 
         // 检查工具执行结果
         if (!executionResult.success) {
@@ -1272,7 +1313,7 @@ Do not output a completion summary until all managed tasks are marked completed.
 
     private getMessagesForLLM(): Message[] {
         const normalizedMessages = this.session
-            .getMessages()
+            .getLayeredContextMessages()
             .map((msg) => this.normalizeMessageForLLM(msg))
             .filter((msg): msg is Message => !!msg)
             .filter((msg) => this.shouldSendMessage(msg));
@@ -1336,8 +1377,24 @@ Do not output a completion summary until all managed tasks are marked completed.
                 typeof toolCall.function.name === 'string' &&
                 toolCall.function.name.trim().length > 0 &&
                 typeof toolCall.function.arguments === 'string';
-            return hasValidId && hasValidType && hasValidFunction;
+            if (!hasValidId || !hasValidType || !hasValidFunction) return false;
+            if (!this.isValidJsonArguments(toolCall.function.arguments)) {
+                return false;
+            }
+            return true;
         });
+    }
+
+    private isValidJsonArguments(argumentsStr: string): boolean {
+        if (!argumentsStr || argumentsStr.trim().length === 0) {
+            return true;
+        }
+        try {
+            JSON.parse(argumentsStr);
+            return true;
+        } catch {
+            return false;
+        }
     }
 
     private extractMessageIdFromError(error: unknown): string | undefined {

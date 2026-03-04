@@ -2,6 +2,14 @@ import fs from 'fs';
 import { z } from 'zod';
 import { BaseTool, ToolContext, ToolResult } from './base';
 import { resolveAndValidatePath, PathTraversalError } from './file';
+import { atomicWriteFileSync } from './atomic-write';
+import {
+    clearTextNotFoundRetry,
+    containsOldTextPlaceholder,
+    invalidateReadSnapshot,
+    registerTextNotFoundRetry,
+    validateEditPreconditions,
+} from './edit-guard';
 
 const schema = z
     .object({
@@ -9,6 +17,16 @@ const schema = z
         line: z.number().describe('Starting line number (1-based) where oldText begins'),
         oldText: z.string().describe('The exact text to replace - can span multiple lines'),
         newText: z.string().describe('The replacement text - can span multiple lines'),
+        expectedHash: z
+            .string()
+            .optional()
+            .describe('Optional optimistic-lock hash from read_file metadata.contentHash'),
+        expectedVersion: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe('Optional optimistic-lock version from read_file metadata.snapshotVersion'),
     })
     .strict();
 
@@ -198,9 +216,17 @@ TOOL SELECTION GUIDE:
     schema = schema;
 
     async execute(
-        { filePath, line, oldText, newText }: z.infer<typeof this.schema>,
-        _context?: ToolContext
+        { filePath, line, oldText, newText, expectedHash, expectedVersion }: z.infer<typeof this.schema>,
+        context?: ToolContext
     ): Promise<ToolResult> {
+        if (containsOldTextPlaceholder(oldText)) {
+            return this.result({
+                success: false,
+                metadata: { error: 'INVALID_OLD_TEXT_PLACEHOLDER', filePath },
+                output: 'INVALID_OLD_TEXT_PLACEHOLDER: oldText contains placeholder content. Use exact source text.',
+            });
+        }
+
         let fullPath: string;
         try {
             fullPath = resolveAndValidatePath(filePath);
@@ -230,6 +256,23 @@ TOOL SELECTION GUIDE:
             content = fs.readFileSync(fullPath, 'utf-8');
         } catch (error) {
             throw new Error(`Failed to read file: ${error}`);
+        }
+        const fileMode = fs.statSync(fullPath).mode;
+
+        const guard = validateEditPreconditions({
+            sessionId: context?.sessionId,
+            filePath: fullPath,
+            currentContent: content,
+            expectedHash,
+            expectedVersion,
+            requireReadSnapshot: true,
+        });
+        if (!guard.ok) {
+            return this.result({
+                success: false,
+                metadata: { error: guard.code, filePath, line },
+                output: `${guard.code}: ${guard.message}`,
+            });
         }
 
         // === 3. Preserve trailing newline state ===
@@ -292,8 +335,11 @@ TOOL SELECTION GUIDE:
                               .join(', ')}`
                         : '';
 
-                return this.result({
-                    success: false,
+                return this.buildTextNotFoundResult({
+                    context,
+                    fullPath,
+                    line,
+                    oldText: normalizedOldText,
                     metadata: {
                         error: 'TEXT_NOT_FOUND',
                         reason: 'Not enough lines from specified position',
@@ -317,8 +363,11 @@ ${contextSnippet}
                 targetLineIdx = expectedMatches[0];
                 autoCorrected = true;
             } else if (expectedMatches.length > 1) {
-                return this.result({
-                    success: false,
+                return this.buildTextNotFoundResult({
+                    context,
+                    fullPath,
+                    line,
+                    oldText: normalizedOldText,
                     metadata: {
                         error: 'TEXT_NOT_FOUND',
                         line,
@@ -346,8 +395,11 @@ TIP: Retry with the exact matching line number.`,
             // Extract the exact actual content for easy copying
             const actualContentForCopy = lines.slice(targetLineIdx, targetLineIdx + oldTextLines.length).join('\n');
 
-            return this.result({
-                success: false,
+            return this.buildTextNotFoundResult({
+                context,
+                fullPath,
+                line,
+                oldText: normalizedOldText,
                 metadata: {
                     error: 'TEXT_NOT_FOUND',
                     line,
@@ -392,7 +444,9 @@ TIP: Copy the EXACT content above, including ALL indentation spaces, and retry.`
                 newContent = newContent.replace(/\n/g, '\r\n');
             }
 
-            fs.writeFileSync(fullPath, newContent);
+            atomicWriteFileSync(fullPath, newContent, { mode: fileMode });
+            invalidateReadSnapshot(context?.sessionId, fullPath);
+            clearTextNotFoundRetry(context?.sessionId, fullPath, line, normalizedOldText);
         } catch (error) {
             throw new Error(`Failed to write file: ${error}`);
         }
@@ -409,6 +463,44 @@ TIP: Copy the EXACT content above, including ALL indentation spaces, and retry.`
             output: autoCorrected
                 ? `Replaced line ${targetLineIdx + 1} in ${filePath} (requested line ${line}, auto-corrected by unique global match)`
                 : `Replaced line ${line} in ${filePath}`,
+        });
+    }
+
+    private buildTextNotFoundResult({
+        context,
+        fullPath,
+        line,
+        oldText,
+        metadata,
+        output,
+    }: {
+        context?: ToolContext;
+        fullPath: string;
+        line: number;
+        oldText: string;
+        metadata: Record<string, unknown>;
+        output: string;
+    }): ToolResult {
+        const retryCount = registerTextNotFoundRetry(context?.sessionId, fullPath, line, oldText);
+        if (retryCount > 1) {
+            return this.result({
+                success: false,
+                metadata: {
+                    error: 'TEXT_NOT_FOUND_RETRY_LIMIT',
+                    line,
+                    retryCount,
+                },
+                output: `TEXT_NOT_FOUND_RETRY_LIMIT: Same precise_replace request failed more than once. Re-run read_file on the target range, then rebuild the patch (prefer batch_replace for multi-change edits).`,
+            });
+        }
+
+        return this.result({
+            success: false,
+            metadata: {
+                ...metadata,
+                retryCount,
+            },
+            output,
         });
     }
 }

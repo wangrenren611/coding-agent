@@ -210,7 +210,7 @@ export class ToolRegistry {
                 const tool = this.tools.get(name);
 
                 if (!tool) {
-                    const error = `Tool "${name}" not found`;
+                    const error = `TOOL_NOT_FOUND: Tool "${name}" not found`;
                     this.eventCallbacks?.onToolFailed?.(name, error);
                     return {
                         tool_call_id: toolCall.id,
@@ -219,6 +219,7 @@ export class ToolRegistry {
                         result: {
                             success: false,
                             error,
+                            metadata: { error: 'TOOL_NOT_FOUND', toolName: name },
                         },
                     };
                 }
@@ -226,7 +227,7 @@ export class ToolRegistry {
                 const params = safeParse(paramsStr || '');
 
                 if (!params) {
-                    const error = `Invalid arguments format: ${paramsStr}`;
+                    const error = `INVALID_INPUT_ARGUMENT_JSON: Invalid arguments format`;
                     this.eventCallbacks?.onToolFailed?.(name, error);
                     return {
                         tool_call_id: toolCall.id,
@@ -235,6 +236,10 @@ export class ToolRegistry {
                         result: {
                             success: false,
                             error,
+                            metadata: {
+                                error: 'INVALID_INPUT_ARGUMENT_JSON',
+                                invalid_input: true,
+                            },
                         },
                     };
                 }
@@ -244,7 +249,8 @@ export class ToolRegistry {
                 const resultSchema = schema.safeParse(params);
 
                 if (!resultSchema.success) {
-                    const error = resultSchema.error.issues.map((issue) => issue.message).join(', ');
+                    const details = resultSchema.error.issues.map((issue) => issue.message).join(', ');
+                    const error = `INVALID_INPUT_SCHEMA: ${details}`;
                     this.eventCallbacks?.onToolFailed?.(name, error);
                     return {
                         tool_call_id: toolCall.id,
@@ -253,6 +259,11 @@ export class ToolRegistry {
                         result: {
                             success: false,
                             error,
+                            metadata: {
+                                error: 'INVALID_INPUT_SCHEMA',
+                                invalid_input: true,
+                                details,
+                            },
                         },
                     };
                 }

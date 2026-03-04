@@ -4,10 +4,18 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { BatchReplaceTool } from '../batch-replace';
+import { ReadFileTool } from '../file';
 import { TestEnvironment } from './test-utils';
 
 describe('BatchReplaceTool - Deep Tests', () => {
     let env: TestEnvironment;
+    const sessionContext = (sessionId: string) => ({
+        environment: 'test',
+        platform: process.platform,
+        time: new Date().toISOString(),
+        workingDirectory: process.cwd(),
+        sessionId,
+    });
 
     beforeEach(async () => {
         env = new TestEnvironment('batch-replace-tool');
@@ -19,6 +27,65 @@ describe('BatchReplaceTool - Deep Tests', () => {
     });
 
     describe('Basic Batch Replacement', () => {
+        it('should require read snapshot before batch replacement when session is present', async () => {
+            const content = 'Line 1 OLD\nLine 2 OLD';
+            const testFile = await env.createFile('session-guard.txt', content);
+            const tool = new BatchReplaceTool();
+            const result = await tool.execute(
+                {
+                    filePath: testFile,
+                    replacements: [{ line: 1, oldText: 'OLD', newText: 'NEW' }],
+                },
+                sessionContext('session-batch-require-read')
+            );
+
+            expect(result.success).toBe(false);
+            expect((result.metadata as { error: string })?.error).toBe('READ_SNAPSHOT_REQUIRED');
+        });
+
+        it('should support expectedHash and expectedVersion optimistic lock', async () => {
+            const content = 'Line 1 OLD\nLine 2 OLD';
+            const testFile = await env.createFile('optimistic-lock.txt', content);
+            const sessionId = `session-batch-lock-${Date.now()}`;
+            const context = sessionContext(sessionId);
+            const readTool = new ReadFileTool();
+            const tool = new BatchReplaceTool();
+
+            const readResult = await readTool.execute({ filePath: testFile }, context);
+            expect(readResult.success).toBe(true);
+            const metadata = readResult.metadata as { contentHash?: string; snapshotVersion?: number };
+
+            const result = await tool.execute(
+                {
+                    filePath: testFile,
+                    expectedHash: metadata.contentHash,
+                    expectedVersion: metadata.snapshotVersion,
+                    replacements: [
+                        { line: 1, oldText: 'OLD', newText: 'NEW' },
+                        { line: 2, oldText: 'OLD', newText: 'NEW' },
+                    ],
+                },
+                context
+            );
+
+            expect(result.success).toBe(true);
+            const modified = await env.readFile('optimistic-lock.txt');
+            expect(modified).toBe('Line 1 NEW\nLine 2 NEW');
+        });
+
+        it('should block placeholder oldText in replacements', async () => {
+            const content = 'Line 1\nLine 2';
+            const testFile = await env.createFile('placeholder-block.txt', content);
+            const tool = new BatchReplaceTool();
+            const result = await tool.execute({
+                filePath: testFile,
+                replacements: [{ line: 1, oldText: '[... Content truncated for brevity ...]', newText: 'Line 1' }],
+            });
+
+            expect(result.success).toBe(false);
+            expect((result.metadata as { error?: string })?.error).toBe('INVALID_OLD_TEXT_PLACEHOLDER');
+        });
+
         it('should replace text on multiple lines', async () => {
             const content = 'Line 1 OLD\nLine 2 OLD\nLine 3 OLD';
             const testFile = await env.createFile('test.txt', content);

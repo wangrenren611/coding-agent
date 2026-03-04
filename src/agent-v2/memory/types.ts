@@ -10,7 +10,7 @@
 import type { Message } from '../session/types';
 
 export type { Message };
-export type ContextExclusionReason = 'empty_response' | 'invalid_response' | 'manual';
+export type ContextExclusionReason = 'empty_response' | 'invalid_response' | 'invalid_input' | 'manual';
 
 /**
  * 存储项的基础接口

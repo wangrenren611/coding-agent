@@ -140,6 +140,96 @@ describe('ToolExecutor protocol events', () => {
         expect(registry.execute).not.toHaveBeenCalled();
     });
 
+    it('should isolate invalid_input diagnostics and avoid writing tool message to session', async () => {
+        const registry = {
+            validateToolCalls: vi.fn(),
+            execute: vi.fn(async () => [
+                {
+                    tool_call_id: 'call-invalid-1',
+                    name: 'precise_replace',
+                    arguments: '{"filePath":"a.ts","oldText":"[...]","newText":"x"}',
+                    result: {
+                        success: false,
+                        error: 'INVALID_INPUT_SCHEMA: oldText is invalid',
+                        metadata: { error: 'INVALID_INPUT_SCHEMA', invalid_input: true },
+                    },
+                },
+            ]),
+        } as unknown as ToolRegistry;
+
+        const onMessageAdd = vi.fn();
+        const onInvalidInputDiagnostic = vi.fn();
+        const executor = new ToolExecutor({
+            toolRegistry: registry,
+            sessionId: 's-1',
+            onMessageAdd,
+            onInvalidInputDiagnostic,
+        });
+
+        const result = await executor.execute(
+            [createToolCall('call-invalid-1', 'precise_replace', { filePath: 'a.ts' })],
+            'msg-invalid-1'
+        );
+
+        expect(result.invalidInputDetected).toBe(true);
+        expect(result.committed).toBe(false);
+        expect(result.resultMessages).toHaveLength(0);
+        expect(onMessageAdd).not.toHaveBeenCalled();
+        expect(onInvalidInputDiagnostic).toHaveBeenCalledTimes(1);
+        expect(onInvalidInputDiagnostic.mock.calls[0][0]).toMatchObject({
+            toolCallId: 'call-invalid-1',
+            errorCode: 'INVALID_INPUT_SCHEMA',
+        });
+    });
+
+    it('should keep header lookup code readable in invalid_input diagnostics', async () => {
+        const preciseReplaceError = [
+            'TEXT_NOT_FOUND at line 476: Text does not match oldText',
+            '',
+            '=== Content near line 476 ===',
+            ">>> 476 |     const apiKey = request.headers['x-api-key'];",
+            '=== End ===',
+            '',
+            '=== EXACT content at line 476 (copy this for oldText) ===',
+            "    const apiKey = request.headers['x-api-key'];",
+            '=== End ===',
+        ].join('\n');
+        const registry = {
+            validateToolCalls: vi.fn(),
+            execute: vi.fn(async () => [
+                {
+                    tool_call_id: 'call-invalid-2',
+                    name: 'precise_replace',
+                    arguments: '{"filePath":"03-认证授权设计.md","line":476}',
+                    result: {
+                        success: false,
+                        error: preciseReplaceError,
+                        metadata: { error: 'TEXT_NOT_FOUND', invalid_input: true },
+                    },
+                },
+            ]),
+        } as unknown as ToolRegistry;
+
+        const onInvalidInputDiagnostic = vi.fn();
+        const executor = new ToolExecutor({
+            toolRegistry: registry,
+            sessionId: 's-1',
+            onInvalidInputDiagnostic,
+        });
+
+        const result = await executor.execute(
+            [createToolCall('call-invalid-2', 'precise_replace', { filePath: 'a.ts' })],
+            'msg-invalid-2'
+        );
+
+        expect(result.invalidInputDetected).toBe(true);
+        expect(onInvalidInputDiagnostic).toHaveBeenCalledTimes(1);
+        const diagnostic = onInvalidInputDiagnostic.mock.calls[0][0];
+        expect(diagnostic.errorCode).toBe('TEXT_NOT_FOUND');
+        expect(diagnostic.reason).toContain("const apiKey = request.headers['x-api-key'];");
+        expect(diagnostic.reason).not.toContain("[REDACTED]x-api-key']");
+    });
+
     it('should bypass permission engine when enablePermissionEngine=false', async () => {
         const registry = {
             validateToolCalls: vi.fn(),

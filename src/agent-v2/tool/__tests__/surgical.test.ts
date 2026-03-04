@@ -4,10 +4,18 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { SurgicalEditTool } from '../surgical';
+import { ReadFileTool } from '../file';
 import { TestEnvironment } from './test-utils';
 
 describe('SurgicalEditTool - Deep Tests', () => {
     let env: TestEnvironment;
+    const sessionContext = (sessionId: string) => ({
+        environment: 'test',
+        platform: process.platform,
+        time: new Date().toISOString(),
+        workingDirectory: process.cwd(),
+        sessionId,
+    });
 
     beforeEach(async () => {
         env = new TestEnvironment('surgical-tool');
@@ -223,6 +231,75 @@ describe('SurgicalEditTool - Deep Tests', () => {
     });
 
     describe('Edge Cases and Error Handling', () => {
+        it('should require read snapshot before editing when session is present', async () => {
+            const content = 'Line 1\nLine 2';
+            const testFile = await env.createFile('session-guard.txt', content);
+            const tool = new SurgicalEditTool();
+            const result = await tool.execute(
+                {
+                    filePath: testFile,
+                    line: 2,
+                    oldText: 'Line 2',
+                    newText: 'Updated line 2',
+                },
+                sessionContext('session-surgical-require-read')
+            );
+
+            expect(result.success).toBe(false);
+            expect((result.metadata as { error: string })?.error).toBe('READ_SNAPSHOT_REQUIRED');
+        });
+
+        it('should block placeholder oldText input', async () => {
+            const content = 'line a\nline b';
+            const testFile = await env.createFile('placeholder-block.txt', content);
+            const tool = new SurgicalEditTool();
+            const result = await tool.execute({
+                filePath: testFile,
+                line: 1,
+                oldText: '[... Content truncated for brevity ...]',
+                newText: 'line a',
+            });
+
+            expect(result.success).toBe(false);
+            expect((result.metadata as { error: string })?.error).toBe('INVALID_OLD_TEXT_PLACEHOLDER');
+        });
+
+        it('should allow only one TEXT_NOT_FOUND retry for same request', async () => {
+            const content = 'alpha\nbeta\ngamma';
+            const testFile = await env.createFile('text-not-found-retry.txt', content);
+            const sessionId = `session-surgical-retry-${Date.now()}`;
+            const context = sessionContext(sessionId);
+            const readTool = new ReadFileTool();
+            const tool = new SurgicalEditTool();
+
+            const readResult = await readTool.execute({ filePath: testFile }, context);
+            expect(readResult.success).toBe(true);
+
+            const first = await tool.execute(
+                {
+                    filePath: testFile,
+                    line: 2,
+                    oldText: 'WRONG',
+                    newText: 'new',
+                },
+                context
+            );
+            expect(first.success).toBe(false);
+            expect((first.metadata as { error?: string })?.error).toBe('TEXT_NOT_FOUND');
+
+            const second = await tool.execute(
+                {
+                    filePath: testFile,
+                    line: 2,
+                    oldText: 'WRONG',
+                    newText: 'new',
+                },
+                context
+            );
+            expect(second.success).toBe(false);
+            expect((second.metadata as { error?: string })?.error).toBe('TEXT_NOT_FOUND_RETRY_LIMIT');
+        });
+
         it('should return error when file does not exist', async () => {
             const tool = new SurgicalEditTool();
             const result = await tool.execute({

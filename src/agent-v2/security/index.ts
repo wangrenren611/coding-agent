@@ -87,17 +87,8 @@ export const SENSITIVE_PATTERNS: Array<{ pattern: RegExp; description: string }>
     // API 密钥模式 (sk- 前缀)
     { pattern: /sk-[a-zA-Z0-9_-]{10,}/g, description: 'API Key (sk-)' },
 
-    // API Key 模式
-    { pattern: /api[_-]?key\s*=\s*['"]?[^\s'"]{8,}['"]?/gi, description: 'API Key Assignment' },
-
-    // 密码模式
-    { pattern: /password\s*=\s*['"]?[^\s'"]{4,}['"]?/gi, description: 'Password Assignment' },
-    { pattern: /passwd\s*=\s*['"]?[^\s'"]{4,}['"]?/gi, description: 'Password Assignment' },
-    { pattern: /pwd\s*=\s*['"]?[^\s'"]{4,}['"]?/gi, description: 'Password Assignment' },
-
     // Token 模式
     { pattern: /bearer\s+[_-]?[a-zA-Z0-9_-]{10,}/gi, description: 'Bearer Token' },
-    { pattern: /token\s*=\s*['"]?[a-zA-Z0-9_-]{10,}['"]?/gi, description: 'Token Assignment' },
 
     // 私钥模式
     { pattern: /-----BEGIN\s+(?:RSA\s+)?PRIVATE\s+KEY-----/g, description: 'Private Key' },
@@ -105,11 +96,23 @@ export const SENSITIVE_PATTERNS: Array<{ pattern: RegExp; description: string }>
 
     // AWS 凭证
     { pattern: /AKIA[A-Z0-9]{16}/g, description: 'AWS Access Key' },
-    {
-        pattern: /aws[_-]?secret[_-]?access[_-]?key\s*=\s*['"]?[a-zA-Z0-9/+=]{30,}['"]?/gi,
-        description: 'AWS Secret Key',
-    },
 ];
+
+/**
+ * 通用代码中的字符串字面量赋值（只脱敏 value，保留 key）
+ * 例：apiKey = "xxx" -> apiKey = "[REDACTED]"
+ */
+const QUOTED_SENSITIVE_ASSIGNMENT_PATTERN =
+    /\b(api[_-]?key|password|passwd|pwd|token|secret|aws[_-]?secret[_-]?access[_-]?key)\b(\s*=\s*)(['"])([^'"\n]{4,})\3/gi;
+
+/**
+ * 环境变量/配置文件中的明文赋值（只脱敏 value，保留 key）
+ * 例：POSTGRES_PASSWORD=postgres -> POSTGRES_PASSWORD=[REDACTED]
+ * 支持可选前缀 export 和尾部注释。
+ */
+// eslint-disable-next-line no-useless-escape
+const ENV_SENSITIVE_ASSIGNMENT_PATTERN =
+    /^(\s*(?:export\s+)?[A-Z0-9_]*?(?:API[_-]?KEY|PASSWORD|PASSWD|PWD|TOKEN|SECRET|AWS[_-]?SECRET[_-]?ACCESS[_-]?KEY)\s*=\s*)([^\s"'`;|&<>{}\[\]\(\)]{4,})(\s*(?:#.*)?)$/gm;
 
 /**
  * 脱敏字符串中的敏感模式
@@ -120,6 +123,19 @@ export const SENSITIVE_PATTERNS: Array<{ pattern: RegExp; description: string }>
 export function sanitizeStringContent(text: string): string {
     let result = text;
 
+    // 1) 先处理 key=value 赋值，保留 key 只替换 value
+    result = result.replace(
+        QUOTED_SENSITIVE_ASSIGNMENT_PATTERN,
+        (_match: string, key: string, separator: string, quote: string) =>
+            `${key}${separator}${quote}${REDACTED_PLACEHOLDER}${quote}`
+    );
+
+    result = result.replace(
+        ENV_SENSITIVE_ASSIGNMENT_PATTERN,
+        (_match: string, prefix: string, _value: string, suffix = '') => `${prefix}${REDACTED_PLACEHOLDER}${suffix}`
+    );
+
+    // 2) 再处理其它高置信模式
     for (const { pattern } of SENSITIVE_PATTERNS) {
         // 重置正则的 lastIndex
         pattern.lastIndex = 0;

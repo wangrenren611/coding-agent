@@ -6,6 +6,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import path from 'node:path';
 import { ReadFileTool, WriteFileTool } from '../file';
 import { TestEnvironment, LARGE_FILE_CONTENT } from './test-utils';
+import { readdir } from 'node:fs/promises';
 
 describe('File Tools', () => {
     let env: TestEnvironment;
@@ -191,6 +192,14 @@ describe('File Tools', () => {
     });
 
     describe('WriteFileTool', () => {
+        const sessionContext = (sessionId: string) => ({
+            environment: 'test',
+            platform: process.platform,
+            time: new Date().toISOString(),
+            workingDirectory: process.cwd(),
+            sessionId,
+        });
+
         it('should write file content successfully', async () => {
             const testFile = path.join(env.getTestDir(), 'test.txt');
             const tool = new WriteFileTool();
@@ -227,6 +236,36 @@ describe('File Tools', () => {
             expect(result.success).toBe(true);
             const content = await env.readFile('overwrite.txt');
             expect(content).toBe('New content');
+        });
+
+        it('should require read snapshot before overwriting existing file when session is present', async () => {
+            const testFile = await env.createFile('needs-read.txt', 'Original content');
+            const tool = new WriteFileTool();
+            const result = await tool.execute(
+                {
+                    filePath: testFile,
+                    content: 'New content',
+                },
+                sessionContext('session-write-require-read')
+            );
+
+            expect(result.success).toBe(false);
+            expect((result.metadata as { error: string })?.error).toBe('READ_SNAPSHOT_REQUIRED');
+        });
+
+        it('should not leave temporary files after atomic write', async () => {
+            const testFile = path.join(env.getTestDir(), 'atomic.txt');
+            const tool = new WriteFileTool();
+            const result = await tool.execute({
+                filePath: testFile,
+                content: 'atomic content',
+            });
+
+            expect(result.success).toBe(true);
+            const baseName = path.basename(testFile);
+            const entries = await readdir(path.dirname(testFile));
+            const leftovers = entries.filter((entry) => entry.startsWith(`.${baseName}.`) && entry.endsWith('.tmp'));
+            expect(leftovers).toEqual([]);
         });
 
         it('should return error when trying to write to a directory', async () => {

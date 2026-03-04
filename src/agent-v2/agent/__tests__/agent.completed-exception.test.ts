@@ -1229,4 +1229,60 @@ describe('Agent completed and exception scenarios', () => {
         );
         expect(invalidAssistantMessages.length).toBeGreaterThan(0);
     });
+
+    it('should rollback invalid_input tool turn to checkpoint and retry successfully', async () => {
+        const invalidToolArgsResponse: LLMResponse = {
+            id: `tool-invalid-args-${Date.now()}-${Math.random()}`,
+            object: 'chat.completion',
+            created: Date.now(),
+            model: 'test-model',
+            choices: [
+                {
+                    index: 0,
+                    message: {
+                        role: 'assistant',
+                        content: 'call malformed tool',
+                        tool_calls: [
+                            {
+                                id: 'call-bad-args',
+                                type: 'function',
+                                index: 0,
+                                function: {
+                                    name: 'read_file',
+                                    arguments: '{"filePath":',
+                                },
+                            },
+                        ],
+                    },
+                    finish_reason: 'tool_calls',
+                },
+            ],
+        };
+
+        const provider = new SequenceProvider([
+            invalidToolArgsResponse,
+            createTextResponse('recovered after rollback'),
+        ]);
+        const memoryManager = await createReadyMemoryManager('rollback-invalid-input');
+
+        const agent = new Agent({
+            provider: provider as unknown as LLMProvider,
+            systemPrompt: 'test',
+            stream: false,
+            memoryManager,
+            maxRetries: 2,
+            maxLoops: 4,
+        });
+
+        const result = await agent.executeWithResult('hello');
+        expect(result.status).toBe('completed');
+        expect(String(result.finalMessage?.content || '')).toContain('recovered after rollback');
+        expect(provider.callCount).toBe(2);
+
+        const history = await memoryManager.getFullHistory({ sessionId: agent.getSessionId() });
+        const invalidInputExcluded = history.filter(
+            (m) => m.role === 'assistant' && m.excludedFromContext === true && m.excludedReason === 'invalid_input'
+        );
+        expect(invalidInputExcluded.length).toBeGreaterThan(0);
+    });
 });

@@ -876,6 +876,44 @@ describe('StreamProcessor', () => {
             expect(smallProcessor.isAborted()).toBe(true);
             expect(smallProcessor.getAbortReason()).toBe('buffer_overflow');
         });
+
+        it('should continue when tool_call arguments are large', () => {
+            const onMessageCreateLocal = vi.fn();
+            const smallProcessor = new StreamProcessor({
+                maxBufferSize: 1000,
+                onMessageUpdate: vi.fn(),
+                onTextDelta: vi.fn(),
+                onTextStart: vi.fn(),
+                onTextComplete: vi.fn(),
+                onMessageCreate: onMessageCreateLocal,
+            });
+            smallProcessor.setMessageId('tool-arg-overflow');
+
+            smallProcessor.processChunk({
+                id: 'tc-1',
+                index: 0,
+                choices: [
+                    {
+                        index: 0,
+                        delta: {
+                            role: 'assistant',
+                            content: '',
+                            tool_calls: [
+                                {
+                                    index: 0,
+                                    id: 'call-over',
+                                    type: 'function',
+                                    function: { name: 'write_file', arguments: '{"content":"1234567890"}' },
+                                },
+                            ],
+                        },
+                    },
+                ],
+            });
+
+            expect(smallProcessor.isAborted()).toBe(false);
+            expect(onMessageCreateLocal).toHaveBeenCalledTimes(1);
+        });
     });
 
     describe('validation', () => {

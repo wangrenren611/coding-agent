@@ -6,6 +6,8 @@ import { LLMProvider, type MessageContent, type Tool, type ToolCall } from '../.
 import { ToolCallRepairer } from './tool-call-repairer';
 import { getLogger, type Logger } from '../logger';
 
+const DEFAULT_L1_CONTEXT_WINDOW = 80;
+
 export interface SessionConfig {
     sessionId?: string;
     systemPrompt: string;
@@ -24,6 +26,14 @@ export interface SessionConfig {
 
 export type { Message, SessionOptions } from './types';
 export type { CompactionConfig, CompactionResult } from './compaction';
+
+export interface SessionCheckpoint {
+    checkpointId: string;
+    messageCount: number;
+    lastStableMessageId: string;
+    createdAt: number;
+    label?: string;
+}
 
 /**
  * Session 类 - 管理对话消息
@@ -44,6 +54,8 @@ export class Session {
     private readonly logger: Logger;
     private initialized = false;
     private initializePromise: Promise<void> | null = null;
+    private checkpointSeq = 0;
+    private lastStableMessageId = 'system';
 
     constructor(options: SessionConfig) {
         this.sessionId = options.sessionId || uuid();
@@ -133,6 +145,7 @@ export class Session {
 
         // 启动时修复 tool 协议脏数据（同时更新 context + history）
         await this.repairContextToolProtocol();
+        this.lastStableMessageId = this.resolveLastContextMessageId();
 
         this.initialized = true;
     }
@@ -182,6 +195,31 @@ export class Session {
         return this.messages;
     }
 
+    /**
+     * 分层上下文输出：
+     * - L1: 最近窗口内的有效消息
+     * - L2: 历史 summary 消息（保留任务记忆）
+     * - L3/L4: 结构化索引和诊断日志不进入主消息上下文
+     */
+    getLayeredContextMessages(maxRecent: number = DEFAULT_L1_CONTEXT_WINDOW): Message[] {
+        const cappedRecent = Math.max(1, maxRecent);
+        const nonSystem = this.messages.filter((message) => message.role !== 'system');
+        const l2SummaryIds = new Set(
+            nonSystem.filter((message) => message.type === 'summary').map((message) => message.messageId)
+        );
+        const l1RecentIds = new Set(
+            nonSystem
+                .filter((message) => message.type !== 'summary')
+                .slice(-cappedRecent)
+                .map((message) => message.messageId)
+        );
+
+        return this.messages.filter((message) => {
+            if (message.role === 'system') return true;
+            return l1RecentIds.has(message.messageId) || l2SummaryIds.has(message.messageId);
+        });
+    }
+
     getLastMessage(): Message | undefined {
         return this.messages[this.messages.length - 1];
     }
@@ -197,12 +235,64 @@ export class Session {
     clearMessages(): void {
         const systemMessage = this.messages.find((m) => m.role === 'system');
         this.messages = systemMessage ? [systemMessage] : [];
+        this.lastStableMessageId = this.resolveLastContextMessageId();
         this.memoryManager?.clearContext(this.sessionId).catch((error) => {
             this.logger.error(
                 `[Session] Failed to clear context (${this.sessionId})`,
                 error instanceof Error ? error : new Error(String(error))
             );
         });
+    }
+
+    createCheckpoint(label?: string): SessionCheckpoint {
+        this.checkpointSeq += 1;
+        return {
+            checkpointId: `ckpt-${this.checkpointSeq}`,
+            messageCount: this.messages.length,
+            lastStableMessageId: this.lastStableMessageId,
+            createdAt: Date.now(),
+            ...(label ? { label } : {}),
+        };
+    }
+
+    getLastStableMessageId(): string {
+        return this.lastStableMessageId;
+    }
+
+    markCheckpointCommitted(_checkpoint?: SessionCheckpoint): void {
+        this.lastStableMessageId = this.resolveLastContextMessageId();
+    }
+
+    async rollbackToCheckpoint(
+        checkpoint: SessionCheckpoint,
+        reason: ContextExclusionReason = 'invalid_response'
+    ): Promise<void> {
+        if (checkpoint.messageCount < 1) {
+            return;
+        }
+        if (checkpoint.messageCount >= this.messages.length) {
+            this.lastStableMessageId = checkpoint.lastStableMessageId || this.resolveLastContextMessageId();
+            return;
+        }
+
+        const removedMessages = this.messages
+            .slice(checkpoint.messageCount)
+            .filter((message) => message.role !== 'system');
+        this.messages = this.messages.slice(0, checkpoint.messageCount);
+        this.lastStableMessageId = checkpoint.lastStableMessageId || this.resolveLastContextMessageId();
+
+        for (const removedMessage of removedMessages) {
+            this.persistQueue = this.persistQueue
+                .then(() => this.doRemovePersist(removedMessage.messageId, reason))
+                .catch((error) => {
+                    this.logger.error(
+                        `[Session] Failed to rollback message (${removedMessage.messageId})`,
+                        error instanceof Error ? error : new Error(String(error))
+                    );
+                });
+        }
+
+        await this.persistQueue;
     }
 
     /**
@@ -225,6 +315,9 @@ export class Session {
         }
 
         this.messages.splice(index, 1);
+        if (target.messageId === this.lastStableMessageId) {
+            this.lastStableMessageId = this.resolveLastContextMessageId();
+        }
 
         this.persistQueue = this.persistQueue
             .then(() => this.doRemovePersist(messageId, reason))
@@ -327,6 +420,10 @@ export class Session {
         return this.sessionId;
     }
 
+    replayFromCheckpoint(checkpoint: SessionCheckpoint): Message[] {
+        return this.messages.slice(checkpoint.messageCount);
+    }
+
     /**
      * 立即同步当前状态到 MemoryManager
      */
@@ -394,6 +491,11 @@ export class Session {
             }
         }
         return -1;
+    }
+
+    private resolveLastContextMessageId(): string {
+        const last = this.getLastMessage();
+        return last?.messageId || 'system';
     }
 
     // ==================== 工具调用修复 ====================

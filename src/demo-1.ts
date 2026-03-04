@@ -951,12 +951,12 @@ async function demo1() {
     fs.accessSync(preferredMemoryPath, fs.constants.W_OK);
 
     const memoryManager = createMemoryManager({
-        type: 'mongodb',
-        // connectionString: preferredMemoryPath,
+        type: 'file',
+        connectionString: preferredMemoryPath,
     });
-
+    console.log(`${COLORS.success}◆ 内存管理器初始化${COLORS.reset}`);
     await memoryManager.initialize();
-
+    console.log(`${COLORS.success}◆ 内存管理器连接成功${COLORS.reset}`);
     let agent: Agent | undefined;
     let mcpManager: McpManager | undefined;
     try {

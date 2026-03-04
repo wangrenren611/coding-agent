@@ -228,18 +228,21 @@ export class StreamProcessor {
         if (hasReasoningDelta(chunk)) {
             const content = getChunkReasoningContent(chunk);
             this.handleReasoningContent(content, chunk.id, finishReason);
+            if (this.state.aborted) return;
         }
 
         // 3. 处理 content
         if (hasContentDelta(chunk)) {
             const content = getChunkContent(chunk);
             this.handleTextContent(content, chunk.id, finishReason);
+            if (this.state.aborted) return;
         }
 
         // 4. 处理 tool_calls
         if (hasToolCalls(chunk)) {
             const toolCalls = getChunkToolCalls(chunk)!;
             this.handleToolCalls(toolCalls, chunk.id, finishReason);
+            if (this.state.aborted) return;
         }
 
         // 5. 处理单独的 finish_reason
@@ -419,7 +422,9 @@ export class StreamProcessor {
     ): void {
         // 更新工具调用映射
         for (const toolCall of toolCalls) {
-            this.updateToolCall(toolCall);
+            if (!this.updateToolCall(toolCall)) {
+                return;
+            }
         }
 
         // 标记工具调用开始
@@ -617,8 +622,9 @@ export class StreamProcessor {
     /**
      * 更新工具调用
      */
-    private updateToolCall(toolCall: ToolCall): void {
+    private updateToolCall(toolCall: ToolCall): boolean {
         const index = toolCall.index ?? 0;
+        const nextArgumentsChunk = toolCall.function?.arguments || '';
 
         if (!this.buffers.toolCalls.has(index)) {
             // 创建新的工具调用
@@ -628,7 +634,7 @@ export class StreamProcessor {
                 index,
                 function: {
                     name: toolCall.function?.name || '',
-                    arguments: toolCall.function?.arguments || '',
+                    arguments: nextArgumentsChunk,
                 },
             });
         } else {
@@ -647,6 +653,7 @@ export class StreamProcessor {
                 existing.function.arguments += toolCall.function.arguments;
             }
         }
+        return true;
     }
 
     /**

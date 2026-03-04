@@ -200,6 +200,83 @@ describe('Session persistence queue', () => {
         expect(String(toolHistory[1].content || '')).toContain('TOOL_CALL_INTERRUPTED');
     });
 
+    it('should rollback to checkpoint and mark rolled-back messages as invalid_input in history', async () => {
+        const sessionId = 'session-checkpoint-rollback-invalid-input';
+        const session = new Session({
+            sessionId,
+            systemPrompt: 'test',
+            memoryManager,
+        });
+        await session.initialize();
+
+        session.addMessage({
+            messageId: 'user-1',
+            role: 'user',
+            content: 'hello',
+            type: 'text',
+        });
+        const checkpoint = session.createCheckpoint('before-tool-turn');
+        session.markCheckpointCommitted(checkpoint);
+
+        session.addMessage({
+            messageId: 'assistant-tool-rollback',
+            role: 'assistant',
+            content: '',
+            type: 'tool-call',
+            finish_reason: 'tool_calls',
+            tool_calls: [
+                { id: 'call-rb-1', type: 'function', index: 0, function: { name: 'write_file', arguments: '{}' } },
+            ],
+        });
+        session.addMessage({
+            messageId: 'tool-rb-1',
+            role: 'tool',
+            type: 'tool-result',
+            tool_call_id: 'call-rb-1',
+            content: 'INVALID_INPUT_SCHEMA: bad payload',
+        });
+
+        await session.rollbackToCheckpoint(checkpoint, 'invalid_input');
+        await session.sync();
+
+        const contextMessages = session.getMessages();
+        expect(contextMessages.map((m) => m.messageId)).toEqual(['system', 'user-1']);
+
+        const history = await memoryManager.getFullHistory({ sessionId });
+        const rolledBack = history.filter(
+            (m) =>
+                (m.messageId === 'assistant-tool-rollback' || m.messageId === 'tool-rb-1') &&
+                m.excludedFromContext === true
+        );
+        expect(rolledBack).toHaveLength(2);
+        expect(rolledBack.every((m) => m.excludedReason === 'invalid_input')).toBe(true);
+    });
+
+    it('should keep summary in layered context while capping recent L1 messages', async () => {
+        const session = new Session({
+            sessionId: 'session-layered-context',
+            systemPrompt: 'test',
+            memoryManager,
+        });
+        await session.initialize();
+
+        session.addMessage({ messageId: 'summary-1', role: 'assistant', type: 'summary', content: 'summary memory' });
+        session.addMessage({ messageId: 'u1', role: 'user', content: 'u1' });
+        session.addMessage({ messageId: 'a1', role: 'assistant', content: 'a1' });
+        session.addMessage({ messageId: 'u2', role: 'user', content: 'u2' });
+        session.addMessage({ messageId: 'a2', role: 'assistant', content: 'a2' });
+
+        const layered = session.getLayeredContextMessages(2);
+        const ids = layered.map((m) => m.messageId);
+
+        expect(ids).toContain('system');
+        expect(ids).toContain('summary-1');
+        expect(ids).toContain('u2');
+        expect(ids).toContain('a2');
+        expect(ids).not.toContain('u1');
+        expect(ids).not.toContain('a1');
+    });
+
     it('should repair interleaved tool result in context and keep raw history via exclusion markers', async () => {
         const sessionId = 'session-repair-interleaved-tool-result';
         const session = new Session({

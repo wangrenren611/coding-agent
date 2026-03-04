@@ -39,6 +39,35 @@ interface AuthorizationOutcome {
     allowlistBypassedCallIds: Set<string>;
 }
 
+export interface InvalidToolInputDiagnostic {
+    toolCallId: string;
+    toolName: string;
+    errorCode: string;
+    reason: string;
+    argumentsBytes: number;
+}
+
+interface PreparedToolResultMessage {
+    message: Message;
+}
+
+interface PreparedToolResults {
+    messages: PreparedToolResultMessage[];
+    invalidDiagnostics: InvalidToolInputDiagnostic[];
+}
+
+const INVALID_INPUT_ERROR_CODES = new Set([
+    'INVALID_INPUT_ARGUMENT_JSON',
+    'INVALID_INPUT_SCHEMA',
+    'INVALID_OLD_TEXT_PLACEHOLDER',
+    'PRECONDITION_READ_REQUIRED',
+    'OPTIMISTIC_LOCK_HASH_MISMATCH',
+    'OPTIMISTIC_LOCK_VERSION_MISMATCH',
+    'EXPECTED_VERSION_REQUIRES_SNAPSHOT',
+    'TEXT_NOT_FOUND',
+    'TEXT_NOT_FOUND_RETRY_LIMIT',
+]);
+
 /**
  * 工具执行器配置
  */
@@ -78,6 +107,8 @@ export interface ToolExecutorConfig {
     onCodePatch?: (filePath: string, diff: string, messageId: string, language?: string) => void;
     /** 消息添加回调 */
     onMessageAdd?: (message: Message) => void;
+    /** 无效输入诊断回调（仅诊断，不入会话） */
+    onInvalidInputDiagnostic?: (diagnostic: InvalidToolInputDiagnostic) => void;
 }
 
 /**
@@ -90,6 +121,12 @@ export interface ToolExecutionOutput {
     toolCount: number;
     /** 工具结果消息 */
     resultMessages: Message[];
+    /** 是否检测到 invalid_input（检测到时 resultMessages 不会提交） */
+    invalidInputDetected: boolean;
+    /** invalid_input 诊断信息 */
+    invalidDiagnostics: InvalidToolInputDiagnostic[];
+    /** 当前 turn 是否已提交 */
+    committed: boolean;
 }
 
 /**
@@ -148,14 +185,33 @@ export class ToolExecutor {
             },
         });
 
-        // 记录结果
-        const resultMessages = this.recordResults(results, messageId, streamedToolCallIds);
+        // 预处理结果（先诊断，再决定是否提交）
+        const preparedResults = this.prepareResultMessages(results, messageId, streamedToolCallIds);
+        if (preparedResults.invalidDiagnostics.length > 0) {
+            for (const diagnostic of preparedResults.invalidDiagnostics) {
+                this.config.onInvalidInputDiagnostic?.(diagnostic);
+            }
+            return {
+                success: false,
+                toolCount: results.length,
+                resultMessages: [],
+                invalidInputDetected: true,
+                invalidDiagnostics: preparedResults.invalidDiagnostics,
+                committed: false,
+            };
+        }
+
+        // 提交工具结果消息
+        const resultMessages = this.commitResultMessages(preparedResults.messages);
         this.emitCodePatches(fileSnapshots, messageId);
 
         return {
             success: results.every((r) => r.result?.success !== false),
             toolCount: results.length,
             resultMessages,
+            invalidInputDetected: false,
+            invalidDiagnostics: [],
+            committed: true,
         };
     }
 
@@ -306,14 +362,15 @@ export class ToolExecutor {
     }
 
     /**
-     * 记录工具执行结果
+     * 预处理工具执行结果（不直接提交消息）
      */
-    private recordResults(
+    private prepareResultMessages(
         results: ToolExecutionResult[],
         messageId: string,
         streamedToolCallIds: Set<string>
-    ): Message[] {
-        const messages: Message[] = [];
+    ): PreparedToolResults {
+        const messages: PreparedToolResultMessage[] = [];
+        const invalidDiagnostics: InvalidToolInputDiagnostic[] = [];
 
         for (const result of results) {
             const resultMessageId = uuid();
@@ -332,20 +389,71 @@ export class ToolExecutor {
                 resultMessageId
             );
 
-            const message: Message = {
-                messageId: resultMessageId,
-                role: 'tool',
-                content: outputText,
-                tool_call_id: result.tool_call_id,
-                type: 'tool-result',
-            };
+            const invalidDiagnostic = this.classifyInvalidInput(result, outputText);
+            if (invalidDiagnostic) {
+                invalidDiagnostics.push(invalidDiagnostic);
+                continue;
+            }
 
-            // 添加到会话
-            this.config.onMessageAdd?.(message);
-            messages.push(message);
+            messages.push({
+                message: {
+                    messageId: resultMessageId,
+                    role: 'tool',
+                    content: outputText,
+                    tool_call_id: result.tool_call_id,
+                    type: 'tool-result',
+                },
+            });
         }
 
+        return { messages, invalidDiagnostics };
+    }
+
+    /**
+     * 提交工具执行结果到会话
+     */
+    private commitResultMessages(preparedMessages: PreparedToolResultMessage[]): Message[] {
+        const messages: Message[] = [];
+        for (const prepared of preparedMessages) {
+            this.config.onMessageAdd?.(prepared.message);
+            messages.push(prepared.message);
+        }
         return messages;
+    }
+
+    private classifyInvalidInput(result: ToolExecutionResult, outputText: string): InvalidToolInputDiagnostic | null {
+        const rawResult = (result.result || {}) as unknown as Record<string, unknown>;
+        const metadata = (rawResult.metadata || {}) as Record<string, unknown>;
+        const metadataErrorCode = typeof metadata.error === 'string' ? metadata.error.trim() : '';
+        const explicitInvalidMarker = metadata.invalid_input === true;
+        const rawError = typeof rawResult.error === 'string' ? rawResult.error.trim() : '';
+        const normalizedErrorCode = this.extractErrorCode(metadataErrorCode || rawError || outputText);
+        const isInvalidCode =
+            INVALID_INPUT_ERROR_CODES.has(normalizedErrorCode) ||
+            normalizedErrorCode.startsWith('INVALID_INPUT_') ||
+            normalizedErrorCode.startsWith('INVALID_');
+
+        if (!explicitInvalidMarker && !isInvalidCode) {
+            return null;
+        }
+
+        return {
+            toolCallId: result.tool_call_id,
+            toolName: result.name,
+            errorCode: normalizedErrorCode || 'INVALID_INPUT',
+            reason: rawError || outputText || metadataErrorCode || 'invalid tool input',
+            argumentsBytes: Buffer.byteLength(result.arguments || '', 'utf8'),
+        };
+    }
+
+    private extractErrorCode(text: string): string {
+        if (!text) return '';
+        const direct = text.match(/^([A-Z][A-Z0-9_]{2,})\b/);
+        if (direct?.[1]) return direct[1];
+
+        const embedded = text.match(/\b([A-Z][A-Z0-9_]{2,})\b/);
+        if (embedded?.[1]) return embedded[1];
+        return '';
     }
 
     /**
